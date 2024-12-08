@@ -1,0 +1,11 @@
+[package]
+name = "v4-examples"
+edition = "2021"
+version.workspace = true
+authors.workspace = true
+
+[dependencies]
+v4 = {path = "../v4"}
+tokio.workspace = true
+wgpu.workspace = true
+async-scoped.workspace = true

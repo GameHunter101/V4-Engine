@@ -1,0 +1,25 @@
+[package]
+name = "v4"
+edition = "2021"
+version.workspace = true
+authors.workspace = true
+
+[dependencies]
+# bytemuck.workspace = true
+# env_logger.workspace = true
+# wgpu.workspace = true
+# nalgebra.workspace = true
+# smaa.workspace = true
+# futures.workspace = true
+# tokio.workspace = true
+# imgui.workspace = true
+# imgui-wgpu.workspace = true
+# pollster.workspace = true
+# log.workspace = true
+# async-scoped.workspace = true
+# async-trait.workspace = true
+# winit.workspace = true
+# winit_input_helper.workspace = true
+# imgui-winit-support.workspace = true
+glyphon.workspace = true
+v4-core = {path = "../v4-core"}
