@@ -3,4 +3,12 @@ name = "v4-macros"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+proc-macro = true
+
 [dependencies]
+"quote" = "*"
+"syn" = { version = "2.0.90", features = ["extra-traits"]}
+"proc-macro2" = "*"
+"v4-core" = { path = "../v4-core" }
+"darling" = "0.20.10"

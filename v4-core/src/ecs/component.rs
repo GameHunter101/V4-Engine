@@ -26,14 +26,12 @@ pub trait ComponentSystem: ComponentDetails + Debug {
     }
     fn render(&self, device: &Device, queue: &Queue) {}
 
-    /// Lower order means it is rendered earlier
-    fn rendering_order(&self) -> i32 {
-        0
-    }
 }
 
 pub trait ComponentDetails {
     fn id(&self) -> ComponentId;
+
+    fn set_id(&mut self, new_id: ComponentId);
 
     fn is_initialized(&self) -> bool;
 
@@ -44,4 +42,9 @@ pub trait ComponentDetails {
     fn is_enabled(&self) -> bool;
 
     fn set_enabled_state(&mut self, enabled_state: bool);
+
+    /// Lower order means it is rendered earlier
+    fn rendering_order(&self) -> i32 {
+        0
+    }
 }

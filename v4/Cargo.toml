@@ -22,4 +22,5 @@ authors.workspace = true
 # winit_input_helper.workspace = true
 # imgui-winit-support.workspace = true
 glyphon.workspace = true
-v4-core = {path = "../v4-core"}
+v4-core = { path = "../v4-core" }
+v4-macros = { path = "../v4-macros" }

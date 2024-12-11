@@ -1,6 +1,7 @@
 pub use v4_core::V4;
 pub use v4_core::EngineDetails;
 pub use v4_core::V4Builder;
+pub use v4_macros::component;
 
 pub mod builtin_actions;
 
