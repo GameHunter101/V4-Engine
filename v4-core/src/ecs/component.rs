@@ -1,5 +1,5 @@
 use std::fmt::Debug;
-use wgpu::{Device, Queue};
+use wgpu::{Device, Queue, RenderPass};
 use winit_input_helper::WinitInputHelper;
 
 use crate::EngineDetails;
@@ -10,9 +10,11 @@ pub type ComponentId = u32;
 
 pub type Component = Box<dyn ComponentSystem + Send>;
 
+#[allow(unused)]
 #[async_trait::async_trait]
 pub trait ComponentSystem: ComponentDetails + Debug {
-    fn initialize(&self) {}
+    fn initialize(&mut self, device: &Device) {}
+
     async fn update(
         &mut self,
         device: &Device,
@@ -24,7 +26,8 @@ pub trait ComponentSystem: ComponentDetails + Debug {
     ) -> ActionQueue {
         Vec::new()
     }
-    fn render(&self, device: &Device, queue: &Queue) {}
+
+    fn render(&self, device: &Device, queue: &Queue, render_pass: &mut RenderPass) {}
 
 }
 

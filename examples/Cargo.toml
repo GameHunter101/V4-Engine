@@ -9,3 +9,4 @@ v4 = {path = "../v4"}
 tokio.workspace = true
 wgpu.workspace = true
 async-scoped.workspace = true
+bytemuck.workspace = true

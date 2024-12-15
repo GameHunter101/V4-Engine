@@ -101,7 +101,8 @@ impl V4 {
                         return;
                     }
                     if !self.initialized_scene {
-                        self.scenes[self.active_scene].initialize();
+                        let device = self.rendering_manager.device();
+                        self.scenes[self.active_scene].initialize(device);
                         self.initialized_scene = true;
                     }
                     if self.active_scene != last_active_scene_index {

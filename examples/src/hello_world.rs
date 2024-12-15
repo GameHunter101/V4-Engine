@@ -1,18 +1,20 @@
 use std::sync::Arc;
 
+use tokio::sync::Mutex;
 use v4::{
+    builtin_components::mesh_component::{MeshComponent, VertexDescriptor},
     ecs::{
         pipeline::{GeometryDetails, PipelineDetails},
         scene::Scene,
     },
     V4,
 };
-use tokio::sync::Mutex;
+use wgpu::vertex_attr_array;
 
 #[tokio::main]
 pub async fn main() {
     let mut engine = V4::builder()
-        .window_settings(600, 600, "Example Gamezap Project", None)
+        .window_settings(600, 600, "Example V4 Project", None)
         .clear_color(wgpu::Color {
             r: 0.8,
             g: 0.15,
@@ -37,15 +39,32 @@ pub async fn main() {
     let material = scene.create_material(
         device,
         render_format,
-        "examples/assets/shaders/vertex.wgsl",
-        "examples/assets/shaders/fragment.wgsl",
+        "shaders/vertex.wgsl",
+        "shaders/fragment.wgsl",
         Vec::new(),
         PipelineDetails {
-            vertex_layouts: &[],
+            vertex_layouts: &[Vertex::vertex_layout()],
             geometry_details: GeometryDetails::default(),
         },
     );
-    scene.create_entity(None, Vec::new(), Some(material), true);
+
+    let mesh_component = MeshComponent::new(
+        vec![
+            Vertex {
+                pos: [-1.0, 1.0, 0.0],
+            },
+            Vertex {
+                pos: [-1.0, -1.0, 0.0],
+            },
+            Vertex {
+                pos: [1.0, -1.0, 0.0],
+            },
+        ],
+        vec![0, 1, 2],
+        true,
+    );
+
+    scene.create_entity(None, vec![Box::new(mesh_component)], Some(material), true);
 
     engine.attach_scene(scene);
 
@@ -94,91 +113,18 @@ async fn async_test(results: Arc<Mutex<Vec<u64>>>) {
     });
 }
 
-/* trait TestAction {
-    fn execute(&self, items: &mut ItemCollection);
+#[repr(C)]
+#[derive(Debug, bytemuck::Pod, bytemuck::Zeroable, Clone, Copy)]
+struct Vertex {
+    pos: [f32; 3],
 }
 
-#[derive(Debug, Clone)]
-struct TestTransfer {
-    item: Box<Item>,
-}
-
-impl TestAction for TestTransfer {
-    fn execute(&self, items: &mut ItemCollection) {
-        items.all_items.push(self.item.clone());
-    }
-}
-
-trait ItemTrait: std::fmt::Debug {
-    fn update(&mut self, _other_items: &mut [&mut Box<dyn ItemTrait + Send>], _index: f32) {}
-}
-
-#[derive(Debug, Clone, Copy)]
-struct Item {
-    field: f32,
-}
-
-impl ItemTrait for Item {
-    fn update(&mut self, other_items: &mut [&mut Box<dyn ItemTrait + Send>], index: f32) {
-        // other_items[0].field = 12.0 * index;
-        println!("{index} | {other_items:?}");
-        self.field = index;
-    }
-}
-
-#[derive(Debug)]
-struct ItemCollection {
-    all_items: Vec<Box<dyn ItemTrait + Send>>,
-}
-
-impl ItemCollection {
-    async fn update_all(&mut self) {
-        let all_items_ref = &mut self.all_items;
-        for i in 0..all_items_ref.len() {
-            unsafe {
-                let value = all_items_ref.split_at_mut(i);
-                async_scoped::TokioScope::scope_and_collect(|scope| {
-                    let proc = async move {
-                        let (previous_items, next_items_and_current_item) = value;
-                        let current_item = next_items_and_current_item.split_first_mut();
-                        if let Some((current_item, next_items)) = current_item {
-                            let mut chain = previous_items
-                                .iter_mut()
-                                .chain(next_items.iter_mut())
-                                .collect::<Vec<_>>();
-                            current_item.update(&mut chain, i as f32);
-                        }
-                    };
-
-                    scope.spawn(proc);
-                })
-                .await;
-            }
+impl VertexDescriptor for Vertex {
+    fn vertex_layout() -> wgpu::VertexBufferLayout<'static> {
+        wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &vertex_attr_array![0 => Float32x3],
         }
     }
 }
-
-struct Material {
-    pub components: Vec<usize>
-}
-
-struct Component;
-impl Component {
-    pub fn render(&self, device: &wgpu::Device, render_pass: &mut wgpu::RenderPass) {
-        println!("rendering");
-    }
-}
-
-struct Stuff {
-    components: Vec<Component>,
-}
-
-impl Stuff {
-    fn render_component(&self, render_pass: &mut wgpu::RenderPass, device: wgpu::Device, material: &Material) {
-        for component_id in &material.components {
-            let component = &self.components[*component_id];
-            component.render(&device, render_pass);
-        }
-    }
-
-} */

@@ -198,7 +198,7 @@ impl<'a> RenderingManager {
                     }
                     let material_id = material.id();
                     for component in &components_sorted_by_material[&material_id] {
-                        component.render(&self.device, &self.queue);
+                        component.render(&self.device, &self.queue, &mut render_pass);
                     }
                 }
             }

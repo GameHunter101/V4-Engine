@@ -105,9 +105,9 @@ impl Scene {
         }
     }
 
-    pub fn initialize(&self) {
-        for component in &self.components {
-            component.initialize();
+    pub fn initialize(&mut self, device: &Device) {
+        for component in &mut self.components {
+            component.initialize(device);
         }
     }
 
@@ -121,6 +121,9 @@ impl Scene {
         let active_camera_id = self.active_camera_id;
         let all_components = &mut self.components;
         for i in 0..all_components.len() {
+            if !all_components[i].is_enabled() {
+                continue;
+            }
             async_scoped::TokioScope::scope_and_block(|scope| {
                 let (components_before, components_after_and_this) = all_components.split_at_mut(i);
                 let proc = async move {
@@ -197,6 +200,7 @@ impl Scene {
                 render_format,
                 pipeline_details,
             ));
+            self.pipeline_to_corresponding_materials.insert((vertex_shader_path, fragment_shader_path), Vec::new());
         }
 
         let id = new_material.id();
@@ -241,7 +245,7 @@ impl Scene {
             let parent_entity_material_id =
                 self.entities[&component_parent_entity_id].active_material();
             if let Some(parent_entity_material_id) = parent_entity_material_id {
-                if self.entities[&(parent_entity_material_id as u32)].is_enabled()
+                if self.entities[&component_parent_entity_id].is_enabled()
                     && component.is_enabled()
                 {
                     output
@@ -281,7 +285,7 @@ impl Scene {
                 .position(|comp| comp.rendering_order() >= component.rendering_order())
                 .unwrap_or(self.components.len());
             self.components.insert(insert_index, component);
-            self.components.last_mut().unwrap().set_parent_entity(id);
+            self.components.get_mut(insert_index).unwrap().set_parent_entity(id);
         }
 
         id

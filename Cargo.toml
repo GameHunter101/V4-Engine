@@ -4,9 +4,10 @@ members = [ "examples", "v4",
     "v4-macros",
     "examples",
 ]
+resolver = "2"
 
 [workspace.package]
-version = "0.1.1"
+version = "0.1.2"
 authors = ["Lior Carmeli"]
 
 [workspace.dependencies]
@@ -32,3 +33,4 @@ glyphon = "=0.6.0"
 version = "0.25.2"
 default-features = false
 features = ["png", "jpeg"]
+

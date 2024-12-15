@@ -22,13 +22,6 @@ pub fn component_impl(args: TokenStream, item: TokenStream) -> TokenStream {
         }
     };
 
-    let component_specs = match ComponentSpecs::from_list(&attr_args) {
-        Ok(v) => v,
-        Err(e) => {
-            return TokenStream::from(e.write_errors());
-        }
-    };
-
     if let syn::Fields::Named(ref mut fields) = component_struct.fields {
         // let test = syn::parse_quote! {}
         fields.named.push(
@@ -65,11 +58,12 @@ pub fn component_impl(args: TokenStream, item: TokenStream) -> TokenStream {
     }
 
     let ident = component_struct.ident.clone();
+    let generics = component_struct.generics.clone();
 
     quote! {
         #component_struct
 
-        impl v4_core::ecs::component::ComponentDetails for #ident {
+        impl #generics v4_core::ecs::component::ComponentDetails for #ident #generics {
             fn id(&self) -> v4_core::ecs::component::ComponentId {
                 self.component_id
             }
