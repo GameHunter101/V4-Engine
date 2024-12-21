@@ -117,7 +117,9 @@ impl V4 {
 
                     async_scoped::TokioScope::scope_and_block(|scope| {
                         let proc = async {
-                            scene.update(device, queue, &self.input_manager, &self.details).await;
+                            scene
+                                .update(device, queue, &self.input_manager, &self.details)
+                                .await;
                         };
                         scope.spawn(proc);
                     });

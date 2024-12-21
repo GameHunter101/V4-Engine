@@ -1,12 +1,9 @@
 use darling::{ast::NestedMeta, FromMeta};
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{
-    ext::IdentExt, parse::Parser, parse_macro_input, spanned::Spanned, DeriveInput, Error, Expr,
-    Item, ItemStruct, Lit, Meta, MetaNameValue,
-};
-use v4_core::ecs::entity::EntityId;
+use syn::{parse::Parser, parse_macro_input, ItemStruct};
 
+#[allow(unused)]
 #[derive(Debug, FromMeta)]
 struct ComponentSpecs {
     rendering_order: Option<i32>,
@@ -23,19 +20,10 @@ pub fn component_impl(args: TokenStream, item: TokenStream) -> TokenStream {
     };
 
     if let syn::Fields::Named(ref mut fields) = component_struct.fields {
-        // let test = syn::parse_quote! {}
         fields.named.push(
             syn::Field::parse_named
                 .parse2(quote! {
-                    parent_entity_id: v4_core::ecs::entity::EntityId
-                })
-                .unwrap(),
-        );
-
-        fields.named.push(
-            syn::Field::parse_named
-                .parse2(quote! {
-                    component_id: v4_core::ecs::component::ComponentId
+                    parent_entity_id: v4::ecs::entity::EntityId
                 })
                 .unwrap(),
         );
@@ -60,27 +48,42 @@ pub fn component_impl(args: TokenStream, item: TokenStream) -> TokenStream {
     let ident = component_struct.ident.clone();
     let generics = component_struct.generics.clone();
 
+    #[allow(clippy::collapsible_match)]
+    let rendering_order = if attr_args.is_empty() {
+        0
+    } else {
+        match &attr_args[0] {
+            NestedMeta::Lit(lit) => {
+                if let syn::Lit::Int(lit_int) = lit {
+                    lit_int.base10_parse().unwrap_or(0)
+                } else {
+                    0
+                }
+            }
+            _ => 0,
+        }
+    };
+
     quote! {
         #component_struct
 
-        impl #generics v4_core::ecs::component::ComponentDetails for #ident #generics {
-            fn id(&self) -> v4_core::ecs::component::ComponentId {
-                self.component_id
-            }
-
-            fn set_id(&mut self, new_id: v4_core::ecs::component::ComponentId) {
-                self.component_id = new_id;
+        impl #generics v4::ecs::component::ComponentDetails for #ident #generics {
+            fn id(&self) -> v4::ecs::component::ComponentId {
+                const PRIME: u64 = 2147483647;
+                let address = self as *const _ as u64;
+                let obfuscated = (address).wrapping_mul(PRIME).rotate_left(16);
+                (obfuscated & 0xFFFF_FFFF) as v4::ecs::component::ComponentId
             }
 
             fn is_initialized(&self) -> bool {
                 self.is_initialized
             }
 
-            fn parent_entity_id(&self) -> v4_core::ecs::entity::EntityId {
+            fn parent_entity_id(&self) -> v4::ecs::entity::EntityId {
                 self.parent_entity_id
             }
 
-            fn set_parent_entity(&mut self, parent_id: v4_core::ecs::entity::EntityId) {
+            fn set_parent_entity(&mut self, parent_id: v4::ecs::entity::EntityId) {
                 self.parent_entity_id = parent_id;
             }
 
@@ -90,6 +93,10 @@ pub fn component_impl(args: TokenStream, item: TokenStream) -> TokenStream {
 
             fn set_enabled_state(&mut self, enabled_state: bool) {
                 self.is_enabled = enabled_state;
+            }
+
+            fn rendering_order(&self) -> i32 {
+                #rendering_order
             }
         }
     }

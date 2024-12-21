@@ -5,7 +5,7 @@ use v4_core::ecs::{
     material::MaterialId, scene::{Scene, TextDisplayInfo, Workload},
 };
 
-pub struct WorkloadAction(ComponentId, Workload);
+pub struct WorkloadAction(pub ComponentId, pub Workload);
 
 impl Debug for WorkloadAction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -23,7 +23,7 @@ impl Action for WorkloadAction {
 }
 
 #[derive(Debug)]
-pub struct EntityToggleAction(EntityId, Option<bool>);
+pub struct EntityToggleAction(pub EntityId, pub Option<bool>);
 
 impl Action for EntityToggleAction {
     fn execute(self: Box<Self>, scene: &mut Scene) {
@@ -38,7 +38,7 @@ impl Action for EntityToggleAction {
 }
 
 #[derive(Debug)]
-pub struct ComponentToggleAction(ComponentId, Option<bool>);
+pub struct ComponentToggleAction(pub ComponentId, pub Option<bool>);
 
 impl Action for ComponentToggleAction {
     fn execute(self: Box<Self>, scene: &mut Scene) {
@@ -55,19 +55,19 @@ impl Action for ComponentToggleAction {
 
 #[derive(Debug)]
 pub struct RegisterUiComponentAction<'a> {
-    component_id: ComponentId,
-    text: &'a str,
-    text_attributes: glyphon::Attrs<'a>,
-    text_metrics: glyphon::Metrics,
-    text_display_info: TextDisplayInfo,
-    advanced_rendering: bool,
+    pub component_id: ComponentId,
+    pub text: String,
+    pub text_attributes: glyphon::Attrs<'a>,
+    pub text_metrics: glyphon::Metrics,
+    pub text_display_info: TextDisplayInfo,
+    pub advanced_rendering: bool,
 }
 
-impl<'a> Action for RegisterUiComponentAction<'a> {
+impl Action for RegisterUiComponentAction<'_> {
     fn execute(self: Box<Self>, scene: &mut Scene) {
         scene.create_text_buffer(
             self.component_id,
-            self.text,
+            &self.text,
             self.text_attributes,
             self.text_metrics,
             self.text_display_info,
@@ -78,7 +78,7 @@ impl<'a> Action for RegisterUiComponentAction<'a> {
 }
 
 #[derive(Debug)]
-pub struct SetEntityActiveMaterialAction(EntityId, MaterialId);
+pub struct SetEntityActiveMaterialAction(pub EntityId, pub MaterialId);
 
 impl Action for SetEntityActiveMaterialAction {
     fn execute(self: Box<Self>, scene: &mut Scene) {
@@ -90,10 +90,10 @@ impl Action for SetEntityActiveMaterialAction {
 
 #[derive(Debug)]
 pub struct CreateEntityAction {
-    entity_parent_id: Option<EntityId>,
-    components: Vec<Component>,
-    active_material: Option<MaterialId>,
-    is_enabled: bool,
+    pub entity_parent_id: Option<EntityId>,
+    pub components: Vec<Component>,
+    pub active_material: Option<MaterialId>,
+    pub is_enabled: bool,
 }
 
 impl Action for CreateEntityAction {

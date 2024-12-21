@@ -112,35 +112,6 @@ impl<'a> RenderingManager {
     }
 
     pub fn render(&mut self, scene: &mut Scene) {
-        {
-            let enabled_components = scene.enabled_ui_components();
-            let font_state = scene.font_state_mut();
-            font_state
-                .text_renderer
-                .prepare(
-                    &self.device,
-                    &self.queue,
-                    &mut font_state.font_system,
-                    &mut font_state.atlas,
-                    &font_state.viewport,
-                    font_state
-                        .text_buffers
-                        .iter()
-                        .filter(|(id, _)| enabled_components.contains(id))
-                        .map(|(_, data)| glyphon::TextArea {
-                            buffer: &data.buffer,
-                            left: data.top_left_pos[0],
-                            top: data.top_left_pos[1],
-                            scale: data.scale,
-                            bounds: data.bounds,
-                            default_color: glyphon::Color::rgb(0, 0, 0),
-                            custom_glyphs: &[],
-                        }),
-                    &mut font_state.swash_cache,
-                )
-                .expect("Failed to prepare text for rendering.");
-        }
-
         let output = self.surface.get_current_texture().unwrap();
 
         let view = output
@@ -202,14 +173,61 @@ impl<'a> RenderingManager {
                     }
                 }
             }
+        }
 
-            let font_state = scene.font_state_mut();
+        let enabled_components = scene.enabled_ui_components();
+        let font_state = scene.font_state_mut();
+        let text_areas = font_state
+            .text_buffers
+            .iter()
+            .filter(|(id, _)| enabled_components.contains(id))
+            .map(|(_, data)| glyphon::TextArea {
+                buffer: &data.buffer,
+                left: data.top_left_pos[0],
+                top: data.top_left_pos[1],
+                scale: data.scale,
+                bounds: data.bounds,
+                default_color: data.color,
+                custom_glyphs: &[],
+            })
+            .collect::<Vec<_>>();
 
+        font_state
+            .text_renderer
+            .prepare(
+                &self.device,
+                &self.queue,
+                &mut font_state.font_system,
+                &mut font_state.atlas,
+                &font_state.viewport,
+                text_areas,
+                &mut font_state.swash_cache,
+            )
+            .expect("Failed to prepare text for rendering.");
+
+        let font_state = scene.font_state_mut();
+
+        {
+            let mut ui_render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("UI Render Pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
             font_state
                 .text_renderer
-                .render(&font_state.atlas, &font_state.viewport, &mut render_pass)
+                .render(&font_state.atlas, &font_state.viewport, &mut ui_render_pass)
                 .expect("Failed to render text.");
         }
+
         smaa_frame.resolve();
 
         self.queue.submit(std::iter::once(encoder.finish()));

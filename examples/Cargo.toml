@@ -10,3 +10,4 @@ tokio.workspace = true
 wgpu.workspace = true
 async-scoped.workspace = true
 bytemuck.workspace = true
+glyphon.workspace = true

@@ -1082,6 +1082,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e2db585e1d738fc771bf08a151420d3ed193d9d895a36df7f6f8a9456b911ddc"
 
 [[package]]
+name = "lazy_static"
+version = "1.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
+
+[[package]]
 name = "libc"
 version = "0.2.168"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2212,7 +2218,7 @@ checksum = "ebc1c04c71510c7f702b52b7c350734c9ff1295c464a03335b00bb84fc54f853"
 
 [[package]]
 name = "v4"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "bytemuck",
  "glyphon",
@@ -2223,7 +2229,7 @@ dependencies = [
 
 [[package]]
 name = "v4-core"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "async-scoped",
  "async-trait",
@@ -2234,6 +2240,7 @@ dependencies = [
  "imgui",
  "imgui-wgpu",
  "imgui-winit-support",
+ "lazy_static",
  "log",
  "nalgebra",
  "pollster",
@@ -2246,10 +2253,11 @@ dependencies = [
 
 [[package]]
 name = "v4-examples"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "async-scoped",
  "bytemuck",
+ "glyphon",
  "tokio",
  "v4",
  "wgpu",

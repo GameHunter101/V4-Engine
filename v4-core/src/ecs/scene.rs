@@ -47,17 +47,19 @@ pub struct FontState {
 
 #[derive(Debug)]
 pub struct TextDisplayInfo {
-    on_screen_width: f32,
-    on_screen_height: f32,
-    top_left_pos: [f32; 2],
-    scale: f32,
+    pub on_screen_width: f32,
+    pub on_screen_height: f32,
+    pub top_left_pos: [f32; 2],
+    pub scale: f32,
 }
 
+#[derive(Debug)]
 pub struct TextRenderInfo {
     pub buffer: glyphon::Buffer,
     pub top_left_pos: [f32; 2],
     pub scale: f32,
     pub bounds: glyphon::TextBounds,
+    pub color: glyphon::Color,
 }
 
 impl Debug for Scene {
@@ -106,9 +108,15 @@ impl Scene {
     }
 
     pub fn initialize(&mut self, device: &Device) {
-        for component in &mut self.components {
+        let action_queue: ActionQueue = self
+            .components
+            .iter_mut()
+            .flat_map(|component| component.initialize(device))
+            .collect();
+        self.execute_action_queue(action_queue);
+        /* for component in &mut self.components {
             component.initialize(device);
-        }
+        } */
     }
 
     pub async fn update(
@@ -200,7 +208,8 @@ impl Scene {
                 render_format,
                 pipeline_details,
             ));
-            self.pipeline_to_corresponding_materials.insert((vertex_shader_path, fragment_shader_path), Vec::new());
+            self.pipeline_to_corresponding_materials
+                .insert((vertex_shader_path, fragment_shader_path), Vec::new());
         }
 
         let id = new_material.id();
@@ -245,8 +254,7 @@ impl Scene {
             let parent_entity_material_id =
                 self.entities[&component_parent_entity_id].active_material();
             if let Some(parent_entity_material_id) = parent_entity_material_id {
-                if self.entities[&component_parent_entity_id].is_enabled()
-                    && component.is_enabled()
+                if self.entities[&component_parent_entity_id].is_enabled() && component.is_enabled()
                 {
                     output
                         .get_mut(&parent_entity_material_id)
@@ -285,7 +293,10 @@ impl Scene {
                 .position(|comp| comp.rendering_order() >= component.rendering_order())
                 .unwrap_or(self.components.len());
             self.components.insert(insert_index, component);
-            self.components.get_mut(insert_index).unwrap().set_parent_entity(id);
+            self.components
+                .get_mut(insert_index)
+                .unwrap()
+                .set_parent_entity(id);
         }
 
         id
@@ -352,6 +363,9 @@ impl Scene {
                         as i32,
                 },
                 scale: text_display_info.scale,
+                color: text_attributes
+                    .color_opt
+                    .unwrap_or(glyphon::Color::rgb(255, 255, 255)),
             },
         );
     }

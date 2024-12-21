@@ -13,7 +13,9 @@ pub type Component = Box<dyn ComponentSystem + Send>;
 #[allow(unused)]
 #[async_trait::async_trait]
 pub trait ComponentSystem: ComponentDetails + Debug {
-    fn initialize(&mut self, device: &Device) {}
+    fn initialize(&mut self, device: &Device) -> ActionQueue {
+        Vec::new()
+    }
 
     async fn update(
         &mut self,
@@ -28,13 +30,10 @@ pub trait ComponentSystem: ComponentDetails + Debug {
     }
 
     fn render(&self, device: &Device, queue: &Queue, render_pass: &mut RenderPass) {}
-
 }
 
 pub trait ComponentDetails {
     fn id(&self) -> ComponentId;
-
-    fn set_id(&mut self, new_id: ComponentId);
 
     fn is_initialized(&self) -> bool;
 

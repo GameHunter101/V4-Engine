@@ -3,6 +3,13 @@ pub use v4_core::EngineDetails;
 pub use v4_core::V4Builder;
 pub use v4_macros::component;
 
+#[allow(unused_imports)]
+pub(crate) mod v4 {
+    pub(crate) mod ecs {
+        pub(crate) use v4_core::ecs::*;
+    }
+}
+
 pub mod builtin_actions;
 
 pub mod ecs {

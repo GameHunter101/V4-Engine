@@ -39,8 +39,8 @@ pub async fn main() {
     let material = scene.create_material(
         device,
         render_format,
-        "shaders/vertex.wgsl",
-        "shaders/fragment.wgsl",
+        "shaders/hello_world/vertex.wgsl",
+        "shaders/hello_world/fragment.wgsl",
         Vec::new(),
         PipelineDetails {
             vertex_layouts: &[Vertex::vertex_layout()],
