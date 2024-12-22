@@ -128,35 +128,48 @@ impl Scene {
     ) {
         let active_camera_id = self.active_camera_id;
         let all_components = &mut self.components;
-        for i in 0..all_components.len() {
-            if !all_components[i].is_enabled() {
-                continue;
-            }
-            async_scoped::TokioScope::scope_and_block(|scope| {
-                let (components_before, components_after_and_this) = all_components.split_at_mut(i);
-                let proc = async move {
-                    if let Some((component, components_after)) =
-                        components_after_and_this.split_first_mut()
-                    {
-                        let chain: Vec<&mut Component> = components_before
-                            .iter_mut()
-                            .chain(components_after.iter_mut())
-                            .collect();
-                        component
-                            .update(
-                                device,
-                                queue,
-                                input_manager,
-                                &chain,
-                                active_camera_id,
-                                engine_details,
-                            )
-                            .await;
-                    }
-                };
-                scope.spawn(proc)
-            });
-        }
+        let actions: Vec<_> = (0..all_components.len())
+            .map(|i| {
+                if !all_components[i].is_enabled() {
+                    return Vec::new();
+                }
+                let (_, outputs) = async_scoped::TokioScope::scope_and_block(|scope| {
+                    let (components_before, components_after_and_this) =
+                        all_components.split_at_mut(i);
+                    let proc = async move {
+                        if let Some((component, components_after)) =
+                            components_after_and_this.split_first_mut()
+                        {
+                            let chain: Vec<&mut Component> = components_before
+                                .iter_mut()
+                                .chain(components_after.iter_mut())
+                                .collect();
+                            component
+                                .update(
+                                    device,
+                                    queue,
+                                    input_manager,
+                                    &chain,
+                                    active_camera_id,
+                                    engine_details,
+                                )
+                                .await
+                        } else {
+                            Vec::new()
+                        }
+                    };
+                    scope.spawn(proc)
+                });
+                outputs
+            })
+            .collect();
+        let action_queue: ActionQueue = actions
+            .into_iter()
+            .flatten()
+            .flat_map(|actions| actions.unwrap_or_default())
+            .collect();
+
+        self.execute_action_queue(action_queue);
     }
 
     pub fn attach_workload(&mut self, component_id: ComponentId, workload: Workload) {
@@ -387,10 +400,9 @@ impl Scene {
     pub fn enabled_ui_components(&self) -> HashSet<ComponentId> {
         self.components
             .iter()
-            .map(|comp| (comp.id(), comp.is_enabled()))
-            .filter_map(|(comp_id, is_enabled)| {
-                if is_enabled && self.ui_components.contains(&comp_id) {
-                    Some(comp_id)
+            .filter_map(|comp| {
+                if comp.is_enabled() && self.ui_components.contains(&comp.id()) {
+                    Some(comp.id())
                 } else {
                     None
                 }
@@ -399,7 +411,6 @@ impl Scene {
     }
 
     pub fn execute_action_queue(&mut self, action_queue: ActionQueue) {
-        // self.action_queue.iter_mut().for_each(|action| action.execute(self));
         for action in action_queue {
             action.execute(self);
         }

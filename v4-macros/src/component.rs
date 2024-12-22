@@ -23,6 +23,14 @@ pub fn component_impl(args: TokenStream, item: TokenStream) -> TokenStream {
         fields.named.push(
             syn::Field::parse_named
                 .parse2(quote! {
+                    id: std::sync::OnceLock<v4::ecs::component::ComponentId>
+                })
+                .unwrap(),
+        );
+
+        fields.named.push(
+            syn::Field::parse_named
+                .parse2(quote! {
                     parent_entity_id: v4::ecs::entity::EntityId
                 })
                 .unwrap(),
@@ -69,14 +77,21 @@ pub fn component_impl(args: TokenStream, item: TokenStream) -> TokenStream {
 
         impl #generics v4::ecs::component::ComponentDetails for #ident #generics {
             fn id(&self) -> v4::ecs::component::ComponentId {
-                const PRIME: u64 = 2147483647;
-                let address = self as *const _ as u64;
-                let obfuscated = (address).wrapping_mul(PRIME).rotate_left(16);
-                (obfuscated & 0xFFFF_FFFF) as v4::ecs::component::ComponentId
+                *self.id.get_or_init(|| {
+                    const PRIME: u64 = 2147483647;
+                    let address = self as *const _ as u64;
+                    let obfuscated = (address).wrapping_mul(PRIME).rotate_left(16);
+                    let new_id = (obfuscated & 0xFFFF_FFFF) as v4::ecs::component::ComponentId;
+                    new_id
+                })
             }
 
             fn is_initialized(&self) -> bool {
                 self.is_initialized
+            }
+
+            fn set_initialized(&mut self) {
+                self.is_initialized = true;
             }
 
             fn parent_entity_id(&self) -> v4::ecs::entity::EntityId {

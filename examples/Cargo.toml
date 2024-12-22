@@ -11,3 +11,6 @@ wgpu.workspace = true
 async-scoped.workspace = true
 bytemuck.workspace = true
 glyphon.workspace = true
+winit_input_helper.workspace = true
+async-trait.workspace = true
+winit.workspace = true

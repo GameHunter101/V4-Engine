@@ -70,7 +70,9 @@ impl V4 {
         let mut last_active_scene_index = self.active_scene;
         self.details.initialization_time = Instant::now();
         self.event_loop
-            .run(move |event, elwt| match &event {
+            .run(move |event, elwt| {
+                self.input_manager.update(&event);
+                match &event {
                 WindowEvent { event, .. } => match event {
                     winit::event::WindowEvent::Resized(new_size) => {
                         self.rendering_manager
@@ -127,7 +129,7 @@ impl V4 {
                     self.details.last_frame_instant = Instant::now();
                 }
                 _ => {}
-            })
+            }})
             .expect("An error occured in the main loop.");
     }
 

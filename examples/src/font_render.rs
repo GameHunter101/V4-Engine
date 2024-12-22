@@ -1,7 +1,7 @@
 use v4::{
     component,
     ecs::{
-        component::{ComponentDetails, ComponentSystem},
+        component::{ComponentDetails, ComponentId, ComponentSystem},
         entity::EntityId,
         scene::{Scene, TextDisplayInfo},
     },
@@ -25,7 +25,13 @@ pub async fn main() {
     );
 
     let text_component = TextComponent::new("hi".to_string());
-    let _text_entity_id = scene.create_entity(None, vec![Box::new(text_component)], None, true);
+    let toggle_component = ToggleComponent::new(text_component.id());
+    let _text_entity_id = scene.create_entity(
+        None,
+        vec![Box::new(text_component), Box::new(toggle_component)],
+        None,
+        true,
+    );
 
     engine.attach_scene(scene);
 
@@ -45,6 +51,7 @@ impl TextComponent {
             parent_entity_id: EntityId::MAX,
             is_initialized: false,
             is_enabled: true,
+            id: std::sync::OnceLock::new(),
         }
     }
 }
@@ -69,5 +76,51 @@ impl ComponentSystem for TextComponent {
             },
             advanced_rendering: false,
         })]
+    }
+}
+
+#[derive(Debug)]
+#[component]
+struct ToggleComponent {
+    text_component: ComponentId,
+}
+
+impl ToggleComponent {
+    fn new(text_component: ComponentId) -> Self {
+        Self {
+            text_component,
+            parent_entity_id: 0,
+            is_initialized: false,
+            is_enabled: true,
+            id: std::sync::OnceLock::new(),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl ComponentSystem for ToggleComponent {
+    async fn update(
+        &mut self,
+        _device: &wgpu::Device,
+        _queue: &wgpu::Queue,
+        input_manager: &winit_input_helper::WinitInputHelper,
+        _other_components: &[&mut v4::ecs::component::Component],
+        _active_camera_id: Option<ComponentId>,
+        _engine_details: &v4::EngineDetails,
+    ) -> v4::ecs::actions::ActionQueue {
+        let text = input_manager.text();
+
+        if !text.is_empty()
+            && text
+                .iter()
+                .any(|c| *c == winit::keyboard::Key::Named(winit::keyboard::NamedKey::Escape))
+        {
+            println!("escape pressed");
+            return vec![Box::new(v4::builtin_actions::ComponentToggleAction(
+                self.text_component,
+                None,
+            ))];
+        }
+        Vec::new()
     }
 }

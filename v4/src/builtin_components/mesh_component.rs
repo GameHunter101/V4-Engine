@@ -32,6 +32,7 @@ impl<V: VertexDescriptor> MeshComponent<V> {
             parent_entity_id: EntityId::MAX,
             is_initialized: false,
             is_enabled,
+            id: std::sync::OnceLock::new(),
         }
     }
 }

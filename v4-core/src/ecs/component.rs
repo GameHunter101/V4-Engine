@@ -8,12 +8,13 @@ use super::{actions::ActionQueue, entity::EntityId};
 
 pub type ComponentId = u32;
 
-pub type Component = Box<dyn ComponentSystem + Send>;
+pub type Component = Box<dyn ComponentSystem + Send + Sync>;
 
 #[allow(unused)]
 #[async_trait::async_trait]
 pub trait ComponentSystem: ComponentDetails + Debug {
     fn initialize(&mut self, device: &Device) -> ActionQueue {
+        self.set_initialized();
         Vec::new()
     }
 
@@ -36,6 +37,8 @@ pub trait ComponentDetails {
     fn id(&self) -> ComponentId;
 
     fn is_initialized(&self) -> bool;
+
+    fn set_initialized(&mut self);
 
     fn parent_entity_id(&self) -> EntityId;
 
