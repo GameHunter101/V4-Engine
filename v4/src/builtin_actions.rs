@@ -1,8 +1,11 @@
 use std::fmt::Debug;
 
 use v4_core::ecs::{
-    actions::Action, component::{Component, ComponentId}, entity::EntityId,
-    material::MaterialId, scene::{Scene, TextDisplayInfo, Workload},
+    actions::Action,
+    component::{Component, ComponentId},
+    entity::EntityId,
+    material::MaterialId,
+    scene::{Scene, TextAttributes, TextDisplayInfo, Workload},
 };
 
 pub struct WorkloadAction(pub ComponentId, pub Workload);
@@ -54,26 +57,52 @@ impl Action for ComponentToggleAction {
 }
 
 #[derive(Debug)]
-pub struct RegisterUiComponentAction<'a> {
-    pub component_id: ComponentId,
+pub struct TextComponentProperties {
     pub text: String,
-    pub text_attributes: glyphon::Attrs<'a>,
+    pub text_attributes: TextAttributes,
     pub text_metrics: glyphon::Metrics,
     pub text_display_info: TextDisplayInfo,
-    pub advanced_rendering: bool,
 }
 
-impl Action for RegisterUiComponentAction<'_> {
+#[derive(Debug)]
+pub struct RegisterUiComponentAction {
+    pub component_id: ComponentId,
+    pub text_component_properties: Option<TextComponentProperties>,
+}
+
+impl Action for RegisterUiComponentAction {
     fn execute(self: Box<Self>, scene: &mut Scene) {
-        scene.create_text_buffer(
+        if let Some(text_component_properties) = self.text_component_properties {
+            scene.create_text_buffer(
+                self.component_id,
+                &text_component_properties.text,
+                text_component_properties.text_attributes,
+                text_component_properties.text_metrics,
+                text_component_properties.text_display_info,
+            );
+        }
+        scene.register_ui_component(self.component_id);
+    }
+}
+
+#[derive(Debug)]
+pub struct UpdateTextComponentAction {
+    pub component_id: ComponentId,
+    pub text: Option<String>,
+    pub text_attributes: Option<TextAttributes>,
+    pub text_metrics: Option<glyphon::Metrics>,
+    pub text_display_info: Option<TextDisplayInfo>,
+}
+
+impl Action for UpdateTextComponentAction {
+    fn execute(self: Box<Self>, scene: &mut Scene) {
+        scene.update_text_buffer(
             self.component_id,
-            &self.text,
+            self.text,
             self.text_attributes,
             self.text_metrics,
             self.text_display_info,
-            self.advanced_rendering,
         );
-        scene.register_ui_component(self.component_id);
     }
 }
 

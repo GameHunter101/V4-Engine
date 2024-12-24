@@ -187,7 +187,7 @@ impl<'a> RenderingManager {
                 top: data.top_left_pos[1],
                 scale: data.scale,
                 bounds: data.bounds,
-                default_color: data.color,
+                default_color: data.attributes.color,
                 custom_glyphs: &[],
             })
             .collect::<Vec<_>>();
@@ -204,8 +204,6 @@ impl<'a> RenderingManager {
                 &mut font_state.swash_cache,
             )
             .expect("Failed to prepare text for rendering.");
-
-        let font_state = scene.font_state_mut();
 
         {
             let mut ui_render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
