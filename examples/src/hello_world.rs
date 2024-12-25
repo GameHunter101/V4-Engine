@@ -49,7 +49,7 @@ pub async fn main() {
     );
 
     let mesh_component = MeshComponent::new(
-        vec![
+        vec![vec![
             Vertex {
                 pos: [-1.0, 1.0, 0.0],
             },
@@ -59,40 +59,19 @@ pub async fn main() {
             Vertex {
                 pos: [1.0, -1.0, 0.0],
             },
-        ],
-        vec![0, 1, 2],
+        ]],
+        vec![vec![0, 1, 2]],
         true,
+        vec![0],
     );
 
-    scene.create_entity(None, vec![Box::new(mesh_component)], Some(material), true);
+    let cube_mesh_component = MeshComponent::<Vertex>::from_obj("assets/models/basic_cube.obj", true)
+        .await
+        .unwrap();
+
+    scene.create_entity(None, vec![Box::new(cube_mesh_component)], Some(material), true);
 
     engine.attach_scene(scene);
-
-    // drop(scene);
-
-    // futures::future::join_all(tasks).await;
-
-    /* let all_items: Vec<Box<dyn ItemTrait + Send>> = [Item { field: -1.0 }; 10]
-        .iter()
-        .cloned()
-        .map(|item| Box::new(item) as Box<dyn ItemTrait + Send>)
-        .collect();
-    let mut item_colllection = ItemCollection { all_items };
-    item_colllection.update_all().await;
-
-    let mut actions: Vec<Box<dyn TestAction>> = vec![
-        Box::new(TestTransfer {
-            item: Box::new(Item { field: -7.5 })
-        });
-        10
-    ]
-    .into_iter()
-    .map(|action| action as Box<dyn TestAction>)
-    .collect();
-
-    actions
-        .iter_mut()
-        .for_each(|action| action.execute(&mut item_colllection)); */
 
     engine.main_loop().await;
 }
@@ -105,7 +84,6 @@ async fn async_test(results: Arc<Mutex<Vec<u64>>>) {
             let task = async move {
                 tokio::time::sleep(std::time::Duration::from_millis(i * 100)).await;
                 res.lock().await.push(i);
-                // println!("{i} finished");
                 i
             };
             scope.spawn(task);
@@ -125,6 +103,12 @@ impl VertexDescriptor for Vertex {
             array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
             step_mode: wgpu::VertexStepMode::Vertex,
             attributes: &vertex_attr_array![0 => Float32x3],
+        }
+    }
+
+    fn from_pos_normal_coords(pos: Vec<f32>, _normal: Vec<f32>, _tex_coords: Vec<f32>) -> Self {
+        Self {
+            pos: pos.try_into().unwrap(),
         }
     }
 }

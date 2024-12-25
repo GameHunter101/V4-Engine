@@ -175,6 +175,8 @@ impl<'a> RenderingManager {
             }
         }
 
+        smaa_frame.resolve();
+
         let enabled_components = scene.enabled_ui_components();
         let font_state = scene.font_state_mut();
         let text_areas = font_state
@@ -212,7 +214,7 @@ impl<'a> RenderingManager {
                     view: &view,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                        load: wgpu::LoadOp::Load,
                         store: wgpu::StoreOp::Store,
                     },
                 })],
@@ -226,7 +228,6 @@ impl<'a> RenderingManager {
                 .expect("Failed to render text.");
         }
 
-        smaa_frame.resolve();
 
         self.queue.submit(std::iter::once(encoder.finish()));
         output.present();

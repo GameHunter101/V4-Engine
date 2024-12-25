@@ -22,4 +22,3 @@ winit.workspace = true
 winit_input_helper.workspace = true
 imgui-winit-support.workspace = true
 glyphon.workspace = true
-lazy_static = "1.5.0"
