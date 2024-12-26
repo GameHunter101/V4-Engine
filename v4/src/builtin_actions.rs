@@ -26,6 +26,16 @@ impl Action for WorkloadAction {
 }
 
 #[derive(Debug)]
+pub struct WorkloadOutputFreeAction(pub ComponentId, pub usize);
+
+#[async_trait::async_trait]
+impl Action for WorkloadOutputFreeAction {
+    async fn execute_async(self: Box<Self>, scene: &mut Scene) {
+        scene.free_workload_output(self.0, self.1).await;
+    }
+}
+
+#[derive(Debug)]
 pub struct EntityToggleAction(pub EntityId, pub Option<bool>);
 
 impl Action for EntityToggleAction {

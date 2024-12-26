@@ -1,3 +1,4 @@
+use async_scoped::TokioScope;
 use ecs::scene::Scene;
 use engine_management::rendering_management::RenderingManager;
 use std::{collections::HashSet, fmt::Debug, time::Instant};
@@ -73,63 +74,68 @@ impl V4 {
             .run(move |event, elwt| {
                 self.input_manager.update(&event);
                 match &event {
-                WindowEvent { event, .. } => match event {
-                    winit::event::WindowEvent::Resized(new_size) => {
-                        self.rendering_manager
-                            .resize(new_size.width, new_size.height);
-                        self.scenes[self.active_scene].update_text_viewport(
-                            self.rendering_manager.queue(),
-                            (new_size.width, new_size.height),
-                        );
-                        self.details.window_resolution = (new_size.width, new_size.height);
-                    }
-                    winit::event::WindowEvent::CloseRequested => {
-                        elwt.exit();
-                    }
-                    winit::event::WindowEvent::CursorMoved { position, .. } => {
-                        self.details.cursor_position = (position.x as u32, position.y as u32);
-                    }
-                    winit::event::WindowEvent::MouseInput { button, .. } => {
-                        if self.details.mouse_state.contains(button) {
-                            self.details.mouse_state.remove(button);
-                        } else {
-                            self.details.mouse_state.insert(*button);
+                    WindowEvent { event, .. } => match event {
+                        winit::event::WindowEvent::Resized(new_size) => {
+                            self.rendering_manager
+                                .resize(new_size.width, new_size.height);
+                            self.scenes[self.active_scene].update_text_viewport(
+                                self.rendering_manager.queue(),
+                                (new_size.width, new_size.height),
+                            );
+                            self.details.window_resolution = (new_size.width, new_size.height);
                         }
+                        winit::event::WindowEvent::CloseRequested => {
+                            elwt.exit();
+                        }
+                        winit::event::WindowEvent::CursorMoved { position, .. } => {
+                            self.details.cursor_position = (position.x as u32, position.y as u32);
+                        }
+                        winit::event::WindowEvent::MouseInput { button, .. } => {
+                            if self.details.mouse_state.contains(button) {
+                                self.details.mouse_state.remove(button);
+                            } else {
+                                self.details.mouse_state.insert(*button);
+                            }
+                        }
+                        _ => {}
+                    },
+                    winit::event::Event::AboutToWait => {
+                        if self.scenes.is_empty() {
+                            return;
+                        }
+                        if !self.initialized_scene {
+                            let device = self.rendering_manager.device();
+                            TokioScope::scope_and_block(|scope| {
+                                let proc = self.scenes[self.active_scene].initialize(device);
+
+                                scope.spawn(proc);
+                            });
+                            self.initialized_scene = true;
+                        }
+                        if self.active_scene != last_active_scene_index {
+                            self.initialized_scene = false;
+                            last_active_scene_index = self.active_scene;
+                            return;
+                        }
+                        let scene = &mut self.scenes[self.active_scene];
+                        self.rendering_manager.render(scene);
+                        let device = self.rendering_manager.device();
+                        let queue = self.rendering_manager.queue();
+
+                        TokioScope::scope_and_block(|scope| {
+                            let proc = async {
+                                scene
+                                    .update(device, queue, &self.input_manager, &self.details)
+                                    .await;
+                            };
+                            scope.spawn(proc);
+                        });
+                        self.details.frames_elapsed += 1;
+                        self.details.last_frame_instant = Instant::now();
                     }
                     _ => {}
-                },
-                winit::event::Event::AboutToWait => {
-                    if self.scenes.is_empty() {
-                        return;
-                    }
-                    if !self.initialized_scene {
-                        let device = self.rendering_manager.device();
-                        self.scenes[self.active_scene].initialize(device);
-                        self.initialized_scene = true;
-                    }
-                    if self.active_scene != last_active_scene_index {
-                        self.initialized_scene = false;
-                        last_active_scene_index = self.active_scene;
-                        return;
-                    }
-                    let scene = &mut self.scenes[self.active_scene];
-                    self.rendering_manager.render(scene);
-                    let device = self.rendering_manager.device();
-                    let queue = self.rendering_manager.queue();
-
-                    async_scoped::TokioScope::scope_and_block(|scope| {
-                        let proc = async {
-                            scene
-                                .update(device, queue, &self.input_manager, &self.details)
-                                .await;
-                        };
-                        scope.spawn(proc);
-                    });
-                    self.details.frames_elapsed += 1;
-                    self.details.last_frame_instant = Instant::now();
                 }
-                _ => {}
-            }})
+            })
             .expect("An error occured in the main loop.");
     }
 

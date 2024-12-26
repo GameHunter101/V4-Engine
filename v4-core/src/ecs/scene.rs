@@ -33,7 +33,7 @@ pub struct Scene {
     total_entities_created: u32,
     font_state: FontState,
     workloads: HashMap<ComponentId, Workload>,
-    workload_outputs: Arc<Mutex<HashMap<ComponentId, WorkloadOutput>>>,
+    workload_outputs: Arc<Mutex<HashMap<ComponentId, Vec<WorkloadOutput>>>>,
 }
 
 pub struct FontState {
@@ -177,16 +177,13 @@ impl Scene {
         }
     }
 
-    pub fn initialize(&mut self, device: &Device) {
+    pub async fn initialize(&mut self, device: &Device) {
         let action_queue: ActionQueue = self
             .components
             .iter_mut()
             .flat_map(|component| component.initialize(device))
             .collect();
-        self.execute_action_queue(action_queue);
-        /* for component in &mut self.components {
-            component.initialize(device);
-        } */
+        self.execute_action_queue(action_queue).await;
     }
 
     pub async fn update(
@@ -198,8 +195,10 @@ impl Scene {
     ) {
         let active_camera_id = self.active_camera_id;
         let all_components = &mut self.components;
+        let workload_outputs = self.workload_outputs.clone();
         let actions: Vec<_> = (0..all_components.len())
             .map(|i| {
+                let workload_outputs = workload_outputs.clone();
                 if !all_components[i].is_enabled() {
                     return Vec::new();
                 }
@@ -222,6 +221,7 @@ impl Scene {
                                     &chain,
                                     active_camera_id,
                                     engine_details,
+                                    workload_outputs,
                                 )
                                 .await
                         } else {
@@ -239,7 +239,7 @@ impl Scene {
             .flat_map(|actions| actions.unwrap_or_default())
             .collect();
 
-        self.execute_action_queue(action_queue);
+        self.execute_action_queue(action_queue).await;
     }
 
     pub fn attach_workload(&mut self, component_id: ComponentId, workload: Workload) {
@@ -256,11 +256,29 @@ impl Scene {
                 let workload = self.workloads.remove(&component_id).unwrap();
                 let workloads = workloads.clone();
                 let proc = async move {
-                    workloads.lock().await.insert(component_id, workload.await);
+                    let mut workloads = workloads.lock().await;
+                    if let Some(outputs) = workloads.get_mut(&component_id) {
+                        outputs.push(workload.await);
+                    } else {
+                        workloads.insert(component_id, vec![workload.await]);
+                    }
                 };
                 scope.spawn(proc);
             }
         });
+    }
+
+    pub async fn free_workload_output(
+        &mut self,
+        component_id: ComponentId,
+        workload_output_index: usize,
+    ) {
+        self.workload_outputs
+            .lock()
+            .await
+            .get_mut(&component_id)
+            .expect("Failed to get workloads assigned to the given component ID.")
+            .remove(workload_output_index);
     }
 
     pub fn create_material(
@@ -483,42 +501,6 @@ impl Scene {
                 };
             }
         }
-        /* let mut text_buffer = glyphon::Buffer::new(font_system, text_metrics);
-        text_buffer.set_size(
-            font_system,
-            Some(text_display_info.on_screen_height),
-            Some(text_display_info.on_screen_height),
-        );
-        text_buffer.set_text(
-            font_system,
-            text,
-            text_attributes,
-            if advanced_rendering {
-                glyphon::Shaping::Advanced
-            } else {
-                glyphon::Shaping::Basic
-            },
-        );
-
-        self.font_state.text_buffers.insert(
-            component_id,
-            TextRenderInfo {
-                buffer: text_buffer,
-                top_left_pos: text_display_info.top_left_pos,
-                bounds: glyphon::TextBounds {
-                    left: text_display_info.top_left_pos[0] as i32,
-                    top: text_display_info.top_left_pos[1] as i32,
-                    right: (text_display_info.top_left_pos[0] + text_display_info.on_screen_width)
-                        as i32,
-                    bottom: (text_display_info.top_left_pos[1] + text_display_info.on_screen_height)
-                        as i32,
-                },
-                scale: text_display_info.scale,
-                attributes: text_attributes
-                    .color_opt
-                    .unwrap_or(glyphon::Color::rgb(255, 255, 255)),
-            },
-        ); */
     }
 
     pub fn update_text_viewport(&mut self, queue: &Queue, new_size: (u32, u32)) {
@@ -548,9 +530,16 @@ impl Scene {
             .collect()
     }
 
-    pub fn execute_action_queue(&mut self, action_queue: ActionQueue) {
+    pub async fn execute_action_queue(&mut self, action_queue: ActionQueue) {
         for action in action_queue {
-            action.execute(self);
+            action.execute_async(self).await;
+        }
+        if !self.workloads.is_empty() {
+            std::thread::scope(|scope| {
+                scope.spawn(|| {
+                    self.run_workloads();
+                });
+            });
         }
     }
 

@@ -1,10 +1,11 @@
-use std::fmt::Debug;
+use std::{collections::HashMap, fmt::Debug, sync::Arc};
+use tokio::sync::Mutex;
 use wgpu::{Device, Queue, RenderPass};
 use winit_input_helper::WinitInputHelper;
 
 use crate::EngineDetails;
 
-use super::{actions::ActionQueue, entity::EntityId};
+use super::{actions::ActionQueue, entity::EntityId, scene::WorkloadOutput};
 
 pub type ComponentId = u32;
 
@@ -18,6 +19,7 @@ pub trait ComponentSystem: ComponentDetails + Debug {
         Vec::new()
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn update(
         &mut self,
         device: &Device,
@@ -26,6 +28,7 @@ pub trait ComponentSystem: ComponentDetails + Debug {
         other_components: &[&mut Component],
         active_camera_id: Option<ComponentId>,
         engine_details: &EngineDetails,
+        workload_outputs: Arc<Mutex<HashMap<ComponentId, Vec<WorkloadOutput>>>>,
     ) -> ActionQueue {
         Vec::new()
     }

@@ -67,7 +67,8 @@ impl ComponentSystem for TextComponent {
             text_component_properties: Some(TextComponentProperties {
                 text: self.text.clone(),
                 text_attributes: glyphon::Attrs::new()
-                    .color(glyphon::Color::rgb(255, 0, 0)).family(glyphon::Family::Name("AntiquarianScribeW01-Reg"))
+                    .color(glyphon::Color::rgb(255, 0, 0))
+                    .family(glyphon::Family::Name("AntiquarianScribeW01-Reg"))
                     .into(),
                 text_metrics: glyphon::Metrics {
                     font_size: 20.0,
@@ -91,6 +92,14 @@ impl ComponentSystem for TextComponent {
         _other_components: &[&mut v4::ecs::component::Component],
         _active_camera_id: Option<ComponentId>,
         _engine_details: &v4::EngineDetails,
+        _workload_outputs: std::sync::Arc<
+            tokio::sync::Mutex<
+                std::collections::HashMap<
+                    v4::ecs::component::ComponentId,
+                    Vec<v4::ecs::scene::WorkloadOutput>,
+                >,
+            >,
+        >,
     ) -> v4::ecs::actions::ActionQueue {
         let text = input_manager.text();
 
@@ -157,6 +166,14 @@ impl ComponentSystem for ToggleComponent {
         _other_components: &[&mut v4::ecs::component::Component],
         _active_camera_id: Option<ComponentId>,
         _engine_details: &v4::EngineDetails,
+        _workload_outputs: std::sync::Arc<
+            tokio::sync::Mutex<
+                std::collections::HashMap<
+                    v4::ecs::component::ComponentId,
+                    Vec<v4::ecs::scene::WorkloadOutput>,
+                >,
+            >,
+        >,
     ) -> v4::ecs::actions::ActionQueue {
         let text = input_manager.text();
 
