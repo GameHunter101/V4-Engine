@@ -2221,7 +2221,7 @@ checksum = "ebc1c04c71510c7f702b52b7c350734c9ff1295c464a03335b00bb84fc54f853"
 
 [[package]]
 name = "v4"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "async-trait",
  "bytemuck",
@@ -2234,7 +2234,7 @@ dependencies = [
 
 [[package]]
 name = "v4-core"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "async-scoped",
  "async-trait",
@@ -2257,7 +2257,7 @@ dependencies = [
 
 [[package]]
 name = "v4-examples"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "async-scoped",
  "async-trait",

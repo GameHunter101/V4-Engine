@@ -4,7 +4,7 @@ use std::{
     fmt::Debug,
     future::Future,
     pin::Pin,
-    sync::Arc,
+    sync::{mpsc, Arc},
 };
 
 use glyphon::{FontSystem, SwashCache, TextAtlas, TextRenderer, Viewport};
@@ -23,6 +23,7 @@ use super::{
 };
 
 pub struct Scene {
+    scene_index: usize,
     components: Vec<Component>,
     entities: HashMap<EntityId, Entity>,
     ui_components: Vec<ComponentId>,
@@ -32,8 +33,9 @@ pub struct Scene {
     active_camera_id: Option<ComponentId>,
     total_entities_created: u32,
     font_state: FontState,
-    workloads: HashMap<ComponentId, Workload>,
-    workload_outputs: Arc<Mutex<HashMap<ComponentId, Vec<WorkloadOutput>>>>,
+    // workloads: Arc<Mutex<HashMap<ComponentId, Workload>>>,
+    workload_sender: Option<mpsc::Sender<WorkloadPacket>>,
+    workload_outputs: WorkloadOutputCollection,
 }
 
 pub struct FontState {
@@ -141,10 +143,17 @@ impl Debug for Scene {
 }
 
 pub type WorkloadOutput = Box<dyn Any + Send>;
+pub type WorkloadOutputCollection = Arc<Mutex<HashMap<ComponentId, Vec<WorkloadOutput>>>>;
 pub type Workload = Pin<Box<dyn Future<Output = WorkloadOutput> + Send>>;
 
+pub struct WorkloadPacket {
+    pub scene_index: usize,
+    pub component_id: ComponentId,
+    pub workload: Workload,
+}
+
 impl Scene {
-    pub fn new(device: &Device, queue: &Queue, format: TextureFormat) -> Self {
+    pub fn new(scene_index: usize, device: &Device, queue: &Queue, format: TextureFormat) -> Self {
         let font_system = FontSystem::new();
         let swash_cache = SwashCache::new();
         let cache = glyphon::Cache::new(device);
@@ -163,6 +172,7 @@ impl Scene {
         };
 
         Scene {
+            scene_index,
             components: Vec::new(),
             entities: HashMap::new(),
             ui_components: Vec::new(),
@@ -172,12 +182,20 @@ impl Scene {
             active_camera_id: None,
             total_entities_created: 0,
             font_state,
-            workloads: HashMap::new(),
+            workload_sender: None,
+            // workloads: Arc::new(Mutex::new(HashMap::new())),
             workload_outputs: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
-    pub async fn initialize(&mut self, device: &Device) {
+    pub async fn initialize(
+        &mut self,
+        device: &Device,
+        workload_sender: mpsc::Sender<WorkloadPacket>,
+        workload_outputs: WorkloadOutputCollection,
+    ) {
+        self.workload_sender = Some(workload_sender);
+        self.workload_outputs = workload_outputs;
         let action_queue: ActionQueue = self
             .components
             .iter_mut()
@@ -242,25 +260,39 @@ impl Scene {
         self.execute_action_queue(action_queue).await;
     }
 
-    pub fn attach_workload(&mut self, component_id: ComponentId, workload: Workload) {
-        self.workloads.insert(component_id, workload);
+    pub async fn attach_workload(&mut self, component_id: ComponentId, workload: Workload) {
+        // self.workloads.lock().await.insert(component_id, workload);
+        if let Some(sender) = &self.workload_sender {
+            sender
+                .send(WorkloadPacket {
+                    scene_index: self.scene_index,
+                    component_id,
+                    workload,
+                }).unwrap()
+                // .expect("Failed to send workload");
+        }
     }
 
     #[tokio::main]
-    pub async fn run_workloads(&mut self) {
-        let keys: Vec<ComponentId> = self.workloads.keys().cloned().collect();
-        let workloads = self.workload_outputs.clone();
+    pub async fn run_workloads(
+        workloads: Arc<Mutex<HashMap<ComponentId, Workload>>>,
+        workload_outputs: Arc<Mutex<HashMap<ComponentId, Vec<WorkloadOutput>>>>,
+    ) {
+        let mut workloads = workloads.lock().await;
+        let keys: Vec<ComponentId> = workloads.keys().cloned().collect();
+        let workload_outputs = workload_outputs.clone();
 
         async_scoped::TokioScope::scope_and_block(|scope| {
             for component_id in keys {
-                let workload = self.workloads.remove(&component_id).unwrap();
-                let workloads = workloads.clone();
+                let workload = workloads.remove(&component_id).unwrap();
+                let workload_outputs = workload_outputs.clone();
+                println!("started");
                 let proc = async move {
-                    let mut workloads = workloads.lock().await;
-                    if let Some(outputs) = workloads.get_mut(&component_id) {
+                    let mut workload_outputs = workload_outputs.lock().await;
+                    if let Some(outputs) = workload_outputs.get_mut(&component_id) {
                         outputs.push(workload.await);
                     } else {
-                        workloads.insert(component_id, vec![workload.await]);
+                        workload_outputs.insert(component_id, vec![workload.await]);
                     }
                 };
                 scope.spawn(proc);
@@ -534,13 +566,14 @@ impl Scene {
         for action in action_queue {
             action.execute_async(self).await;
         }
-        if !self.workloads.is_empty() {
-            std::thread::scope(|scope| {
-                scope.spawn(|| {
-                    self.run_workloads();
-                });
+        /* let workload_count = self.workloads.lock().await.len();
+        if workload_count != 0 {
+            let workloads = self.workloads.clone();
+            let outputs = self.workload_outputs.clone();
+            std::thread::spawn(move || {
+                Self::run_workloads(workloads, outputs);
             });
-        }
+        } */
     }
 
     pub fn register_ui_component(&mut self, component_id: ComponentId) {

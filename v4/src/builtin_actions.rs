@@ -19,9 +19,10 @@ impl Debug for WorkloadAction {
     }
 }
 
+#[async_trait::async_trait]
 impl Action for WorkloadAction {
-    fn execute(self: Box<Self>, scene: &mut Scene) {
-        scene.attach_workload(self.0, self.1);
+    async fn execute_async(self: Box<Self>, scene: &mut Scene) {
+        scene.attach_workload(self.0, self.1).await;
     }
 }
 

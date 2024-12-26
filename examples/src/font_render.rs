@@ -20,6 +20,7 @@ pub async fn main() {
     let rendering_manager = engine.rendering_manager();
 
     let mut scene = Scene::new(
+        engine.scene_count(),
         rendering_manager.device(),
         rendering_manager.queue(),
         rendering_manager.format(),

@@ -18,14 +18,20 @@ pub async fn main() {
     let queue = rendering_manager.queue();
     let format = rendering_manager.format();
 
-    let mut scene = Scene::new(device, queue, format);
+    let mut scene = Scene::new(engine.scene_count(), device, queue, format);
 
     let workload_component = WorkloadTesterComponent::new(2);
     let workload_component_2 = WorkloadTesterComponent::new(3);
 
+    let temp = TempComponent::default();
+
     scene.create_entity(
         None,
-        vec![Box::new(workload_component), Box::new(workload_component_2)],
+        vec![
+            Box::new(workload_component),
+            Box::new(workload_component_2),
+            Box::new(temp),
+        ],
         None,
         true,
     );
@@ -89,7 +95,7 @@ impl ComponentSystem for WorkloadTesterComponent {
         >,
     ) -> v4::ecs::actions::ActionQueue {
         if self.initialized_time.elapsed().as_secs_f32() % 1.0 <= 0.01 {
-            println!("Creating workload");
+            // println!("Creating workload");
             return vec![Box::new(WorkloadAction(
                 self.id(),
                 Box::pin(Self::create_workload(self.duration)),
@@ -107,6 +113,48 @@ impl ComponentSystem for WorkloadTesterComponent {
                 return vec![Box::new(WorkloadOutputFreeAction(self.id(), 0))];
             }
         }
+        Vec::new()
+    }
+}
+
+#[derive(Debug)]
+#[component]
+struct TempComponent {}
+
+impl Default for TempComponent {
+    fn default() -> Self {
+        Self {
+            id: std::sync::OnceLock::new(),
+            parent_entity_id: v4::ecs::entity::EntityId::MAX,
+            is_initialized: false,
+            is_enabled: true,
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl ComponentSystem for TempComponent {
+    async fn update(
+        &mut self,
+        _device: &wgpu::Device,
+        _queue: &wgpu::Queue,
+        _input_manager: &winit_input_helper::WinitInputHelper,
+        _other_components: &[&mut v4::ecs::component::Component],
+        _active_camera_id: Option<v4::ecs::component::ComponentId>,
+        engine_details: &v4::EngineDetails,
+        _workload_outputs: std::sync::Arc<
+            tokio::sync::Mutex<
+                std::collections::HashMap<
+                    v4::ecs::component::ComponentId,
+                    Vec<v4::ecs::scene::WorkloadOutput>,
+                >,
+            >,
+        >,
+    ) -> v4::ecs::actions::ActionQueue {
+        if engine_details.initialization_time.elapsed().as_millis() % 100 == 0 {
+            println!("Check");
+        }
+
         Vec::new()
     }
 }

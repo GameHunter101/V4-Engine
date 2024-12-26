@@ -35,7 +35,7 @@ pub async fn main() {
     let queue = rendering_manager.queue();
     let render_format = rendering_manager.format();
 
-    let mut scene = Scene::new(device, queue, render_format);
+    let mut scene = Scene::new(engine.scene_count(), device, queue, render_format);
     let material = scene.create_material(
         device,
         render_format,
@@ -65,11 +65,17 @@ pub async fn main() {
         vec![0],
     );
 
-    let cube_mesh_component = MeshComponent::<Vertex>::from_obj("assets/models/basic_cube.obj", true)
-        .await
-        .unwrap();
+    let cube_mesh_component =
+        MeshComponent::<Vertex>::from_obj("assets/models/basic_cube.obj", true)
+            .await
+            .unwrap();
 
-    scene.create_entity(None, vec![Box::new(cube_mesh_component)], Some(material), true);
+    scene.create_entity(
+        None,
+        vec![Box::new(cube_mesh_component)],
+        Some(material),
+        true,
+    );
 
     engine.attach_scene(scene);
 

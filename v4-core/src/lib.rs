@@ -1,7 +1,13 @@
 use async_scoped::TokioScope;
-use ecs::scene::Scene;
+use ecs::scene::{Scene, WorkloadOutputCollection, WorkloadPacket};
 use engine_management::rendering_management::RenderingManager;
-use std::{collections::HashSet, fmt::Debug, time::Instant};
+use std::{
+    collections::{HashMap, HashSet},
+    fmt::Debug,
+    sync::{mpsc, Arc},
+    time::Instant,
+};
+use tokio::sync::Mutex;
 
 use winit::{
     event::{Event::WindowEvent, MouseButton},
@@ -41,12 +47,12 @@ pub struct V4 {
 
 #[derive(Debug)]
 pub struct EngineDetails {
-    initialization_time: Instant,
-    frames_elapsed: u128,
-    last_frame_instant: Instant,
-    window_resolution: (u32, u32),
-    cursor_position: (u32, u32),
-    mouse_state: HashSet<MouseButton>,
+    pub initialization_time: Instant,
+    pub frames_elapsed: u128,
+    pub last_frame_instant: Instant,
+    pub window_resolution: (u32, u32),
+    pub cursor_position: (u32, u32),
+    pub mouse_state: HashSet<MouseButton>,
 }
 
 impl Default for EngineDetails {
@@ -70,6 +76,9 @@ impl V4 {
     pub async fn main_loop(mut self) {
         let mut last_active_scene_index = self.active_scene;
         self.details.initialization_time = Instant::now();
+
+        let (workload_sender, workload_outputs, _handle) = Self::launch_workload_executor();
+
         self.event_loop
             .run(move |event, elwt| {
                 self.input_manager.update(&event);
@@ -106,7 +115,11 @@ impl V4 {
                         if !self.initialized_scene {
                             let device = self.rendering_manager.device();
                             TokioScope::scope_and_block(|scope| {
-                                let proc = self.scenes[self.active_scene].initialize(device);
+                                let proc = self.scenes[self.active_scene].initialize(
+                                    device,
+                                    workload_sender.clone(),
+                                    workload_outputs.clone(),
+                                );
 
                                 scope.spawn(proc);
                             });
@@ -123,12 +136,11 @@ impl V4 {
                         let queue = self.rendering_manager.queue();
 
                         TokioScope::scope_and_block(|scope| {
-                            let proc = async {
+                            scope.spawn(async {
                                 scene
                                     .update(device, queue, &self.input_manager, &self.details)
                                     .await;
-                            };
-                            scope.spawn(proc);
+                            });
                         });
                         self.details.frames_elapsed += 1;
                         self.details.last_frame_instant = Instant::now();
@@ -146,8 +158,52 @@ impl V4 {
         index
     }
 
+    pub fn scene_count(&self) -> usize {
+        self.scenes.len()
+    }
+
     pub fn rendering_manager(&self) -> &RenderingManager {
         &self.rendering_manager
+    }
+
+    pub fn launch_workload_executor() -> (
+        mpsc::Sender<WorkloadPacket>,
+        WorkloadOutputCollection,
+        std::thread::JoinHandle<()>,
+    ) {
+        let (workload_sender, workload_receiver): (
+            mpsc::Sender<WorkloadPacket>,
+            mpsc::Receiver<WorkloadPacket>,
+        ) = mpsc::channel();
+
+        let outputs: WorkloadOutputCollection = Arc::new(Mutex::new(HashMap::new()));
+
+        let workload_outputs_arc = outputs.clone();
+        let handle = std::thread::spawn(move || {
+            let runtime = tokio::runtime::Runtime::new()
+                .expect("Failed to create tokio runtime for workloads.");
+            runtime.block_on(async move {
+                TokioScope::scope_and_block(|async_scope| loop {
+                    if let Ok(workload_packet) = workload_receiver.try_recv() {
+                        let workload_outputs_arc = workload_outputs_arc.clone();
+                        async_scope.spawn(async move {
+                            let workload_result = workload_packet.workload.await;
+                            let mut workload_outputs = workload_outputs_arc.lock().await;
+                            if let Some(component_outputs) =
+                                workload_outputs.get_mut(&workload_packet.component_id)
+                            {
+                                component_outputs.push(workload_result);
+                            } else {
+                                workload_outputs
+                                    .insert(workload_packet.component_id, vec![workload_result]);
+                            }
+                        });
+                    }
+                });
+            });
+        });
+
+        (workload_sender, outputs, handle)
     }
 }
 
