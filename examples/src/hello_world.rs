@@ -4,7 +4,7 @@ use tokio::sync::Mutex;
 use v4::{
     builtin_components::mesh_component::{MeshComponent, VertexDescriptor},
     ecs::{
-        pipeline::{GeometryDetails, PipelineDetails},
+        pipeline::{GeometryDetails, PipelineId},
         scene::Scene,
     },
     V4,
@@ -38,14 +38,13 @@ pub async fn main() {
     let mut scene = Scene::new(engine.scene_count(), device, queue, render_format);
     let material = scene.create_material(
         device,
-        render_format,
-        "shaders/hello_world/vertex.wgsl",
-        "shaders/hello_world/fragment.wgsl",
-        Vec::new(),
-        PipelineDetails {
-            vertex_layouts: &[Vertex::vertex_layout()],
+        PipelineId {
+            vertex_shader_path: "shaders/hello_world/vertex.wgsl",
+            fragment_shader_path: "shaders/hello_world/fragment.wgsl",
+            vertex_layouts: vec![Vertex::vertex_layout()],
             geometry_details: GeometryDetails::default(),
         },
+        Vec::new(),
     );
 
     let mesh_component = MeshComponent::new(

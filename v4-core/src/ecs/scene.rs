@@ -9,7 +9,7 @@ use std::{
 
 use glyphon::{FontSystem, SwashCache, TextAtlas, TextRenderer, Viewport};
 use tokio::sync::Mutex;
-use wgpu::{Device, Queue, RenderPipeline, TextureFormat};
+use wgpu::{Device, Queue, TextureFormat};
 use winit_input_helper::WinitInputHelper;
 
 use crate::EngineDetails;
@@ -19,7 +19,7 @@ use super::{
     component::{Component, ComponentId},
     entity::{Entity, EntityId},
     material::{Material, MaterialAttachment, MaterialId},
-    pipeline::{create_render_pipeline, PipelineDetails, PipelineId},
+    pipeline::PipelineId,
 };
 
 pub struct Scene {
@@ -27,15 +27,14 @@ pub struct Scene {
     components: Vec<Component>,
     entities: HashMap<EntityId, Entity>,
     ui_components: Vec<ComponentId>,
-    pipelines: HashMap<PipelineId, RenderPipeline>,
     materials: Vec<Material>,
     pipeline_to_corresponding_materials: HashMap<PipelineId, Vec<MaterialId>>,
     active_camera_id: Option<ComponentId>,
     total_entities_created: u32,
     font_state: FontState,
-    // workloads: Arc<Mutex<HashMap<ComponentId, Workload>>>,
     workload_sender: Option<mpsc::Sender<WorkloadPacket>>,
     workload_outputs: WorkloadOutputCollection,
+    pub new_pipelines_needed: bool,
 }
 
 pub struct FontState {
@@ -176,15 +175,14 @@ impl Scene {
             components: Vec::new(),
             entities: HashMap::new(),
             ui_components: Vec::new(),
-            pipelines: HashMap::new(),
             materials: Vec::new(),
             pipeline_to_corresponding_materials: HashMap::new(),
             active_camera_id: None,
             total_entities_created: 0,
             font_state,
             workload_sender: None,
-            // workloads: Arc::new(Mutex::new(HashMap::new())),
             workload_outputs: Arc::new(Mutex::new(HashMap::new())),
+            new_pipelines_needed: false,
         }
     }
 
@@ -268,8 +266,9 @@ impl Scene {
                     scene_index: self.scene_index,
                     component_id,
                     workload,
-                }).unwrap()
-                // .expect("Failed to send workload");
+                })
+                .unwrap()
+            // .expect("Failed to send workload");
         }
     }
 
@@ -316,55 +315,41 @@ impl Scene {
     pub fn create_material(
         &mut self,
         device: &Device,
-        render_format: TextureFormat,
-        vertex_shader_path: &'static str,
-        fragment_shader_path: &'static str,
+        pipeline_id: PipelineId,
         attachments: Vec<MaterialAttachment>,
-        pipeline_details: PipelineDetails,
     ) -> MaterialId {
         let new_material = Material::new(
             device,
             self.materials.len(),
-            vertex_shader_path,
-            fragment_shader_path,
+            pipeline_id.vertex_shader_path,
+            pipeline_id.fragment_shader_path,
             attachments,
         );
-        if let std::collections::hash_map::Entry::Vacant(e) = self
-            .pipelines
-            .entry((vertex_shader_path, fragment_shader_path))
+
+        if let Some(entry) = self
+            .pipeline_to_corresponding_materials
+            .get_mut(&pipeline_id)
         {
-            e.insert(create_render_pipeline(
-                device,
-                vertex_shader_path,
-                fragment_shader_path,
-                new_material.bind_group_layouts(),
-                render_format,
-                pipeline_details,
-            ));
+            entry.push(new_material.id());
+        } else {
             self.pipeline_to_corresponding_materials
-                .insert((vertex_shader_path, fragment_shader_path), Vec::new());
+                .insert(pipeline_id, vec![new_material.id()]);
+            self.new_pipelines_needed = true;
         }
 
         let id = new_material.id();
 
         self.materials.push(new_material);
 
-        if let Some(indices) = self
-            .pipeline_to_corresponding_materials
-            .get_mut(&(vertex_shader_path, fragment_shader_path))
-        {
-            indices.push(id);
-        }
-
         id
     }
 
-    pub fn pipelines(&self) -> &HashMap<PipelineId, RenderPipeline> {
-        &self.pipelines
+    pub fn get_pipeline_ids(&self) -> Vec<&PipelineId> {
+        self.pipeline_to_corresponding_materials.keys().collect()
     }
 
-    pub fn get_pipeline_materials(&self, pipeline_id: PipelineId) -> Vec<&Material> {
-        let material_ids = self.pipeline_to_corresponding_materials.get(&pipeline_id);
+    pub fn get_pipeline_materials(&self, pipeline_id: &PipelineId) -> Vec<&Material> {
+        let material_ids = self.pipeline_to_corresponding_materials.get(pipeline_id);
         match material_ids {
             Some(material_ids) => self
                 .materials

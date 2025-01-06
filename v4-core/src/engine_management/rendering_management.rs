@@ -1,9 +1,9 @@
-use std::fmt::Debug;
+use std::{collections::HashMap, fmt::Debug};
 
 use smaa::SmaaTarget;
-use wgpu::rwh::{HasDisplayHandle, HasWindowHandle};
+use wgpu::{rwh::{HasDisplayHandle, HasWindowHandle}, RenderPipeline};
 
-use crate::{ecs::scene::Scene, engine_support::texture_support};
+use crate::{ecs::{pipeline::PipelineId, scene::Scene}, engine_support::texture_support};
 
 pub struct RenderingManager {
     surface: wgpu::Surface<'static>,
@@ -111,7 +111,7 @@ impl<'a> RenderingManager {
         }
     }
 
-    pub fn render(&mut self, scene: &mut Scene) {
+    pub fn render(&mut self, scene: &mut Scene, pipelines: &HashMap<PipelineId, RenderPipeline>) {
         let output = self.surface.get_current_texture().unwrap();
 
         let view = output
@@ -153,9 +153,9 @@ impl<'a> RenderingManager {
 
             let components_sorted_by_material = scene.get_components_per_material();
 
-            for (pipeline_id, pipeline) in scene.pipelines() {
+            for (pipeline_id, pipeline) in pipelines {
                 render_pass.set_pipeline(pipeline);
-                let materials_for_pipeline = scene.get_pipeline_materials(*pipeline_id);
+                let materials_for_pipeline = scene.get_pipeline_materials(pipeline_id);
                 for material in materials_for_pipeline {
                     let material_bind_groups = material.bind_groups();
                     let mut bind_group_count_accumulated = 0;
@@ -227,7 +227,6 @@ impl<'a> RenderingManager {
                 .render(&font_state.atlas, &font_state.viewport, &mut ui_render_pass)
                 .expect("Failed to render text.");
         }
-
 
         self.queue.submit(std::iter::once(encoder.finish()));
         output.present();

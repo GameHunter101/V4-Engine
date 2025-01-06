@@ -1,6 +1,8 @@
+use wgpu::Device;
 use async_scoped::TokioScope;
-use ecs::scene::{Scene, WorkloadOutputCollection, WorkloadPacket};
+use ecs::{pipeline::{create_render_pipeline, PipelineId}, scene::{Scene, WorkloadOutputCollection, WorkloadPacket}};
 use engine_management::rendering_management::RenderingManager;
+use wgpu::{RenderPipeline, TextureFormat};
 use std::{
     collections::{HashMap, HashSet},
     fmt::Debug,
@@ -43,6 +45,7 @@ pub struct V4 {
     initialized_scene: bool,
     window: Window,
     details: EngineDetails,
+    pipelines: HashMap<PipelineId, RenderPipeline>,
 }
 
 #[derive(Debug)]
@@ -131,7 +134,6 @@ impl V4 {
                             return;
                         }
                         let scene = &mut self.scenes[self.active_scene];
-                        self.rendering_manager.render(scene);
                         let device = self.rendering_manager.device();
                         let queue = self.rendering_manager.queue();
 
@@ -142,6 +144,11 @@ impl V4 {
                                     .await;
                             });
                         });
+
+                        Self::create_new_pipelines(device, self.rendering_manager.format(), scene, &mut self.pipelines);
+
+                        self.rendering_manager.render(scene, &self.pipelines);
+
                         self.details.frames_elapsed += 1;
                         self.details.last_frame_instant = Instant::now();
                     }
@@ -204,6 +211,21 @@ impl V4 {
         });
 
         (workload_sender, outputs, handle)
+    }
+
+    fn create_new_pipelines(device: &Device, render_format: TextureFormat, active_scene: &mut Scene, pipelines: &mut HashMap<PipelineId, RenderPipeline>) {
+        if active_scene.new_pipelines_needed {
+            /* let device = rendering_manager.device();
+            let render_format = rendering_manager.format(); */
+            let active_scene_pipelines = active_scene.get_pipeline_ids();
+            for pipeline_id in active_scene_pipelines {
+                if !pipelines.contains_key(pipeline_id) {
+                    let bind_group_layouts = active_scene.get_pipeline_materials(pipeline_id)[0].bind_group_layouts();
+                    pipelines.insert(pipeline_id.clone(), create_render_pipeline(device, pipeline_id, bind_group_layouts, render_format));
+                }
+            }
+            active_scene.new_pipelines_needed = false;
+        }
     }
 }
 
@@ -288,6 +310,7 @@ impl V4Builder {
             initialized_scene: false,
             window,
             details: Default::default(),
+            pipelines: HashMap::new(),
         }
     }
 }

@@ -2,6 +2,7 @@ pub use v4_core::V4;
 pub use v4_core::EngineDetails;
 pub use v4_core::V4Builder;
 pub use v4_macros::component;
+pub use v4_macros::scene;
 
 #[allow(unused_imports)]
 pub(crate) mod v4 {
@@ -27,3 +28,11 @@ pub mod engine_support {
 pub mod builtin_components {
     pub mod mesh_component;
 }
+
+/* scene! {
+    Test {
+        components: [
+            Thing(param: 5, ident: "stuff")
+    ]
+    }
+} */
