@@ -4,15 +4,13 @@ use std::{
     fmt::Debug,
     future::Future,
     pin::Pin,
-    sync::{mpsc, Arc},
 };
 
-use glyphon::{FontSystem, SwashCache, TextAtlas, TextRenderer, Viewport};
-use tokio::sync::Mutex;
+use crossbeam_channel::{Receiver, Sender};
 use wgpu::{Device, Queue, TextureFormat};
 use winit_input_helper::WinitInputHelper;
 
-use crate::EngineDetails;
+use crate::{engine_management::engine_action::EngineAction, EngineDetails};
 
 use super::{
     actions::ActionQueue,
@@ -22,6 +20,8 @@ use super::{
     pipeline::PipelineId,
 };
 
+static mut SCENE_COUNT: usize = 0;
+
 pub struct Scene {
     scene_index: usize,
     components: Vec<Component>,
@@ -29,22 +29,14 @@ pub struct Scene {
     ui_components: Vec<ComponentId>,
     materials: Vec<Material>,
     pipeline_to_corresponding_materials: HashMap<PipelineId, Vec<MaterialId>>,
-    active_camera_id: Option<ComponentId>,
     total_entities_created: u32,
-    font_state: FontState,
-    workload_sender: Option<mpsc::Sender<WorkloadPacket>>,
+    workload_sender: Option<Sender<WorkloadPacket>>,
+    workload_output_receiver: Option<Receiver<(ComponentId, WorkloadOutput)>>,
     workload_outputs: WorkloadOutputCollection,
+    engine_action_sender: Option<Sender<Box<dyn EngineAction>>>,
     pub new_pipelines_needed: bool,
 }
 
-pub struct FontState {
-    pub font_system: FontSystem,
-    pub swash_cache: SwashCache,
-    pub viewport: glyphon::Viewport,
-    pub atlas: TextAtlas,
-    pub text_renderer: TextRenderer,
-    pub text_buffers: HashMap<ComponentId, TextRenderInfo>,
-}
 
 #[derive(Debug)]
 pub struct TextDisplayInfo {
@@ -54,84 +46,9 @@ pub struct TextDisplayInfo {
     pub scale: f32,
 }
 
-#[derive(Debug)]
-pub struct TextRenderInfo {
-    pub buffer: glyphon::Buffer,
-    pub top_left_pos: [f32; 2],
-    pub scale: f32,
-    pub bounds: glyphon::TextBounds,
-    pub attributes: TextAttributes,
-}
 
-#[derive(Debug, Clone)]
-pub struct TextAttributes {
-    pub color: glyphon::Color,
-    pub family: FontFamily,
-    pub stretch: glyphon::Stretch,
-    pub style: glyphon::Style,
-    pub weight: glyphon::Weight,
-}
 
-impl<'a> From<glyphon::Attrs<'a>> for TextAttributes {
-    fn from(val: glyphon::Attrs<'a>) -> Self {
-        TextAttributes {
-            color: val.color_opt.unwrap_or(glyphon::Color::rgb(255, 255, 255)),
-            family: val.family.into(),
-            stretch: val.stretch,
-            style: val.style,
-            weight: val.weight,
-        }
-    }
-}
 
-#[allow(clippy::wrong_self_convention)]
-impl TextAttributes {
-    fn into_glyphon_attrs(&self) -> glyphon::Attrs {
-        glyphon::Attrs::new()
-            .color(self.color)
-            .family(self.family.into_glyphon_family())
-            .stretch(self.stretch)
-            .style(self.style)
-            .weight(self.weight)
-    }
-}
-
-#[derive(Debug, Clone)]
-pub enum FontFamily {
-    Name(String),
-    Serif,
-    SansSerif,
-    Cursive,
-    Fantasy,
-    Monospace,
-}
-
-impl<'a> From<glyphon::Family<'a>> for FontFamily {
-    fn from(val: glyphon::Family<'a>) -> Self {
-        match val {
-            glyphon::Family::Name(name) => FontFamily::Name(name.to_owned()),
-            glyphon::Family::Serif => FontFamily::Serif,
-            glyphon::Family::SansSerif => FontFamily::SansSerif,
-            glyphon::Family::Cursive => FontFamily::Cursive,
-            glyphon::Family::Fantasy => FontFamily::Fantasy,
-            glyphon::Family::Monospace => FontFamily::Monospace,
-        }
-    }
-}
-
-#[allow(clippy::wrong_self_convention)]
-impl FontFamily {
-    fn into_glyphon_family(&self) -> glyphon::Family {
-        match self {
-            FontFamily::Name(name) => glyphon::Family::Name(name),
-            FontFamily::Serif => glyphon::Family::Serif,
-            FontFamily::SansSerif => glyphon::Family::SansSerif,
-            FontFamily::Cursive => glyphon::Family::Cursive,
-            FontFamily::Fantasy => glyphon::Family::Fantasy,
-            FontFamily::Monospace => glyphon::Family::Monospace,
-        }
-    }
-}
 
 impl Debug for Scene {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -141,8 +58,8 @@ impl Debug for Scene {
     }
 }
 
-pub type WorkloadOutput = Box<dyn Any + Send>;
-pub type WorkloadOutputCollection = Arc<Mutex<HashMap<ComponentId, Vec<WorkloadOutput>>>>;
+pub type WorkloadOutput = Box<dyn Any + Send + Sync>;
+pub type WorkloadOutputCollection = HashMap<ComponentId, Vec<WorkloadOutput>>;
 pub type Workload = Pin<Box<dyn Future<Output = WorkloadOutput> + Send>>;
 
 pub struct WorkloadPacket {
@@ -152,22 +69,11 @@ pub struct WorkloadPacket {
 }
 
 impl Scene {
-    pub fn new(scene_index: usize, device: &Device, queue: &Queue, format: TextureFormat) -> Self {
-        let font_system = FontSystem::new();
-        let swash_cache = SwashCache::new();
-        let cache = glyphon::Cache::new(device);
-        let viewport = Viewport::new(device, &cache);
-        let mut atlas = TextAtlas::new(device, queue, &cache, format);
-        let text_renderer =
-            TextRenderer::new(&mut atlas, device, wgpu::MultisampleState::default(), None);
+    pub fn new(device: &Device, queue: &Queue, format: TextureFormat) -> Self {
 
-        let font_state = FontState {
-            font_system,
-            swash_cache,
-            viewport,
-            atlas,
-            text_renderer,
-            text_buffers: HashMap::new(),
+        let scene_index = unsafe {
+            SCENE_COUNT += 1;
+            SCENE_COUNT
         };
 
         Scene {
@@ -177,11 +83,11 @@ impl Scene {
             ui_components: Vec::new(),
             materials: Vec::new(),
             pipeline_to_corresponding_materials: HashMap::new(),
-            active_camera_id: None,
             total_entities_created: 0,
-            font_state,
             workload_sender: None,
-            workload_outputs: Arc::new(Mutex::new(HashMap::new())),
+            workload_output_receiver: None,
+            engine_action_sender: None,
+            workload_outputs: HashMap::new(),
             new_pipelines_needed: false,
         }
     }
@@ -189,11 +95,14 @@ impl Scene {
     pub async fn initialize(
         &mut self,
         device: &Device,
-        workload_sender: mpsc::Sender<WorkloadPacket>,
-        workload_outputs: WorkloadOutputCollection,
+        workload_sender: Sender<WorkloadPacket>,
+        workload_output_receiver: Receiver<(ComponentId, WorkloadOutput)>,
+        engine_action_sender: Sender<Box<dyn EngineAction>>,
     ) {
         self.workload_sender = Some(workload_sender);
-        self.workload_outputs = workload_outputs;
+        self.workload_output_receiver = Some(workload_output_receiver);
+        self.engine_action_sender = Some(engine_action_sender);
+
         let action_queue: ActionQueue = self
             .components
             .iter_mut()
@@ -209,19 +118,30 @@ impl Scene {
         input_manager: &WinitInputHelper,
         engine_details: &EngineDetails,
     ) {
-        let active_camera_id = self.active_camera_id;
+        while let Ok((component_id, workload_output)) = self
+            .workload_output_receiver
+            .as_ref()
+            .expect("Failed to initialize workload output receiver.")
+            .try_recv()
+        {
+            if let Some(outputs) = self.workload_outputs.get_mut(&component_id) {
+                outputs.push(workload_output);
+            } else {
+                self.workload_outputs
+                    .insert(component_id, vec![workload_output]);
+            }
+        }
         let all_components = &mut self.components;
-        let workload_outputs = self.workload_outputs.clone();
         let actions: Vec<_> = (0..all_components.len())
             .map(|i| {
-                let workload_outputs = workload_outputs.clone();
                 if !all_components[i].is_enabled() {
                     return Vec::new();
                 }
                 let (_, outputs) = async_scoped::TokioScope::scope_and_block(|scope| {
                     let (components_before, components_after_and_this) =
                         all_components.split_at_mut(i);
-                    let proc = async move {
+                    let workload_outputs = &self.workload_outputs;
+                    scope.spawn(async move {
                         if let Some((component, components_after)) =
                             components_after_and_this.split_first_mut()
                         {
@@ -235,7 +155,6 @@ impl Scene {
                                     queue,
                                     input_manager,
                                     &chain,
-                                    active_camera_id,
                                     engine_details,
                                     workload_outputs,
                                 )
@@ -243,8 +162,7 @@ impl Scene {
                         } else {
                             Vec::new()
                         }
-                    };
-                    scope.spawn(proc)
+                    })
                 });
                 outputs
             })
@@ -259,7 +177,6 @@ impl Scene {
     }
 
     pub async fn attach_workload(&mut self, component_id: ComponentId, workload: Workload) {
-        // self.workloads.lock().await.insert(component_id, workload);
         if let Some(sender) = &self.workload_sender {
             sender
                 .send(WorkloadPacket {
@@ -267,36 +184,8 @@ impl Scene {
                     component_id,
                     workload,
                 })
-                .unwrap()
-            // .expect("Failed to send workload");
+                .expect("Failed to send workload");
         }
-    }
-
-    #[tokio::main]
-    pub async fn run_workloads(
-        workloads: Arc<Mutex<HashMap<ComponentId, Workload>>>,
-        workload_outputs: Arc<Mutex<HashMap<ComponentId, Vec<WorkloadOutput>>>>,
-    ) {
-        let mut workloads = workloads.lock().await;
-        let keys: Vec<ComponentId> = workloads.keys().cloned().collect();
-        let workload_outputs = workload_outputs.clone();
-
-        async_scoped::TokioScope::scope_and_block(|scope| {
-            for component_id in keys {
-                let workload = workloads.remove(&component_id).unwrap();
-                let workload_outputs = workload_outputs.clone();
-                println!("started");
-                let proc = async move {
-                    let mut workload_outputs = workload_outputs.lock().await;
-                    if let Some(outputs) = workload_outputs.get_mut(&component_id) {
-                        outputs.push(workload.await);
-                    } else {
-                        workload_outputs.insert(component_id, vec![workload.await]);
-                    }
-                };
-                scope.spawn(proc);
-            }
-        });
     }
 
     pub async fn free_workload_output(
@@ -305,8 +194,6 @@ impl Scene {
         workload_output_index: usize,
     ) {
         self.workload_outputs
-            .lock()
-            .await
             .get_mut(&component_id)
             .expect("Failed to get workloads assigned to the given component ID.")
             .remove(workload_output_index);
@@ -528,10 +415,6 @@ impl Scene {
                 height: new_size.1,
             },
         );
-    }
-
-    pub fn font_state_mut(&mut self) -> &mut FontState {
-        &mut self.font_state
     }
 
     pub fn enabled_ui_components(&self) -> HashSet<ComponentId> {

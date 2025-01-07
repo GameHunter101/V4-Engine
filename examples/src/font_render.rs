@@ -20,7 +20,6 @@ pub async fn main() {
     let rendering_manager = engine.rendering_manager();
 
     let mut scene = Scene::new(
-        engine.scene_count(),
         rendering_manager.device(),
         rendering_manager.queue(),
         rendering_manager.format(),
@@ -91,15 +90,10 @@ impl ComponentSystem for TextComponent {
         _queue: &wgpu::Queue,
         input_manager: &winit_input_helper::WinitInputHelper,
         _other_components: &[&mut v4::ecs::component::Component],
-        _active_camera_id: Option<ComponentId>,
         _engine_details: &v4::EngineDetails,
-        _workload_outputs: std::sync::Arc<
-            tokio::sync::Mutex<
-                std::collections::HashMap<
-                    v4::ecs::component::ComponentId,
-                    Vec<v4::ecs::scene::WorkloadOutput>,
-                >,
-            >,
+        _workload_outputs: &std::collections::HashMap<
+            v4::ecs::component::ComponentId,
+            Vec<v4::ecs::scene::WorkloadOutput>,
         >,
     ) -> v4::ecs::actions::ActionQueue {
         let text = input_manager.text();
@@ -165,15 +159,10 @@ impl ComponentSystem for ToggleComponent {
         _queue: &wgpu::Queue,
         input_manager: &winit_input_helper::WinitInputHelper,
         _other_components: &[&mut v4::ecs::component::Component],
-        _active_camera_id: Option<ComponentId>,
         _engine_details: &v4::EngineDetails,
-        _workload_outputs: std::sync::Arc<
-            tokio::sync::Mutex<
-                std::collections::HashMap<
-                    v4::ecs::component::ComponentId,
-                    Vec<v4::ecs::scene::WorkloadOutput>,
-                >,
-            >,
+        _workload_outputs: &std::collections::HashMap<
+            v4::ecs::component::ComponentId,
+            Vec<v4::ecs::scene::WorkloadOutput>,
         >,
     ) -> v4::ecs::actions::ActionQueue {
         let text = input_manager.text();

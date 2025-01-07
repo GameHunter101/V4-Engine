@@ -1,7 +1,7 @@
 use darling::{ast::NestedMeta, FromMeta};
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{parse::Parser, parse_macro_input, ItemStruct};
+use syn::{parse::Parser, parse_macro_input, ItemStruct, Token, Visibility};
 
 #[allow(unused)]
 #[derive(Debug, FromMeta)]
@@ -19,7 +19,7 @@ pub fn component_impl(args: TokenStream, item: TokenStream) -> TokenStream {
         }
     };
 
-    if let syn::Fields::Named(ref mut fields) = component_struct.fields {
+    let public_fields = if let syn::Fields::Named(ref mut fields) = component_struct.fields {
         fields.named.push(
             syn::Field::parse_named
                 .parse2(quote! {
@@ -51,7 +51,15 @@ pub fn component_impl(args: TokenStream, item: TokenStream) -> TokenStream {
                 })
                 .unwrap(),
         );
-    }
+
+        fields
+            .named
+            .iter()
+            .filter(|field| field.vis == Visibility::Public(syn::token::Pub::default()))
+            .collect()
+    } else {
+        Vec::new()
+    };
 
     let ident = component_struct.ident.clone();
     let generics = component_struct.generics.clone();

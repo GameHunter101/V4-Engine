@@ -37,10 +37,11 @@ struct MaterialDescriptor {
 #[derive(Debug)]
 struct ComponentDescriptor {
     component_type: Ident,
-    params: Punctuated<FieldValue, Token![,]>,
+    params: Vec<SimpleField>,
     ident: Option<Lit>,
 }
 
+#[derive(Debug)]
 struct SimpleField {
     member: Member,
     colon: Option<Token![:]>,
@@ -77,15 +78,12 @@ impl Parse for ComponentDescriptor {
         let component_type = input.parse()?;
         let (_, _, args_contents) = input.parse_any_delimiter()?;
         let (params, ident) = parse_arguments_and_ident(&args_contents)?;
-        // args_contents.parse()?;
 
         let mut component = ComponentDescriptor {
             component_type,
-            params: todo!(),
-            ident: todo!(),
+            params,
+            ident,
         };
-        // if input.peek(syn::token::Paren) {
-        // }
         Ok(component)
     }
 }
@@ -118,5 +116,9 @@ pub fn scene_impl(item: TokenStream) -> TokenStream {
     /* let scene_descriptor = parse_macro_input!(item as SceneDescriptor);
     let scene = Scene::new(scene_index, device, queue, format) */
     // quote! { #scene_descriptor}.into()
-    item
+    // item
+    let temp = parse_macro_input!(item as Expr);
+    quote! {
+        #temp.thing
+    }.into()
 }

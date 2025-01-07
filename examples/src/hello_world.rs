@@ -7,9 +7,26 @@ use v4::{
         pipeline::{GeometryDetails, PipelineId},
         scene::Scene,
     },
-    V4,
+    scene, V4,
 };
 use wgpu::vertex_attr_array;
+
+#[derive(Default)]
+pub struct Temp {
+    pub hi: String,
+    thing: f32,
+}
+
+macro_rules! temp {
+    ($($field:ident: $val:expr),+) => {
+        Temp {
+            $(
+                $field: $val,
+            )*
+        ..Default::default()
+        }
+    };
+}
 
 #[tokio::main]
 pub async fn main() {
@@ -30,12 +47,14 @@ pub async fn main() {
         async_test(clone);
     });
 
+    println!("{}", scene!(temp!(hi: "thing".to_string())));
+
     let rendering_manager = engine.rendering_manager();
     let device = rendering_manager.device();
     let queue = rendering_manager.queue();
     let render_format = rendering_manager.format();
 
-    let mut scene = Scene::new(engine.scene_count(), device, queue, render_format);
+    let mut scene = Scene::new(device, queue, render_format);
     let material = scene.create_material(
         device,
         PipelineId {

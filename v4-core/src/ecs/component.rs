@@ -1,5 +1,4 @@
-use std::{collections::HashMap, fmt::Debug, sync::Arc};
-use tokio::sync::Mutex;
+use std::{collections::HashMap, fmt::Debug};
 use wgpu::{Device, Queue, RenderPass};
 use winit_input_helper::WinitInputHelper;
 
@@ -26,9 +25,8 @@ pub trait ComponentSystem: ComponentDetails + Debug {
         queue: &Queue,
         input_manager: &WinitInputHelper,
         other_components: &[&mut Component],
-        active_camera_id: Option<ComponentId>,
         engine_details: &EngineDetails,
-        workload_outputs: Arc<Mutex<HashMap<ComponentId, Vec<WorkloadOutput>>>>,
+        workload_outputs: &HashMap<ComponentId, Vec<WorkloadOutput>>,
     ) -> ActionQueue {
         Vec::new()
     }

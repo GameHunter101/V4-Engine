@@ -7,7 +7,7 @@ members = [ "examples", "v4",
 resolver = "2"
 
 [workspace.package]
-version = "0.1.9"
+version = "0.1.10"
 authors = ["Lior Carmeli"]
 
 [workspace.dependencies]
@@ -29,6 +29,7 @@ winit_input_helper = "0.16.0"
 imgui-winit-support = "=0.12.0"
 glyphon = "=0.6.0"
 tobj = { version = "4.0.2", features = ["async"] }
+crossbeam-channel = "0.5.14"
 
 [workspace.dependencies.image]
 version = "0.25.2"

@@ -3,7 +3,7 @@ use v4::{
     component,
     ecs::{
         component::{ComponentDetails, ComponentSystem},
-        scene::Scene,
+        scene::{Scene, WorkloadOutput},
     },
     V4,
 };
@@ -18,7 +18,7 @@ pub async fn main() {
     let queue = rendering_manager.queue();
     let format = rendering_manager.format();
 
-    let mut scene = Scene::new(engine.scene_count(), device, queue, format);
+    let mut scene = Scene::new(device, queue, format);
 
     let workload_component = WorkloadTesterComponent::new(2);
     let workload_component_2 = WorkloadTesterComponent::new(3);
@@ -62,7 +62,7 @@ impl WorkloadTesterComponent {
 }
 
 impl WorkloadTesterComponent {
-    async fn create_workload(duration: u64) -> Box<dyn std::any::Any + Send> {
+    async fn create_workload(duration: u64) -> WorkloadOutput {
         let init_time = std::time::Instant::now();
         tokio::time::sleep(std::time::Duration::from_secs(duration)).await;
         Box::new(init_time)
@@ -83,15 +83,10 @@ impl ComponentSystem for WorkloadTesterComponent {
         _queue: &wgpu::Queue,
         _input_manager: &winit_input_helper::WinitInputHelper,
         _other_components: &[&mut v4::ecs::component::Component],
-        _active_camera_id: Option<v4::ecs::component::ComponentId>,
         _engine_details: &v4::EngineDetails,
-        workload_outputs: std::sync::Arc<
-            tokio::sync::Mutex<
-                std::collections::HashMap<
-                    v4::ecs::component::ComponentId,
-                    Vec<v4::ecs::scene::WorkloadOutput>,
-                >,
-            >,
+        workload_outputs: &std::collections::HashMap<
+            v4::ecs::component::ComponentId,
+            Vec<v4::ecs::scene::WorkloadOutput>,
         >,
     ) -> v4::ecs::actions::ActionQueue {
         if self.initialized_time.elapsed().as_secs_f32() % 1.0 <= 0.01 {
@@ -101,7 +96,6 @@ impl ComponentSystem for WorkloadTesterComponent {
                 Box::pin(Self::create_workload(self.duration)),
             ))];
         }
-        let workload_outputs = workload_outputs.lock().await;
         if let Some(outputs) = workload_outputs.get(&self.id()) {
             let last = outputs.first();
             if let Some(last) = last {
@@ -140,15 +134,10 @@ impl ComponentSystem for TempComponent {
         _queue: &wgpu::Queue,
         _input_manager: &winit_input_helper::WinitInputHelper,
         _other_components: &[&mut v4::ecs::component::Component],
-        _active_camera_id: Option<v4::ecs::component::ComponentId>,
         engine_details: &v4::EngineDetails,
-        _workload_outputs: std::sync::Arc<
-            tokio::sync::Mutex<
-                std::collections::HashMap<
-                    v4::ecs::component::ComponentId,
-                    Vec<v4::ecs::scene::WorkloadOutput>,
-                >,
-            >,
+        _workload_outputs: &std::collections::HashMap<
+            v4::ecs::component::ComponentId,
+            Vec<v4::ecs::scene::WorkloadOutput>,
         >,
     ) -> v4::ecs::actions::ActionQueue {
         if engine_details.initialization_time.elapsed().as_millis() % 100 == 0 {

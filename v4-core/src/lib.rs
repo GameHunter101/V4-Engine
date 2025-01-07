@@ -1,15 +1,22 @@
-use wgpu::Device;
 use async_scoped::TokioScope;
-use ecs::{pipeline::{create_render_pipeline, PipelineId}, scene::{Scene, WorkloadOutputCollection, WorkloadPacket}};
-use engine_management::rendering_management::RenderingManager;
-use wgpu::{RenderPipeline, TextureFormat};
+use crossbeam_channel::{Receiver, Sender};
+use ecs::{
+    component::ComponentId,
+    pipeline::{create_render_pipeline, PipelineId},
+    scene::{Scene, WorkloadOutput, WorkloadPacket},
+};
+use engine_management::{
+    engine_action::{EngineAction, V4Mutable},
+    rendering_management::RenderingManager,
+};
+use glyphon::{FontSystem, SwashCache, TextAtlas, TextRenderer};
 use std::{
     collections::{HashMap, HashSet},
     fmt::Debug,
-    sync::{mpsc, Arc},
     time::Instant,
 };
-use tokio::sync::Mutex;
+use wgpu::Device;
+use wgpu::{RenderPipeline, TextureFormat};
 
 use winit::{
     event::{Event::WindowEvent, MouseButton},
@@ -19,6 +26,7 @@ use winit::{
 use winit_input_helper::WinitInputHelper;
 
 pub mod engine_management {
+    pub mod engine_action;
     pub mod rendering_management;
 }
 
@@ -46,6 +54,7 @@ pub struct V4 {
     window: Window,
     details: EngineDetails,
     pipelines: HashMap<PipelineId, RenderPipeline>,
+    font_state: FontState,
 }
 
 #[derive(Debug)]
@@ -71,6 +80,94 @@ impl Default for EngineDetails {
     }
 }
 
+pub struct FontState {
+    pub font_system: FontSystem,
+    pub swash_cache: SwashCache,
+    pub viewport: glyphon::Viewport,
+    pub atlas: TextAtlas,
+    pub text_renderer: TextRenderer,
+    pub text_buffers: HashMap<ComponentId, TextRenderInfo>,
+}
+
+#[derive(Debug)]
+pub struct TextRenderInfo {
+    pub buffer: glyphon::Buffer,
+    pub top_left_pos: [f32; 2],
+    pub scale: f32,
+    pub bounds: glyphon::TextBounds,
+    pub attributes: TextAttributes,
+}
+
+#[derive(Debug, Clone)]
+pub struct TextAttributes {
+    pub color: glyphon::Color,
+    pub family: FontFamily,
+    pub stretch: glyphon::Stretch,
+    pub style: glyphon::Style,
+    pub weight: glyphon::Weight,
+}
+
+impl<'a> From<glyphon::Attrs<'a>> for TextAttributes {
+    fn from(val: glyphon::Attrs<'a>) -> Self {
+        TextAttributes {
+            color: val.color_opt.unwrap_or(glyphon::Color::rgb(255, 255, 255)),
+            family: val.family.into(),
+            stretch: val.stretch,
+            style: val.style,
+            weight: val.weight,
+        }
+    }
+}
+
+#[allow(clippy::wrong_self_convention)]
+impl TextAttributes {
+    fn into_glyphon_attrs(&self) -> glyphon::Attrs {
+        glyphon::Attrs::new()
+            .color(self.color)
+            .family(self.family.into_glyphon_family())
+            .stretch(self.stretch)
+            .style(self.style)
+            .weight(self.weight)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum FontFamily {
+    Name(String),
+    Serif,
+    SansSerif,
+    Cursive,
+    Fantasy,
+    Monospace,
+}
+
+impl<'a> From<glyphon::Family<'a>> for FontFamily {
+    fn from(val: glyphon::Family<'a>) -> Self {
+        match val {
+            glyphon::Family::Name(name) => FontFamily::Name(name.to_owned()),
+            glyphon::Family::Serif => FontFamily::Serif,
+            glyphon::Family::SansSerif => FontFamily::SansSerif,
+            glyphon::Family::Cursive => FontFamily::Cursive,
+            glyphon::Family::Fantasy => FontFamily::Fantasy,
+            glyphon::Family::Monospace => FontFamily::Monospace,
+        }
+    }
+}
+
+#[allow(clippy::wrong_self_convention)]
+impl FontFamily {
+    fn into_glyphon_family(&self) -> glyphon::Family {
+        match self {
+            FontFamily::Name(name) => glyphon::Family::Name(name),
+            FontFamily::Serif => glyphon::Family::Serif,
+            FontFamily::SansSerif => glyphon::Family::SansSerif,
+            FontFamily::Cursive => glyphon::Family::Cursive,
+            FontFamily::Fantasy => glyphon::Family::Fantasy,
+            FontFamily::Monospace => glyphon::Family::Monospace,
+        }
+    }
+}
+
 impl V4 {
     pub fn builder() -> V4Builder {
         V4Builder::default()
@@ -80,7 +177,12 @@ impl V4 {
         let mut last_active_scene_index = self.active_scene;
         self.details.initialization_time = Instant::now();
 
-        let (workload_sender, workload_outputs, _handle) = Self::launch_workload_executor();
+        let (workload_sender, workload_output_receiver, _handle) = Self::launch_workload_executor();
+
+        let (engine_action_sender, engine_action_receiver): (
+            Sender<Box<dyn EngineAction>>,
+            Receiver<_>,
+        ) = crossbeam_channel::unbounded();
 
         self.event_loop
             .run(move |event, elwt| {
@@ -117,11 +219,13 @@ impl V4 {
                         }
                         if !self.initialized_scene {
                             let device = self.rendering_manager.device();
+                            let workload_output_receiver = workload_output_receiver.clone();
                             TokioScope::scope_and_block(|scope| {
                                 let proc = self.scenes[self.active_scene].initialize(
                                     device,
                                     workload_sender.clone(),
-                                    workload_outputs.clone(),
+                                    workload_output_receiver,
+                                    engine_action_sender.clone(),
                                 );
 
                                 scope.spawn(proc);
@@ -133,6 +237,15 @@ impl V4 {
                             last_active_scene_index = self.active_scene;
                             return;
                         }
+
+                        while let Ok(engine_action) = engine_action_receiver.try_recv() {
+                            engine_action.execute(V4Mutable {
+                                window: &self.window,
+                                active_scene: &mut self.active_scene,
+                                initialized_scene: &mut self.initialized_scene,
+                            });
+                        }
+
                         let scene = &mut self.scenes[self.active_scene];
                         let device = self.rendering_manager.device();
                         let queue = self.rendering_manager.queue();
@@ -145,7 +258,12 @@ impl V4 {
                             });
                         });
 
-                        Self::create_new_pipelines(device, self.rendering_manager.format(), scene, &mut self.pipelines);
+                        Self::create_new_pipelines(
+                            device,
+                            self.rendering_manager.format(),
+                            scene,
+                            &mut self.pipelines,
+                        );
 
                         self.rendering_manager.render(scene, &self.pipelines);
 
@@ -174,54 +292,67 @@ impl V4 {
     }
 
     pub fn launch_workload_executor() -> (
-        mpsc::Sender<WorkloadPacket>,
-        WorkloadOutputCollection,
+        Sender<WorkloadPacket>,
+        Receiver<(ComponentId, WorkloadOutput)>,
         std::thread::JoinHandle<()>,
     ) {
         let (workload_sender, workload_receiver): (
-            mpsc::Sender<WorkloadPacket>,
-            mpsc::Receiver<WorkloadPacket>,
-        ) = mpsc::channel();
+            Sender<WorkloadPacket>,
+            Receiver<WorkloadPacket>,
+        ) = crossbeam_channel::unbounded();
 
-        let outputs: WorkloadOutputCollection = Arc::new(Mutex::new(HashMap::new()));
+        let (workload_output_sender, workload_output_receiver): (
+            Sender<(ComponentId, WorkloadOutput)>,
+            Receiver<_>,
+        ) = crossbeam_channel::unbounded();
 
-        let workload_outputs_arc = outputs.clone();
         let handle = std::thread::spawn(move || {
             let runtime = tokio::runtime::Runtime::new()
                 .expect("Failed to create tokio runtime for workloads.");
             runtime.block_on(async move {
                 TokioScope::scope_and_block(|async_scope| loop {
                     if let Ok(workload_packet) = workload_receiver.try_recv() {
-                        let workload_outputs_arc = workload_outputs_arc.clone();
+                        let sender = workload_output_sender.clone();
                         async_scope.spawn(async move {
                             let workload_result = workload_packet.workload.await;
-                            let mut workload_outputs = workload_outputs_arc.lock().await;
-                            if let Some(component_outputs) =
-                                workload_outputs.get_mut(&workload_packet.component_id)
-                            {
-                                component_outputs.push(workload_result);
-                            } else {
-                                workload_outputs
-                                    .insert(workload_packet.component_id, vec![workload_result]);
-                            }
+                            sender
+                                .send((workload_packet.component_id, workload_result))
+                                .unwrap_or_else(|_| {
+                                    panic!(
+                                        "Failed to send workload output for component {}",
+                                        workload_packet.component_id
+                                    )
+                                });
                         });
                     }
                 });
             });
         });
 
-        (workload_sender, outputs, handle)
+        (workload_sender, workload_output_receiver, handle)
     }
 
-    fn create_new_pipelines(device: &Device, render_format: TextureFormat, active_scene: &mut Scene, pipelines: &mut HashMap<PipelineId, RenderPipeline>) {
+    fn create_new_pipelines(
+        device: &Device,
+        render_format: TextureFormat,
+        active_scene: &mut Scene,
+        pipelines: &mut HashMap<PipelineId, RenderPipeline>,
+    ) {
         if active_scene.new_pipelines_needed {
-            /* let device = rendering_manager.device();
-            let render_format = rendering_manager.format(); */
             let active_scene_pipelines = active_scene.get_pipeline_ids();
             for pipeline_id in active_scene_pipelines {
                 if !pipelines.contains_key(pipeline_id) {
-                    let bind_group_layouts = active_scene.get_pipeline_materials(pipeline_id)[0].bind_group_layouts();
-                    pipelines.insert(pipeline_id.clone(), create_render_pipeline(device, pipeline_id, bind_group_layouts, render_format));
+                    let bind_group_layouts =
+                        active_scene.get_pipeline_materials(pipeline_id)[0].bind_group_layouts();
+                    pipelines.insert(
+                        pipeline_id.clone(),
+                        create_render_pipeline(
+                            device,
+                            pipeline_id,
+                            bind_group_layouts,
+                            render_format,
+                        ),
+                    );
                 }
             }
             active_scene.new_pipelines_needed = false;
@@ -301,6 +432,27 @@ impl V4Builder {
         let rendering_manager =
             RenderingManager::new(&window, self.antialiasing_enabled, self.clear_color).await;
 
+        let device = rendering_manager.device();
+        let queue = rendering_manager.queue();
+        let format = rendering_manager.format();
+
+        let font_system = FontSystem::new();
+        let swash_cache = SwashCache::new();
+        let cache = glyphon::Cache::new(device);
+        let viewport = glyphon::Viewport::new(device, &cache);
+        let mut atlas = TextAtlas::new(device, queue, &cache, format);
+        let text_renderer =
+            TextRenderer::new(&mut atlas, device, wgpu::MultisampleState::default(), None);
+
+        let font_state = FontState {
+            font_system,
+            swash_cache,
+            viewport,
+            atlas,
+            text_renderer,
+            text_buffers: HashMap::new(),
+        };
+
         V4 {
             rendering_manager,
             event_loop,
@@ -311,6 +463,7 @@ impl V4Builder {
             window,
             details: Default::default(),
             pipelines: HashMap::new(),
+            font_state,
         }
     }
 }
