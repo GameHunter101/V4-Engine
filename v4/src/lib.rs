@@ -29,10 +29,3 @@ pub mod builtin_components {
     pub mod mesh_component;
 }
 
-/* scene! {
-    Test {
-        components: [
-            Thing(param: 5, ident: "stuff")
-    ]
-    }
-} */

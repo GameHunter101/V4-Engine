@@ -2,11 +2,11 @@
 use darling::FromMeta;
 use proc_macro::TokenStream;
 use proc_macro2::Literal;
-use quote::quote;
+use quote::{quote, ToTokens};
 use syn::{
     parenthesized,
     parse::{discouraged::AnyDelimiter, Parse, ParseStream},
-    parse_macro_input,
+    parse_macro_input, parse_quote,
     punctuated::Punctuated,
     Expr, FieldValue, Ident, Lit, LitStr, Member, Token,
 };
@@ -42,47 +42,51 @@ struct ComponentDescriptor {
 }
 
 #[derive(Debug)]
-struct SimpleField {
-    member: Member,
-    colon: Option<Token![:]>,
-    expr: Expr,
+enum SimpleFieldValue {
+    Expression(Expr),
+    Literal(Lit),
 }
 
-fn parse_arguments_and_ident(input: ParseStream) -> syn::Result<(Vec<SimpleField>, Option<Lit>)> {
-    let mut fields = Vec::new();
-    let mut ident = None;
-    loop {
-        let member: Member = input.parse()?;
-        let colon = if input.peek(Token![:]) {
-            Some(input.parse::<Token![:]>()?)
-        } else {
-            None
-        };
+#[derive(Debug)]
+struct SimpleField {
+    ident: Ident,
+    value: Option<SimpleFieldValue>,
+}
 
-        if input.peek(Lit) {
-            ident = Some(input.parse::<Lit>()?);
-        } else {
-            fields.push(SimpleField {
-                member,
-                colon,
-                expr: input.parse()?,
-            })
+impl Parse for SimpleField {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let ident = input.parse::<Ident>()?;
+        let colon = input.parse::<Token![:]>();
+        let mut value = None;
+        if colon.is_ok() {
+            if let Ok(expr) = input.parse::<Expr>() {
+                value = Some(SimpleFieldValue::Expression(expr));
+            }
+            if let Ok(lit) = input.parse::<Lit>() {
+                value = Some(SimpleFieldValue::Literal(lit));
+            }
         }
-    }
 
-    Ok((fields, ident))
+        Ok(SimpleField {
+            ident,
+            value,
+        })
+    }
 }
 
 impl Parse for ComponentDescriptor {
     fn parse(input: ParseStream) -> syn::Result<Self> {
-        let component_type = input.parse()?;
-        let (_, _, args_contents) = input.parse_any_delimiter()?;
-        let (params, ident) = parse_arguments_and_ident(&args_contents)?;
+        let component_type: Ident = input.parse()?;
+
+        let content;
+        parenthesized!(content in input);
+
+        let params = content.parse_terminated(SimpleField::parse, Token![,])?.into_iter().collect();
 
         let mut component = ComponentDescriptor {
             component_type,
             params,
-            ident,
+            ident: None,
         };
         Ok(component)
     }
@@ -113,12 +117,30 @@ impl Parse for SceneDescriptor<'_> {
 }
 
 pub fn scene_impl(item: TokenStream) -> TokenStream {
-    /* let scene_descriptor = parse_macro_input!(item as SceneDescriptor);
-    let scene = Scene::new(scene_index, device, queue, format) */
-    // quote! { #scene_descriptor}.into()
-    // item
-    let temp = parse_macro_input!(item as Expr);
+    // Component creation
+    let ComponentDescriptor {
+        component_type,
+        params,
+        ident,
+    } = parse_macro_input!(item as ComponentDescriptor);
+    let builder_function_calls = params.into_iter().map(|param| {
+        let SimpleField {
+            ident,
+            value,
+        } = param;
+        if let Some(value) = value {
+            match value {
+                SimpleFieldValue::Expression(expr) => quote! {.#ident(#expr)},
+                SimpleFieldValue::Literal(lit) => quote! {.#ident(#lit)},
+            }
+        } else {
+            quote! {.#ident(#ident)}
+        }
+    });
+
     quote! {
-        #temp.thing
-    }.into()
+        #component_type::builder()
+        #(#builder_function_calls)*.build()
+    }
+    .into()
 }

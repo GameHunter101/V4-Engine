@@ -1,5 +1,3 @@
-use hello_world::Temp;
-
 mod hello_world;
 mod font_render;
 mod workload_test;
@@ -22,8 +20,4 @@ fn main() {
         },
         None => println!("Please select a example."),
     }
-    /* let test = Temp {
-        hi: "hi".to_string(),
-        ..Default::default()
-    }; */
 }

@@ -7,7 +7,7 @@ use v4::{
         scene::Scene,
     },
     engine_management::font_management::{TextComponentProperties, TextDisplayInfo},
-    V4,
+    scene, V4,
 };
 
 #[derive(Debug)]
@@ -30,9 +30,15 @@ pub async fn main() {
         .build()
         .await;
 
+    let _test = scene! {
+        TextComponent(text: "hi".to_string())
+    };
+
     let mut scene = Scene::default();
 
-    let comp = TextComponent!();
+    let comp = TextComponent::builder()
+        .text("builder_test".to_string())
+        .build();
     dbg!(comp);
     /* let other_comp = TextComponent!(text: ("hi".to_string()));
     dbg!(other_comp); */
@@ -50,7 +56,6 @@ pub async fn main() {
 
     engine.main_loop().await;
 }
-
 
 impl TextComponent {
     fn new(text: String) -> Self {
@@ -139,7 +144,6 @@ impl ComponentSystem for TextComponent {
         Vec::new()
     }
 }
-
 
 impl ToggleComponent {
     fn new(text_component: ComponentId) -> Self {

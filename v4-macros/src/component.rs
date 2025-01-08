@@ -1,7 +1,7 @@
 use darling::{ast::NestedMeta, FromMeta};
 use proc_macro::TokenStream;
-use quote::quote;
-use syn::{parse::Parser, parse_macro_input, Expr, ItemStruct};
+use quote::{format_ident, quote};
+use syn::{parse::Parser, parse_macro_input, Ident, ItemStruct};
 
 #[allow(unused)]
 #[derive(Debug, FromMeta)]
@@ -11,6 +11,38 @@ struct ComponentSpecs {
 
 pub fn component_impl(args: TokenStream, item: TokenStream) -> TokenStream {
     let mut component_struct = parse_macro_input!(item as ItemStruct);
+
+    let ident = component_struct.ident.clone();
+    let generics = component_struct.generics.clone();
+
+    let builder_ident = format_ident!("{}Builder", ident.to_string());
+
+    let (builder_fields, builder_methods): (
+        Vec<proc_macro2::TokenStream>,
+        Vec<proc_macro2::TokenStream>,
+    ) = component_struct
+        .fields
+        .iter()
+        .map(|field| {
+            let field_ident = &field.ident;
+            let ty = &field.ty;
+            (
+                quote! {#field_ident: Option<#ty>},
+                quote! {
+                    pub fn #field_ident(mut self, #field_ident: #ty) -> Self {
+                        self.#field_ident = Some(#field_ident);
+                        self
+                    }
+                },
+            )
+        })
+        .collect();
+
+    let builder_field_idents: Vec<Option<Ident>> = component_struct
+        .fields
+        .iter()
+        .map(|field| field.ident.clone())
+        .collect();
 
     let attr_args = match NestedMeta::parse_meta_list(args.into()) {
         Ok(v) => v,
@@ -53,38 +85,6 @@ pub fn component_impl(args: TokenStream, item: TokenStream) -> TokenStream {
         );
     }
 
-    let default_fields = if let syn::Fields::Named(fields) = &component_struct.fields {
-        fields
-            .named
-            .iter()
-            .map(|field| {
-                let ident = &field.ident;
-                let mut value = None;
-                if let Some(attr) = field.attrs.first() {
-                    if attr.path().is_ident("def") {
-                        attr.parse_nested_meta(|meta| {
-                            if meta.path.is_ident("val") {
-                                value = Some(meta.value()?.parse::<Expr>()?);
-                            }
-                            Ok(())
-                        }).unwrap();
-                    }
-                }
-                if let Some(value) = value {
-                    quote! {#ident: #value}
-                } else {
-                    quote! {#ident: Default::default()}
-                }
-                // let (path, value) = match attribute
-            })
-            .collect()
-    } else {
-        Vec::new()
-    };
-
-    let ident = component_struct.ident.clone();
-    let generics = component_struct.generics.clone();
-
     #[allow(clippy::collapsible_match)]
     let rendering_order = if attr_args.is_empty() {
         0
@@ -104,11 +104,42 @@ pub fn component_impl(args: TokenStream, item: TokenStream) -> TokenStream {
     quote! {
         #component_struct
 
-        impl #generics Default for #ident #generics {
+        pub struct #builder_ident #generics {
+            #(#builder_fields,)*
+            enabled: bool,
+        }
+
+        impl #generics Default for #builder_ident #generics {
             fn default() -> Self {
                 Self {
-                    #(#default_fields,)*
+                    #(#builder_field_idents: None,)*
+                    enabled: false,
                 }
+            }
+        }
+
+        impl #generics #builder_ident #generics {
+            #(#builder_methods)*
+
+            fn enabled(mut self, enabled: bool) -> Self {
+                self.enabled = enabled;
+                self
+            }
+
+            fn build(self) -> #ident #generics {
+                #ident {
+                    #(#builder_field_idents: self.#builder_field_idents.unwrap(),)*
+                    id: std::sync::OnceLock::new(),
+                    parent_entity_id: 0,
+                    is_initialized: false,
+                    is_enabled: self.enabled,
+                }
+            }
+        }
+
+        impl #generics #ident #generics {
+            fn builder() -> #builder_ident #generics {
+                #builder_ident::default()
             }
         }
 
@@ -149,19 +180,6 @@ pub fn component_impl(args: TokenStream, item: TokenStream) -> TokenStream {
 
             fn rendering_order(&self) -> i32 {
                 #rendering_order
-            }
-        }
-
-        #[macro_export]
-        macro_rules! #ident {
-            ($($field:ident: $val:tt),*) => {
-                {
-                    let mut comp = #ident::default();
-                    $(
-                        comp.$field $val;
-                    )*
-                    comp
-                }
             }
         }
     }
