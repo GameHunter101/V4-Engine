@@ -7,7 +7,7 @@ use std::{
 };
 
 use crossbeam_channel::{Receiver, Sender};
-use wgpu::{Device, Queue, TextureFormat};
+use wgpu::{Device, Queue};
 use winit_input_helper::WinitInputHelper;
 
 use crate::{engine_management::engine_action::EngineAction, EngineDetails};
@@ -37,19 +37,6 @@ pub struct Scene {
     pub new_pipelines_needed: bool,
 }
 
-
-#[derive(Debug)]
-pub struct TextDisplayInfo {
-    pub on_screen_width: f32,
-    pub on_screen_height: f32,
-    pub top_left_pos: [f32; 2],
-    pub scale: f32,
-}
-
-
-
-
-
 impl Debug for Scene {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Scene")
@@ -68,9 +55,8 @@ pub struct WorkloadPacket {
     pub workload: Workload,
 }
 
-impl Scene {
-    pub fn new(device: &Device, queue: &Queue, format: TextureFormat) -> Self {
-
+impl Default for Scene {
+    fn default() -> Self {
         let scene_index = unsafe {
             SCENE_COUNT += 1;
             SCENE_COUNT
@@ -91,7 +77,9 @@ impl Scene {
             new_pipelines_needed: false,
         }
     }
+}
 
+impl Scene {
     pub async fn initialize(
         &mut self,
         device: &Device,
@@ -179,7 +167,7 @@ impl Scene {
     pub async fn attach_workload(&mut self, component_id: ComponentId, workload: Workload) {
         if let Some(sender) = &self.workload_sender {
             sender
-                .send(WorkloadPacket {
+                .try_send(WorkloadPacket {
                     scene_index: self.scene_index,
                     component_id,
                     workload,
@@ -327,96 +315,6 @@ impl Scene {
             .find(|comp| comp.id() == component_id)
     }
 
-    pub fn create_text_buffer(
-        &mut self,
-        component_id: ComponentId,
-        text: &str,
-        text_attributes: TextAttributes,
-        text_metrics: glyphon::Metrics,
-        text_display_info: TextDisplayInfo,
-    ) {
-        let font_system = &mut self.font_state.font_system;
-        let mut text_buffer = glyphon::Buffer::new(font_system, text_metrics);
-        text_buffer.set_size(
-            font_system,
-            Some(text_display_info.on_screen_height),
-            Some(text_display_info.on_screen_height),
-        );
-        text_buffer.set_text(
-            font_system,
-            text,
-            text_attributes.into_glyphon_attrs(),
-            glyphon::Shaping::Advanced,
-        );
-
-        self.font_state.text_buffers.insert(
-            component_id,
-            TextRenderInfo {
-                buffer: text_buffer,
-                top_left_pos: text_display_info.top_left_pos,
-                bounds: glyphon::TextBounds {
-                    left: text_display_info.top_left_pos[0] as i32,
-                    top: text_display_info.top_left_pos[1] as i32,
-                    right: (text_display_info.top_left_pos[0] + text_display_info.on_screen_width)
-                        as i32,
-                    bottom: (text_display_info.top_left_pos[1] + text_display_info.on_screen_height)
-                        as i32,
-                },
-                scale: text_display_info.scale,
-                attributes: text_attributes,
-            },
-        );
-    }
-
-    pub fn update_text_buffer(
-        &mut self,
-        component_id: ComponentId,
-        text: Option<String>,
-        text_attributes: Option<TextAttributes>,
-        text_metrics: Option<glyphon::Metrics>,
-        text_display_info: Option<TextDisplayInfo>,
-    ) {
-        let font_system = &mut self.font_state.font_system;
-        if let Some(text_buffer) = self.font_state.text_buffers.get_mut(&component_id) {
-            if let Some(new_text) = text {
-                let attrs = text_attributes.as_ref().unwrap_or(&text_buffer.attributes);
-                text_buffer.buffer.set_text(
-                    font_system,
-                    &new_text,
-                    attrs.into_glyphon_attrs(),
-                    glyphon::Shaping::Advanced,
-                );
-                text_buffer.attributes = attrs.clone();
-            }
-            if let Some(new_text_metrics) = text_metrics {
-                text_buffer
-                    .buffer
-                    .set_metrics(font_system, new_text_metrics);
-            }
-            if let Some(new_text_display_info) = text_display_info {
-                text_buffer.bounds = glyphon::TextBounds {
-                    left: new_text_display_info.top_left_pos[0] as i32,
-                    top: new_text_display_info.top_left_pos[1] as i32,
-                    right: (new_text_display_info.top_left_pos[0]
-                        + new_text_display_info.on_screen_width) as i32,
-                    bottom: (new_text_display_info.top_left_pos[1]
-                        + new_text_display_info.on_screen_height)
-                        as i32,
-                };
-            }
-        }
-    }
-
-    pub fn update_text_viewport(&mut self, queue: &Queue, new_size: (u32, u32)) {
-        self.font_state.viewport.update(
-            queue,
-            glyphon::Resolution {
-                width: new_size.0,
-                height: new_size.1,
-            },
-        );
-    }
-
     pub fn enabled_ui_components(&self) -> HashSet<ComponentId> {
         self.components
             .iter()
@@ -434,17 +332,17 @@ impl Scene {
         for action in action_queue {
             action.execute_async(self).await;
         }
-        /* let workload_count = self.workloads.lock().await.len();
-        if workload_count != 0 {
-            let workloads = self.workloads.clone();
-            let outputs = self.workload_outputs.clone();
-            std::thread::spawn(move || {
-                Self::run_workloads(workloads, outputs);
-            });
-        } */
     }
 
     pub fn register_ui_component(&mut self, component_id: ComponentId) {
         self.ui_components.push(component_id);
+    }
+
+    pub fn send_engine_action(&self, action: Box<dyn EngineAction>) {
+        if let Some(engine_action_sender) = &self.engine_action_sender {
+            engine_action_sender
+                .try_send(action)
+                .expect("Failed to send engine action.");
+        }
     }
 }

@@ -1,13 +1,26 @@
 use v4::{
-    builtin_actions::{TextComponentProperties, UpdateTextComponentAction},
+    builtin_actions::UpdateTextComponentAction,
     component,
     ecs::{
         component::{ComponentDetails, ComponentId, ComponentSystem},
         entity::EntityId,
-        scene::{Scene, TextDisplayInfo},
+        scene::Scene,
     },
+    engine_management::font_management::{TextComponentProperties, TextDisplayInfo},
     V4,
 };
+
+#[derive(Debug)]
+#[component]
+struct TextComponent {
+    text: String,
+}
+
+#[derive(Debug)]
+#[component]
+struct ToggleComponent {
+    text_component: ComponentId,
+}
 
 #[tokio::main]
 pub async fn main() {
@@ -17,13 +30,12 @@ pub async fn main() {
         .build()
         .await;
 
-    let rendering_manager = engine.rendering_manager();
+    let mut scene = Scene::default();
 
-    let mut scene = Scene::new(
-        rendering_manager.device(),
-        rendering_manager.queue(),
-        rendering_manager.format(),
-    );
+    let comp = TextComponent!();
+    dbg!(comp);
+    /* let other_comp = TextComponent!(text: ("hi".to_string()));
+    dbg!(other_comp); */
 
     let text_component = TextComponent::new("hi".to_string());
     let toggle_component = ToggleComponent::new(text_component.id());
@@ -39,11 +51,6 @@ pub async fn main() {
     engine.main_loop().await;
 }
 
-#[derive(Debug)]
-#[component]
-struct TextComponent {
-    text: String,
-}
 
 impl TextComponent {
     fn new(text: String) -> Self {
@@ -133,11 +140,6 @@ impl ComponentSystem for TextComponent {
     }
 }
 
-#[derive(Debug)]
-#[component]
-struct ToggleComponent {
-    text_component: ComponentId,
-}
 
 impl ToggleComponent {
     fn new(text_component: ComponentId) -> Self {

@@ -1,11 +1,17 @@
 use std::fmt::Debug;
 
-use v4_core::ecs::{
-    actions::Action,
-    component::{Component, ComponentId},
-    entity::EntityId,
-    material::MaterialId,
-    scene::{Scene, TextAttributes, TextDisplayInfo, Workload},
+use v4_core::{
+    ecs::{
+        actions::Action,
+        component::{Component, ComponentId},
+        entity::EntityId,
+        material::MaterialId,
+        scene::{Scene, Workload},
+    },
+    engine_management::{
+        engine_action::{CreateTextBufferEngineAction, UpdateTextBufferEngineAction},
+        font_management::{TextAttributes, TextComponentProperties, TextDisplayInfo},
+    },
 };
 
 pub struct WorkloadAction(pub ComponentId, pub Workload);
@@ -68,14 +74,6 @@ impl Action for ComponentToggleAction {
 }
 
 #[derive(Debug)]
-pub struct TextComponentProperties {
-    pub text: String,
-    pub text_attributes: TextAttributes,
-    pub text_metrics: glyphon::Metrics,
-    pub text_display_info: TextDisplayInfo,
-}
-
-#[derive(Debug)]
 pub struct RegisterUiComponentAction {
     pub component_id: ComponentId,
     pub text_component_properties: Option<TextComponentProperties>,
@@ -84,13 +82,10 @@ pub struct RegisterUiComponentAction {
 impl Action for RegisterUiComponentAction {
     fn execute(self: Box<Self>, scene: &mut Scene) {
         if let Some(text_component_properties) = self.text_component_properties {
-            scene.create_text_buffer(
-                self.component_id,
-                &text_component_properties.text,
-                text_component_properties.text_attributes,
-                text_component_properties.text_metrics,
-                text_component_properties.text_display_info,
-            );
+            scene.send_engine_action(Box::new(CreateTextBufferEngineAction {
+                component_id: self.component_id,
+                text_component_properties,
+            }));
         }
         scene.register_ui_component(self.component_id);
     }
@@ -107,13 +102,20 @@ pub struct UpdateTextComponentAction {
 
 impl Action for UpdateTextComponentAction {
     fn execute(self: Box<Self>, scene: &mut Scene) {
-        scene.update_text_buffer(
+        /* scene.update_text_buffer(
             self.component_id,
             self.text,
             self.text_attributes,
             self.text_metrics,
             self.text_display_info,
-        );
+        ); */
+        scene.send_engine_action(Box::new(UpdateTextBufferEngineAction{
+            component_id: self.component_id,
+            text: self.text,
+            text_attributes: self.text_attributes,
+            text_metrics: self.text_metrics,
+            text_display_info: self.text_display_info,
+        }));
     }
 }
 

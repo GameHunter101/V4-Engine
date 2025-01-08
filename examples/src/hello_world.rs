@@ -51,10 +51,8 @@ pub async fn main() {
 
     let rendering_manager = engine.rendering_manager();
     let device = rendering_manager.device();
-    let queue = rendering_manager.queue();
-    let render_format = rendering_manager.format();
 
-    let mut scene = Scene::new(device, queue, render_format);
+    let mut scene = Scene::default();
     let material = scene.create_material(
         device,
         PipelineId {

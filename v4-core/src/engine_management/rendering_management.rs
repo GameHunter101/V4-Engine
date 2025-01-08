@@ -5,6 +5,8 @@ use wgpu::{rwh::{HasDisplayHandle, HasWindowHandle}, RenderPipeline};
 
 use crate::{ecs::{pipeline::PipelineId, scene::Scene}, engine_support::texture_support};
 
+use super::font_management::FontState;
+
 pub struct RenderingManager {
     surface: wgpu::Surface<'static>,
     format: wgpu::TextureFormat,
@@ -111,7 +113,7 @@ impl<'a> RenderingManager {
         }
     }
 
-    pub fn render(&mut self, scene: &mut Scene, pipelines: &HashMap<PipelineId, RenderPipeline>) {
+    pub fn render(&mut self, scene: &mut Scene, pipelines: &HashMap<PipelineId, RenderPipeline>, font_state: &mut FontState) {
         let output = self.surface.get_current_texture().unwrap();
 
         let view = output
@@ -178,7 +180,6 @@ impl<'a> RenderingManager {
         smaa_frame.resolve();
 
         let enabled_components = scene.enabled_ui_components();
-        let font_state = scene.font_state_mut();
         let text_areas = font_state
             .text_buffers
             .iter()

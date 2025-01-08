@@ -6,8 +6,7 @@ use ecs::{
     scene::{Scene, WorkloadOutput, WorkloadPacket},
 };
 use engine_management::{
-    engine_action::{EngineAction, V4Mutable},
-    rendering_management::RenderingManager,
+    engine_action::{EngineAction, V4Mutable}, font_management::FontState, rendering_management::RenderingManager
 };
 use glyphon::{FontSystem, SwashCache, TextAtlas, TextRenderer};
 use std::{
@@ -28,6 +27,7 @@ use winit_input_helper::WinitInputHelper;
 pub mod engine_management {
     pub mod engine_action;
     pub mod rendering_management;
+    pub mod font_management;
 }
 
 pub mod engine_support {
@@ -80,93 +80,6 @@ impl Default for EngineDetails {
     }
 }
 
-pub struct FontState {
-    pub font_system: FontSystem,
-    pub swash_cache: SwashCache,
-    pub viewport: glyphon::Viewport,
-    pub atlas: TextAtlas,
-    pub text_renderer: TextRenderer,
-    pub text_buffers: HashMap<ComponentId, TextRenderInfo>,
-}
-
-#[derive(Debug)]
-pub struct TextRenderInfo {
-    pub buffer: glyphon::Buffer,
-    pub top_left_pos: [f32; 2],
-    pub scale: f32,
-    pub bounds: glyphon::TextBounds,
-    pub attributes: TextAttributes,
-}
-
-#[derive(Debug, Clone)]
-pub struct TextAttributes {
-    pub color: glyphon::Color,
-    pub family: FontFamily,
-    pub stretch: glyphon::Stretch,
-    pub style: glyphon::Style,
-    pub weight: glyphon::Weight,
-}
-
-impl<'a> From<glyphon::Attrs<'a>> for TextAttributes {
-    fn from(val: glyphon::Attrs<'a>) -> Self {
-        TextAttributes {
-            color: val.color_opt.unwrap_or(glyphon::Color::rgb(255, 255, 255)),
-            family: val.family.into(),
-            stretch: val.stretch,
-            style: val.style,
-            weight: val.weight,
-        }
-    }
-}
-
-#[allow(clippy::wrong_self_convention)]
-impl TextAttributes {
-    fn into_glyphon_attrs(&self) -> glyphon::Attrs {
-        glyphon::Attrs::new()
-            .color(self.color)
-            .family(self.family.into_glyphon_family())
-            .stretch(self.stretch)
-            .style(self.style)
-            .weight(self.weight)
-    }
-}
-
-#[derive(Debug, Clone)]
-pub enum FontFamily {
-    Name(String),
-    Serif,
-    SansSerif,
-    Cursive,
-    Fantasy,
-    Monospace,
-}
-
-impl<'a> From<glyphon::Family<'a>> for FontFamily {
-    fn from(val: glyphon::Family<'a>) -> Self {
-        match val {
-            glyphon::Family::Name(name) => FontFamily::Name(name.to_owned()),
-            glyphon::Family::Serif => FontFamily::Serif,
-            glyphon::Family::SansSerif => FontFamily::SansSerif,
-            glyphon::Family::Cursive => FontFamily::Cursive,
-            glyphon::Family::Fantasy => FontFamily::Fantasy,
-            glyphon::Family::Monospace => FontFamily::Monospace,
-        }
-    }
-}
-
-#[allow(clippy::wrong_self_convention)]
-impl FontFamily {
-    fn into_glyphon_family(&self) -> glyphon::Family {
-        match self {
-            FontFamily::Name(name) => glyphon::Family::Name(name),
-            FontFamily::Serif => glyphon::Family::Serif,
-            FontFamily::SansSerif => glyphon::Family::SansSerif,
-            FontFamily::Cursive => glyphon::Family::Cursive,
-            FontFamily::Fantasy => glyphon::Family::Fantasy,
-            FontFamily::Monospace => glyphon::Family::Monospace,
-        }
-    }
-}
 
 impl V4 {
     pub fn builder() -> V4Builder {
@@ -192,10 +105,15 @@ impl V4 {
                         winit::event::WindowEvent::Resized(new_size) => {
                             self.rendering_manager
                                 .resize(new_size.width, new_size.height);
-                            self.scenes[self.active_scene].update_text_viewport(
+
+                            self.font_state.viewport.update(
                                 self.rendering_manager.queue(),
-                                (new_size.width, new_size.height),
+                                glyphon::Resolution {
+                                    width: new_size.width,
+                                    height: new_size.height,
+                                },
                             );
+
                             self.details.window_resolution = (new_size.width, new_size.height);
                         }
                         winit::event::WindowEvent::CloseRequested => {
@@ -243,6 +161,7 @@ impl V4 {
                                 window: &self.window,
                                 active_scene: &mut self.active_scene,
                                 initialized_scene: &mut self.initialized_scene,
+                                font_state: &mut self.font_state,
                             });
                         }
 
@@ -265,7 +184,7 @@ impl V4 {
                             &mut self.pipelines,
                         );
 
-                        self.rendering_manager.render(scene, &self.pipelines);
+                        self.rendering_manager.render(scene, &self.pipelines, &mut self.font_state);
 
                         self.details.frames_elapsed += 1;
                         self.details.last_frame_instant = Instant::now();

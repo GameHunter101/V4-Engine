@@ -1,7 +1,7 @@
 use darling::{ast::NestedMeta, FromMeta};
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{parse::Parser, parse_macro_input, ItemStruct, Token, Visibility};
+use syn::{parse::Parser, parse_macro_input, Expr, ItemStruct};
 
 #[allow(unused)]
 #[derive(Debug, FromMeta)]
@@ -19,7 +19,7 @@ pub fn component_impl(args: TokenStream, item: TokenStream) -> TokenStream {
         }
     };
 
-    let public_fields = if let syn::Fields::Named(ref mut fields) = component_struct.fields {
+    if let syn::Fields::Named(fields) = &mut component_struct.fields {
         fields.named.push(
             syn::Field::parse_named
                 .parse2(quote! {
@@ -51,11 +51,32 @@ pub fn component_impl(args: TokenStream, item: TokenStream) -> TokenStream {
                 })
                 .unwrap(),
         );
+    }
 
+    let default_fields = if let syn::Fields::Named(fields) = &component_struct.fields {
         fields
             .named
             .iter()
-            .filter(|field| field.vis == Visibility::Public(syn::token::Pub::default()))
+            .map(|field| {
+                let ident = &field.ident;
+                let mut value = None;
+                if let Some(attr) = field.attrs.first() {
+                    if attr.path().is_ident("def") {
+                        attr.parse_nested_meta(|meta| {
+                            if meta.path.is_ident("val") {
+                                value = Some(meta.value()?.parse::<Expr>()?);
+                            }
+                            Ok(())
+                        }).unwrap();
+                    }
+                }
+                if let Some(value) = value {
+                    quote! {#ident: #value}
+                } else {
+                    quote! {#ident: Default::default()}
+                }
+                // let (path, value) = match attribute
+            })
             .collect()
     } else {
         Vec::new()
@@ -82,6 +103,14 @@ pub fn component_impl(args: TokenStream, item: TokenStream) -> TokenStream {
 
     quote! {
         #component_struct
+
+        impl #generics Default for #ident #generics {
+            fn default() -> Self {
+                Self {
+                    #(#default_fields,)*
+                }
+            }
+        }
 
         impl #generics v4::ecs::component::ComponentDetails for #ident #generics {
             fn id(&self) -> v4::ecs::component::ComponentId {
@@ -120,6 +149,19 @@ pub fn component_impl(args: TokenStream, item: TokenStream) -> TokenStream {
 
             fn rendering_order(&self) -> i32 {
                 #rendering_order
+            }
+        }
+
+        #[macro_export]
+        macro_rules! #ident {
+            ($($field:ident: $val:tt),*) => {
+                {
+                    let mut comp = #ident::default();
+                    $(
+                        comp.$field $val;
+                    )*
+                    comp
+                }
             }
         }
     }
