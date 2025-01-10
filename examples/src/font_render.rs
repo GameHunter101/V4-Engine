@@ -30,16 +30,20 @@ pub async fn main() {
         .build()
         .await;
 
-    let _test = scene! {
+    /* let _test = scene! {
         TextComponent(text: "hi".to_string())
-    };
+    }; */
 
     let mut scene = Scene::default();
 
-    let comp = TextComponent::builder()
-        .text("builder_test".to_string())
-        .build();
-    dbg!(comp);
+    let test = scene! {
+        "thing" {
+            components: [
+                TextComponent(text: "hi".to_string()),
+                ToggleComponent(text_component: 0),
+            ]
+        }
+    };
     /* let other_comp = TextComponent!(text: ("hi".to_string()));
     dbg!(other_comp); */
 
