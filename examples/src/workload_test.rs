@@ -14,10 +14,10 @@ pub async fn main() {
 
     let mut scene = Scene::default();
 
-    let workload_component = WorkloadTesterComponent::new(2);
-    let workload_component_2 = WorkloadTesterComponent::new(3);
+    let workload_component = WorkloadTesterComponent::builder().duration(2).build();
+    let workload_component_2 = WorkloadTesterComponent::builder().duration(3).build();
 
-    let temp = TempComponent::default();
+    let temp = TempComponent::builder().build();
 
     scene.create_entity(
         None,
@@ -40,19 +40,6 @@ pub async fn main() {
 struct WorkloadTesterComponent {
     initialized_time: std::time::Instant,
     duration: u64,
-}
-
-impl WorkloadTesterComponent {
-    fn new(duration: u64) -> Self {
-        Self {
-            initialized_time: std::time::Instant::now(),
-            duration,
-            id: std::sync::OnceLock::new(),
-            parent_entity_id: v4::ecs::entity::EntityId::MAX,
-            is_initialized: false,
-            is_enabled: true,
-        }
-    }
 }
 
 impl WorkloadTesterComponent {
@@ -108,17 +95,6 @@ impl ComponentSystem for WorkloadTesterComponent {
 #[derive(Debug)]
 #[component]
 struct TempComponent {}
-
-impl Default for TempComponent {
-    fn default() -> Self {
-        Self {
-            id: std::sync::OnceLock::new(),
-            parent_entity_id: v4::ecs::entity::EntityId::MAX,
-            is_initialized: false,
-            is_enabled: true,
-        }
-    }
-}
 
 #[async_trait::async_trait]
 impl ComponentSystem for TempComponent {

@@ -3,7 +3,6 @@ use v4::{
     component,
     ecs::{
         component::{ComponentDetails, ComponentId, ComponentSystem},
-        entity::EntityId,
         scene::Scene,
     },
     engine_management::font_management::{TextComponentProperties, TextDisplayInfo},
@@ -30,25 +29,30 @@ pub async fn main() {
         .build()
         .await;
 
-    /* let _test = scene! {
-        TextComponent(text: "hi".to_string())
-    }; */
+    let ident = scene! {
+        TextComponent(text: "hi".to_string(), thing: ident("hi"))
+    };
+
+    dbg!(ident);
 
     let mut scene = Scene::default();
 
-    let test = scene! {
+    /* let test = scene! {
         "thing" {
             components: [
                 TextComponent(text: "hi".to_string()),
                 ToggleComponent(text_component: 0),
             ]
         }
-    };
+    }; */
+
     /* let other_comp = TextComponent!(text: ("hi".to_string()));
     dbg!(other_comp); */
 
-    let text_component = TextComponent::new("hi".to_string());
-    let toggle_component = ToggleComponent::new(text_component.id());
+    let text_component = TextComponent::builder().text("hi".to_string()).build();
+    let toggle_component = ToggleComponent::builder()
+        .text_component(text_component.id())
+        .build();
     let _text_entity_id = scene.create_entity(
         None,
         vec![Box::new(text_component), Box::new(toggle_component)],
@@ -59,18 +63,6 @@ pub async fn main() {
     engine.attach_scene(scene);
 
     engine.main_loop().await;
-}
-
-impl TextComponent {
-    fn new(text: String) -> Self {
-        Self {
-            text,
-            parent_entity_id: EntityId::MAX,
-            is_initialized: false,
-            is_enabled: true,
-            id: std::sync::OnceLock::new(),
-        }
-    }
 }
 
 #[async_trait::async_trait]
@@ -146,18 +138,6 @@ impl ComponentSystem for TextComponent {
             })];
         }
         Vec::new()
-    }
-}
-
-impl ToggleComponent {
-    fn new(text_component: ComponentId) -> Self {
-        Self {
-            text_component,
-            parent_entity_id: 0,
-            is_initialized: false,
-            is_enabled: true,
-            id: std::sync::OnceLock::new(),
-        }
     }
 }
 

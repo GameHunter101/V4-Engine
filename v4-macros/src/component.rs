@@ -55,7 +55,7 @@ pub fn component_impl(args: TokenStream, item: TokenStream) -> TokenStream {
         fields.named.push(
             syn::Field::parse_named
                 .parse2(quote! {
-                    id: std::sync::OnceLock<v4::ecs::component::ComponentId>
+                    id: v4::ecs::component::ComponentId
                 })
                 .unwrap(),
         );
@@ -107,13 +107,15 @@ pub fn component_impl(args: TokenStream, item: TokenStream) -> TokenStream {
         pub struct #builder_ident #generics {
             #(#builder_fields,)*
             enabled: bool,
+            id: v4::ecs::component::ComponentId,
         }
 
         impl #generics Default for #builder_ident #generics {
             fn default() -> Self {
                 Self {
                     #(#builder_field_idents: None,)*
-                    enabled: false,
+                    enabled: true,
+                    id: 0,
                 }
             }
         }
@@ -126,10 +128,27 @@ pub fn component_impl(args: TokenStream, item: TokenStream) -> TokenStream {
                 self
             }
 
+            fn id(mut self, id: v4::ecs::component::ComponentId) -> Self {
+                self.id = id;
+                self
+            }
+
             fn build(self) -> #ident #generics {
+                use std::hash::{DefaultHasher, Hash, Hasher};
+
+                let mut hasher = DefaultHasher::new();
+                file!().hash(&mut hasher);
+                let file = (hasher.finish() & v4::ecs::component::ComponentId::MAX as u64) as v4::ecs::component::ComponentId;
+                let line = line!();
+
                 #ident {
                     #(#builder_field_idents: self.#builder_field_idents.unwrap(),)*
-                    id: std::sync::OnceLock::new(),
+                    id:
+                        if self.id == 0 {
+                            file + line
+                        } else {
+                            self.id
+                        },
                     parent_entity_id: 0,
                     is_initialized: false,
                     is_enabled: self.enabled,
@@ -145,13 +164,7 @@ pub fn component_impl(args: TokenStream, item: TokenStream) -> TokenStream {
 
         impl #generics v4::ecs::component::ComponentDetails for #ident #generics {
             fn id(&self) -> v4::ecs::component::ComponentId {
-                *self.id.get_or_init(|| {
-                    const PRIME: u64 = 2147483647;
-                    let address = self as *const _ as u64;
-                    let obfuscated = (address).wrapping_mul(PRIME).rotate_left(16);
-                    let new_id = (obfuscated & 0xFFFF_FFFF) as v4::ecs::component::ComponentId;
-                    new_id
-                })
+                self.id
             }
 
             fn is_initialized(&self) -> bool {

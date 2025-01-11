@@ -3,7 +3,7 @@ use std::fmt::Debug;
 use crate::v4;
 use bytemuck::{Pod, Zeroable};
 use v4_core::ecs::{
-    component::{ComponentDetails, ComponentSystem},
+    component::{ComponentDetails, ComponentId, ComponentSystem},
     entity::EntityId,
 };
 use v4_macros::component;
@@ -41,7 +41,7 @@ impl<V: VertexDescriptor> MeshComponent<V> {
             parent_entity_id: EntityId::MAX,
             is_initialized: false,
             is_enabled,
-            id: std::sync::OnceLock::new(),
+            id: ComponentId::MAX,
         }
     }
 
@@ -94,7 +94,7 @@ impl<V: VertexDescriptor> MeshComponent<V> {
             vertex_buffer: None,
             index_buffer: None,
             enabled_models: (0..model_count).collect(),
-            id: std::sync::OnceLock::new(),
+            id: ComponentId::MAX,
             parent_entity_id: 0,
             is_initialized: false,
             is_enabled,
