@@ -29,22 +29,18 @@ pub async fn main() {
         .build()
         .await;
 
-    let ident = scene! {
-        TextComponent(text: "hi".to_string(), thing: ident("hi"))
-    };
-
-    dbg!(ident);
-
     let mut scene = Scene::default();
 
-    /* let test = scene! {
+    let (text, toggle)= scene! {
         "thing" {
             components: [
-                TextComponent(text: "hi".to_string()),
-                ToggleComponent(text_component: 0),
+                TextComponent(text: "hi".to_string(), ident: "text"),
+                ToggleComponent(text_component: ident("text")),
             ]
         }
-    }; */
+    };
+
+    dbg!(text.id(), toggle);
 
     /* let other_comp = TextComponent!(text: ("hi".to_string()));
     dbg!(other_comp); */

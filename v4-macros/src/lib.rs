@@ -11,5 +11,6 @@ pub fn component(args: TokenStream, item: TokenStream) -> TokenStream {
 
 #[proc_macro]
 pub fn scene(item: TokenStream) -> TokenStream {
-    scene::scene_impl(item)
+    // scene::
+    item
 }

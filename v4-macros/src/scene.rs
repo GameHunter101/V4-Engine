@@ -3,7 +3,6 @@ use std::collections::HashMap;
 
 use darling::FromMeta;
 use proc_macro::TokenStream;
-use proc_macro2::Literal;
 use quote::{quote, ToTokens};
 use syn::{
     braced, bracketed, parenthesized,
@@ -15,36 +14,12 @@ use syn::{
 };
 use v4_core::ecs::{component::ComponentId, entity::EntityId, material::MaterialId, scene::Scene};
 
-#[derive(Debug)]
 struct SceneDescriptor {
-    entities: Vec<EntityDescriptor>,
+    entities: Vec<FlattenedEntityDescriptor>,
+    materials: HashMap<MaterialId, MaterialDescriptor>,
+    idents: HashMap<Lit, Id>,
 }
 
-impl Parse for SceneDescriptor {
-    fn parse(input: ParseStream) -> syn::Result<Self> {
-        let mut entities = Vec::new();
-        while let Ok(entity_ident) = input.parse::<Lit>() {
-            let entity = EntityDescriptor {
-                components: todo!(),
-                material: todo!(),
-                children: todo!(),
-                parent: todo!(),
-                ident: if entity_ident == Lit::new(Literal::string("_")) {
-                    None
-                } else {
-                    Some(entity_ident)
-                },
-            };
-            entities.push(entity_ident);
-        }
-
-        Ok(SceneDescriptor {
-            entities: Vec::new(),
-        })
-    }
-}
-
-#[derive(Debug)]
 struct EntityDescriptor {
     ident: Option<Lit>,
     components: Vec<ComponentDescriptor>,
@@ -58,6 +33,161 @@ enum EntityParameters {
     Material(MaterialDescriptor),
     Children(Vec<EntityDescriptor>),
     Parent(EntityDescriptor),
+}
+
+#[derive(Default)]
+struct FlattenedEntityDescriptor {
+    ident: Option<Lit>,
+    components: Vec<ComponentDescriptor>,
+    material: Option<MaterialId>,
+    children: Option<Vec<EntityId>>,
+    parent: Option<EntityId>,
+}
+
+impl Parse for SceneDescriptor {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let recursed_entities = input.parse_terminated(EntityDescriptor::parse, Token![,])?;
+        let mut items_count = 0;
+        let (idents_map, flattened_entities, materials): (
+            HashMap<Lit, Id>,
+            Vec<FlattenedEntityDescriptor>,
+            HashMap<MaterialId, MaterialDescriptor>,
+        ) = recursed_entities
+            .into_iter()
+            .map(|entity| parse_idents(entity, &mut items_count))
+            .reduce(|(mut acc_id, mut acc_ent, mut acc_mat), (id, ent, mat)| {
+                acc_id.extend(id);
+                acc_ent.extend(ent);
+                acc_mat.extend(mat);
+                (acc_id, acc_ent, acc_mat)
+            })
+            .unwrap();
+
+        Ok(Self {
+            entities: flattened_entities,
+            materials,
+            idents: idents_map,
+        })
+    }
+}
+
+impl quote::ToTokens for SceneDescriptor {
+    fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
+        let entities_construction = self.entities.iter().map(|entity| {
+            let parent = entity.parent;
+            let components = entity.components.iter().map(|comp| {
+                let comp_type = &comp.component_type;
+                let component_params = comp.params.iter().map(|param| {
+                    let name = &param.ident;
+                    if let Some(value) = &param.value {
+                        if let Some(ident) = value.get_ident() {
+                            let id = self.idents.get(&ident).unwrap();
+                            return quote! {.#name(#id)};
+                        }
+                    }
+                    match &param.value {
+                        Some(value) => quote! {.#name(#value)},
+                        None => quote! {.#name(#name)},
+                    }
+                });
+
+                let set_id = match &comp.ident {
+                    Some(ident) => {
+                        let id = self.idents.get(ident).unwrap();
+                        quote! {.id(#id)}
+                    }
+                    None => quote! {},
+                };
+
+                quote! {
+                    Box::new(#comp_type::builder()#(#component_params)*#set_id.build())
+                }
+            });
+
+            /* let mat = if let Some(mat) = entity.material {
+                quote! {
+                    scene.create_material()
+                }
+            } else {
+            }; */
+
+            quote! {
+                scene.create_entity(
+                    #parent,
+                    vec![#(#components),*],
+
+                )
+            }
+        });
+
+        tokens.extend(quote! {
+            let mut scene = v4::ecs::scene::Scene::new();
+        });
+    }
+}
+
+fn parse_idents(
+    entity_descriptor: EntityDescriptor,
+    id_count: &mut u32,
+) -> (
+    HashMap<Lit, Id>,
+    Vec<FlattenedEntityDescriptor>,
+    HashMap<MaterialId, MaterialDescriptor>,
+) {
+    let mut id_map = HashMap::new();
+    let mut flattened_entities = Vec::new();
+    let mut materials = HashMap::new();
+
+    let mut this_flattened_entity = FlattenedEntityDescriptor::default();
+
+    if let Some(this_ident) = entity_descriptor.ident {
+        *id_count += 1;
+        id_map.insert(this_ident.clone(), Id::Entity(*id_count as EntityId));
+        this_flattened_entity.ident = Some(this_ident);
+    }
+
+    this_flattened_entity.components = entity_descriptor.components;
+
+    for component in &this_flattened_entity.components {
+        if let Some(ident) = &component.ident {
+            *id_count += 1;
+            id_map.insert(ident.clone(), Id::Component(*id_count as ComponentId));
+        }
+    }
+
+
+    if let Some(material_descriptor) = entity_descriptor.material {
+        if let Some(material_ident) = &material_descriptor.ident {
+            *id_count += 1;
+            id_map.insert(
+                material_ident.clone(),
+                Id::Material(*id_count as MaterialId),
+            );
+
+            materials.insert(*id_count as MaterialId, material_descriptor);
+            this_flattened_entity.material = Some(*id_count as MaterialId);
+        }
+    }
+
+    if let Some(parent_descriptor) = entity_descriptor.parent {
+        let (parent_ids, parent_entities, parent_materials) =
+            parse_idents(*parent_descriptor, id_count);
+        id_map.extend(parent_ids);
+        flattened_entities.extend(parent_entities);
+        materials.extend(parent_materials);
+    }
+
+    if let Some(children) = entity_descriptor.children {
+        for child_descriptor in children {
+            let (child_ids, child_entities, child_materials) =
+                parse_idents(child_descriptor, id_count);
+            id_map.extend(child_ids);
+            flattened_entities.extend(child_entities);
+            materials.extend(child_materials);
+        }
+    }
+
+    (id_map, flattened_entities, materials)
 }
 
 impl Parse for EntityParameters {
@@ -133,7 +263,6 @@ impl Parse for EntityDescriptor {
     }
 }
 
-#[derive(Debug)]
 struct ComponentDescriptor {
     component_type: Ident,
     params: Vec<SimpleField>,
@@ -147,30 +276,68 @@ impl Parse for ComponentDescriptor {
         let content;
         parenthesized!(content in input);
 
-        let params = content
+        let mut params: Vec<SimpleField> = content
             .parse_terminated(SimpleField::parse, Token![,])?
             .into_iter()
             .collect();
 
+        let ident = params
+            .iter()
+            .filter(|param| &param.ident.to_string() == "ident" && param.value.is_some())
+            .flat_map(|param| {
+                if let SimpleFieldValue::Literal(ident) = param.value.as_ref().unwrap() {
+                    Some(ident.clone())
+                } else {
+                    None
+                }
+            })
+            .next();
+
+        if let Some(ident) = &ident {
+            params.remove(
+                params
+                    .iter()
+                    .position(|param| param.value == Some(SimpleFieldValue::Literal(ident.clone())))
+                    .unwrap(),
+            );
+        }
+
         let mut component = ComponentDescriptor {
             component_type,
             params,
-            ident: None,
+            ident,
         };
         Ok(component)
     }
 }
 
-#[derive(Debug)]
+struct SimpleField {
+    ident: Ident,
+    value: Option<SimpleFieldValue>,
+}
+
+#[derive(PartialEq)]
 enum SimpleFieldValue {
     Expression(Expr),
     Literal(Lit),
 }
 
-#[derive(Debug)]
-struct SimpleField {
-    ident: Ident,
-    value: Option<SimpleFieldValue>,
+impl SimpleFieldValue {
+    fn get_ident(&self) -> Option<Lit> {
+        if let SimpleFieldValue::Expression(Expr::Call(ExprCall { func, args, .. })) = &self {
+            if let Expr::Path(ExprPath { path, .. }) = *func.clone() {
+                if let Some(possible_ident) = path.get_ident() {
+                    if &possible_ident.to_string() == "ident" {
+                        if let Some(Expr::Lit(lit)) = args.first() {
+                            return Some(lit.lit.clone());
+                        }
+                    }
+                }
+            }
+        }
+
+        None
+    }
 }
 
 impl Parse for SimpleField {
@@ -195,7 +362,15 @@ impl Parse for SimpleField {
     }
 }
 
-#[derive(Debug)]
+impl quote::ToTokens for SimpleFieldValue {
+    fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
+        tokens.extend(match self {
+            SimpleFieldValue::Expression(expr) => quote! {#expr},
+            SimpleFieldValue::Literal(lit) => quote! {#lit},
+        });
+    }
+}
+
 struct MaterialDescriptor {
     vertex_shader_path: LitStr,
     fragment_shader_path: LitStr,
@@ -206,11 +381,25 @@ struct MaterialDescriptor {
 impl Parse for MaterialDescriptor {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let params = input.parse_terminated(SimpleField::parse, Token![,])?;
+
+        let ident = params
+            .iter()
+            .filter(|param| &param.ident.to_string() == "ident" && param.value.is_some())
+            .flat_map(|param| {
+                if let SimpleFieldValue::Literal(ident) = param.value.as_ref().unwrap() {
+                    Some(ident.clone())
+                } else {
+                    None
+                }
+            })
+            .next();
+
         let mut material_descriptor = MaterialDescriptor {
             vertex_shader_path: LitStr::from_string("")?,
             fragment_shader_path: LitStr::from_string("")?,
-            ident: None,
+            ident,
         };
+
         for param in params {
             match param.ident.to_string().as_str() {
                 "vertex_shader_path" => {
@@ -246,148 +435,18 @@ impl Parse for MaterialDescriptor {
     }
 }
 
-pub fn scene_impl(item: TokenStream) -> TokenStream {
-    // Component creation
-    let ComponentDescriptor {
-        component_type,
-        mut params,
-        ident,
-    } = parse_macro_input!(item as ComponentDescriptor);
-
-    let mut identifier: Option<Lit> = None;
-
-    let mut removal_index = None;
-
-    for (i, param) in params.iter().enumerate() {
-        if let Some(SimpleFieldValue::Expression(Expr::Call(ExprCall { func, args, .. }))) =
-            &param.value
-        {
-            if let Expr::Path(ExprPath { path, .. }) = *func.clone() {
-                if let Some(possible_ident) = path.get_ident() {
-                    if &possible_ident.to_string() == "ident" {
-                        if let Some(Expr::Lit(lit)) = args.first() {
-                            identifier = Some(lit.lit.clone());
-                            removal_index = Some(i);
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    if let Some(index) = removal_index {
-        params.remove(index);
-    }
-
-    let builder_function_calls = params.into_iter().map(|param| {
-        let SimpleField { ident, value } = param;
-        if let Some(value) = value {
-            match value {
-                SimpleFieldValue::Expression(expr) => quote! {.#ident(#expr)},
-                SimpleFieldValue::Literal(lit) => quote! {.#ident(#lit)},
-            }
-        } else {
-            quote! {.#ident(#ident)}
-        }
-    });
-
-    if let Some(ident) = identifier {
-        quote! {#ident}.into()
-    } else {
-        quote! {
-            5
-        }
-        .into()
-    }
-
-    /* quote! {
-        #component_type::builder()
-        #(#builder_function_calls)*.build()
-    }
-    .into() */
-
-    /* let entity = parse_macro_input!(item as EntityDescriptor);
-
-    let idents_map = parse_idents(&entity, &mut 0);
-
-    let EntityDescriptor { ident, components, material, children, parent } = entity;
-
-    let components_construction: Vec<proc_macro2::TokenStream> = components
-        .into_iter()
-        .map(|component| {
-            let ComponentDescriptor {
-                component_type,
-                params,
-                ident,
-            } = component;
-
-            let builder_function_calls = params.into_iter().map(|param| {
-                let SimpleField { ident, value } = param;
-                if let Some(value) = value {
-                    match value {
-                        SimpleFieldValue::Expression(expr) => quote! {.#ident(#expr)},
-                        SimpleFieldValue::Literal(lit) => quote! {.#ident(#lit)},
-                    }
-                } else {
-                    quote! {.#ident(#ident)}
-                }
-            });
-
-            quote! {
-                #component_type::builder()
-                #(#builder_function_calls)*.build()
-            }
-        })
-        .collect();
-
-    quote! {
-        scene.create_entity()
-        (#(#components_construction,)*)
-    }
-    .into() */
-}
-
-#[derive(Debug)]
 pub enum Id {
     Entity(EntityId),
     Component(ComponentId),
     Material(MaterialId),
 }
 
-fn parse_idents(entity_descriptor: &EntityDescriptor, id_count: &mut u32) -> HashMap<Lit, Id> {
-    let mut map = HashMap::new();
-
-    if let Some(this_ident) = &entity_descriptor.ident {
-        *id_count += 1;
-        map.insert(this_ident.clone(), Id::Entity(*id_count as EntityId));
+impl quote::ToTokens for Id {
+    fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
+        tokens.extend(match self {
+            Id::Entity(id) => quote! {#id},
+            Id::Component(id) => quote! {#id},
+            Id::Material(id) => quote! {#id},
+        });
     }
-
-    for component in &entity_descriptor.components {
-        if let Some(ident) = &component.ident {
-            *id_count += 1;
-            map.insert(ident.clone(), Id::Component(*id_count as ComponentId));
-        }
-    }
-
-    if let Some(parent_descriptor) = &entity_descriptor.parent {
-        map.extend(parse_idents(parent_descriptor, id_count));
-    }
-
-    if let Some(children) = &entity_descriptor.children {
-        for child_descriptor in children {
-            map.extend(parse_idents(child_descriptor, id_count));
-        }
-    }
-
-    if let Some(material_descriptor) = &entity_descriptor.material {
-        if let Some(material_ident) = &material_descriptor.ident {
-            *id_count += 1;
-            map.insert(
-                material_ident.clone(),
-                Id::Material(*id_count as MaterialId),
-            );
-        }
-    }
-
-    map
 }
