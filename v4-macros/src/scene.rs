@@ -24,7 +24,7 @@ struct EntityDescriptor {
     ident: Option<Lit>,
     components: Vec<ComponentDescriptor>,
     material: Option<MaterialDescriptor>,
-    children: Option<Vec<EntityDescriptor>>,
+    children: Vec<EntityDescriptor>,
     parent: Option<Box<EntityDescriptor>>,
 }
 
@@ -40,8 +40,9 @@ struct FlattenedEntityDescriptor {
     ident: Option<Lit>,
     components: Vec<ComponentDescriptor>,
     material: Option<MaterialId>,
-    children: Option<Vec<EntityId>>,
+    children: Vec<EntityId>,
     parent: Option<EntityId>,
+    id: EntityId,
 }
 
 impl Parse for SceneDescriptor {
@@ -126,6 +127,59 @@ impl quote::ToTokens for SceneDescriptor {
     }
 }
 
+fn flatten_entities(
+    entity: EntityDescriptor,
+    id_offset: EntityId,
+) -> Vec<FlattenedEntityDescriptor> {
+    let mut flattened = Vec::new();
+
+    let mut num_children_flattened = 0;
+    for child in entity.children {
+        let mut flattened_children = flatten_entities(child, id_offset);
+        for flattened_child in &mut flattened_children {
+            flattened_child.id += num_children_flattened;
+            num_children_flattened += 1;
+        }
+        flattened.extend(flattened_children);
+    }
+
+    let children_indices = (id_offset..=flattened.len() as EntityId).collect();
+
+    let mut parent_id_offset = flattened.len() as EntityId;
+    let parent = if let Some(parent) = entity.parent {
+        let mut flattened_parent = flatten_entities(*parent, id_offset);
+        for entity in &mut flattened_parent {
+            entity.id += parent_id_offset;
+            parent_id_offset += 1;
+        }
+        let parent_id = flattened_parent.last().unwrap().id;
+        flattened_parent
+            .last_mut()
+            .unwrap()
+            .children
+            .push(parent_id + 1);
+        flattened.extend(flattened_parent);
+        Some(parent_id)
+    } else {
+        None
+    };
+
+    flattened.push(FlattenedEntityDescriptor {
+        ident: entity.ident,
+        components: entity.components,
+        material: None,
+        children: children_indices,
+        parent,
+        id: if let Some(last) = flattened.last() {
+            last.id + 1
+        } else {
+            id_offset
+        },
+    });
+
+    flattened
+}
+
 fn parse_idents(
     entity_descriptor: EntityDescriptor,
     id_count: &mut u32,
@@ -134,7 +188,8 @@ fn parse_idents(
     Vec<FlattenedEntityDescriptor>,
     HashMap<MaterialId, MaterialDescriptor>,
 ) {
-    let mut id_map = HashMap::new();
+    todo!()
+    /* let mut id_map = HashMap::new();
     let mut flattened_entities = Vec::new();
     let mut materials = HashMap::new();
 
@@ -154,7 +209,6 @@ fn parse_idents(
             id_map.insert(ident.clone(), Id::Component(*id_count as ComponentId));
         }
     }
-
 
     if let Some(material_descriptor) = entity_descriptor.material {
         if let Some(material_ident) = &material_descriptor.ident {
@@ -177,17 +231,14 @@ fn parse_idents(
         materials.extend(parent_materials);
     }
 
-    if let Some(children) = entity_descriptor.children {
-        for child_descriptor in children {
-            let (child_ids, child_entities, child_materials) =
-                parse_idents(child_descriptor, id_count);
-            id_map.extend(child_ids);
-            flattened_entities.extend(child_entities);
-            materials.extend(child_materials);
-        }
+    for child_descriptor in entity_descriptor.children {
+        let (child_ids, child_entities, child_materials) = parse_idents(child_descriptor, id_count);
+        id_map.extend(child_ids);
+        flattened_entities.extend(child_entities);
+        materials.extend(child_materials);
     }
 
-    (id_map, flattened_entities, materials)
+    (id_map, flattened_entities, materials) */
 }
 
 impl Parse for EntityParameters {
@@ -237,7 +288,7 @@ impl Parse for EntityDescriptor {
             ident,
             components: Vec::new(),
             material: None,
-            children: None,
+            children: Vec::new(),
             parent: None,
         };
 
@@ -251,7 +302,7 @@ impl Parse for EntityDescriptor {
                     entity_descriptor.material = Some(material_descriptor)
                 }
                 EntityParameters::Children(children) => {
-                    entity_descriptor.children = Some(children);
+                    entity_descriptor.children = children;
                 }
                 EntityParameters::Parent(parent) => {
                     entity_descriptor.parent = Some(Box::new(parent))
