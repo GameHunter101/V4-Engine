@@ -76,7 +76,7 @@ impl<'a> RenderingManager {
             format,
             width: window_size.width,
             height: window_size.height,
-            present_mode: surface_caps.present_modes[0],
+            present_mode: wgpu::PresentMode::AutoNoVsync,
             desired_maximum_frame_latency: 2,
             alpha_mode: surface_caps.alpha_modes[0],
             view_formats: vec![],

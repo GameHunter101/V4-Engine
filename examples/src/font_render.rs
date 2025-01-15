@@ -1,10 +1,7 @@
 use v4::{
     builtin_actions::UpdateTextComponentAction,
     component,
-    ecs::{
-        component::{ComponentDetails, ComponentId, ComponentSystem},
-        scene::Scene,
-    },
+    ecs::component::{ComponentDetails, ComponentId, ComponentSystem},
     engine_management::font_management::{TextComponentProperties, TextDisplayInfo},
     scene, V4,
 };
@@ -29,32 +26,14 @@ pub async fn main() {
         .build()
         .await;
 
-    let mut scene = Scene::default();
-
-    let (text, toggle)= scene! {
-        "thing" {
+    scene! {
+        "main" = {
             components: [
-                TextComponent(text: "hi".to_string(), ident: "text"),
+                TextComponent(text: "something".to_string(), ident: "text"),
                 ToggleComponent(text_component: ident("text")),
             ]
-        }
+        },
     };
-
-    dbg!(text.id(), toggle);
-
-    /* let other_comp = TextComponent!(text: ("hi".to_string()));
-    dbg!(other_comp); */
-
-    let text_component = TextComponent::builder().text("hi".to_string()).build();
-    let toggle_component = ToggleComponent::builder()
-        .text_component(text_component.id())
-        .build();
-    let _text_entity_id = scene.create_entity(
-        None,
-        vec![Box::new(text_component), Box::new(toggle_component)],
-        None,
-        true,
-    );
 
     engine.attach_scene(scene);
 

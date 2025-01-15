@@ -3,7 +3,7 @@ use std::collections::HashMap;
 
 use darling::FromMeta;
 use proc_macro::TokenStream;
-use quote::{quote, ToTokens};
+use quote::{format_ident, quote, ToTokens};
 use syn::{
     braced, bracketed, parenthesized,
     parse::{discouraged::AnyDelimiter, Parse, ParseStream},
@@ -14,231 +14,247 @@ use syn::{
 };
 use v4_core::ecs::{component::ComponentId, entity::EntityId, material::MaterialId, scene::Scene};
 
-struct SceneDescriptor {
-    entities: Vec<FlattenedEntityDescriptor>,
-    materials: HashMap<MaterialId, MaterialDescriptor>,
+pub struct SceneDescriptor {
+    entities: Vec<TransformedEntityDescriptor>,
     idents: HashMap<Lit, Id>,
+    relationships: HashMap<EntityId, Vec<EntityId>>,
+    materials: Vec<MaterialDescriptor>,
+}
+
+struct TransformedEntityDescriptor {
+    components: Vec<ComponentDescriptor>,
+    material: Option<MaterialId>,
+    parent: Option<EntityId>,
+    id: EntityId,
+    is_enabled: bool,
+    ident: Option<Lit>,
 }
 
 struct EntityDescriptor {
     ident: Option<Lit>,
     components: Vec<ComponentDescriptor>,
     material: Option<MaterialDescriptor>,
-    children: Vec<EntityDescriptor>,
-    parent: Option<Box<EntityDescriptor>>,
+    parent: Option<Lit>,
+    is_enabled: bool,
 }
 
 enum EntityParameters {
     Components(Vec<ComponentDescriptor>),
     Material(MaterialDescriptor),
-    Children(Vec<EntityDescriptor>),
-    Parent(EntityDescriptor),
-}
-
-#[derive(Default)]
-struct FlattenedEntityDescriptor {
-    ident: Option<Lit>,
-    components: Vec<ComponentDescriptor>,
-    material: Option<MaterialId>,
-    children: Vec<EntityId>,
-    parent: Option<EntityId>,
-    id: EntityId,
+    Parent(Lit),
+    Enabled(bool),
 }
 
 impl Parse for SceneDescriptor {
     fn parse(input: ParseStream) -> syn::Result<Self> {
-        let recursed_entities = input.parse_terminated(EntityDescriptor::parse, Token![,])?;
-        let mut items_count = 0;
-        let (idents_map, flattened_entities, materials): (
-            HashMap<Lit, Id>,
-            Vec<FlattenedEntityDescriptor>,
-            HashMap<MaterialId, MaterialDescriptor>,
-        ) = recursed_entities
+        let entities: Vec<EntityDescriptor> = input
+            .parse_terminated(EntityDescriptor::parse, Token![,])?
             .into_iter()
-            .map(|entity| parse_idents(entity, &mut items_count))
-            .reduce(|(mut acc_id, mut acc_ent, mut acc_mat), (id, ent, mat)| {
-                acc_id.extend(id);
-                acc_ent.extend(ent);
-                acc_mat.extend(mat);
-                (acc_id, acc_ent, acc_mat)
-            })
-            .unwrap();
+            .collect();
+        let mut idents: HashMap<Lit, Id> = HashMap::new();
+        let mut relationships: HashMap<EntityId, Vec<EntityId>> = HashMap::new();
+        let mut materials = Vec::new();
+
+        let mut current_ident = 1;
+        let transformed_entities = entities.into_iter().map(|entity| {
+
+            let material_id = if let Some(material) = entity.material {
+                if let Some(ident) = &material.ident {
+                    idents.insert(ident.clone(), Id::Material(materials.len()));
+                }
+                materials.push(material);
+                Some(materials.len() - 1)
+            } else {
+                None
+            };
+
+            let mut transformed_entity = TransformedEntityDescriptor {
+                components: entity.components,
+                material: material_id,
+                parent: None,
+                id: current_ident,
+                is_enabled: entity.is_enabled,
+                ident: entity.ident,
+            };
+
+            if let Some(ident) = &transformed_entity.ident {
+                idents.insert(ident.clone(), Id::Entity(current_ident));
+                current_ident += 1;
+            }
+
+            if let Some(parent_ident) = &entity.parent {
+                if let Some(parent_id) = idents.get(parent_ident) {
+                    let Id::Entity(parent_id) = parent_id else {
+                        return Err(syn::Error::new_spanned(
+                            parent_ident,
+                            format!("Two objects share the same identifier: \"{parent_ident:?}\""),
+                        ));
+                    };
+                    if let Some(children) = relationships.get_mut(parent_id) {
+                        children.push(transformed_entity.id);
+                    } else {
+                        relationships.insert(*parent_id, vec![transformed_entity.id]);
+                    }
+                } else {
+                    return Err(syn::Error::new_spanned(parent_ident, format!("The parent entity \"{parent_ident:?}\" could not be found. If you declared it, make sure it is declared above the current entity")));
+                }
+            }
+
+            for component in &transformed_entity.components {
+                if let Some(ident) = &component.ident {
+                    idents.insert(ident.clone(), Id::Component(current_ident));
+                    current_ident += 1;
+                }
+            }
+
+            Ok(transformed_entity)
+        }).collect::<syn::Result<Vec<TransformedEntityDescriptor>>>()?;
 
         Ok(Self {
-            entities: flattened_entities,
+            entities: transformed_entities,
+            idents,
+            relationships,
             materials,
-            idents: idents_map,
         })
     }
 }
 
 impl quote::ToTokens for SceneDescriptor {
     fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
-        let entities_construction = self.entities.iter().map(|entity| {
-            let parent = entity.parent;
-            let components = entity.components.iter().map(|comp| {
-                let comp_type = &comp.component_type;
-                let component_params = comp.params.iter().map(|param| {
-                    let name = &param.ident;
+        let entity_initializations = self.entities.iter().map(|entity| {
+            let parent_id = match entity.parent {
+                Some(id) => quote! {Some(#id)},
+                None => quote! {None},
+            };
+
+            let component_initializations = entity.components.iter().map(|component| {
+                let component_type = &component.component_type;
+                let params = component.params.iter().map(|param| {
+                    let field = &param.ident;
                     if let Some(value) = &param.value {
                         if let Some(ident) = value.get_ident() {
                             let id = self.idents.get(&ident).unwrap();
-                            return quote! {.#name(#id)};
+                            quote! {.#field(#id)}
+                        } else {
+                            quote! {.#field(#value)}
                         }
-                    }
-                    match &param.value {
-                        Some(value) => quote! {.#name(#value)},
-                        None => quote! {.#name(#name)},
+                    } else {
+                        quote! {.#field(#field)}
                     }
                 });
-
-                let set_id = match &comp.ident {
-                    Some(ident) => {
-                        let id = self.idents.get(ident).unwrap();
-                        quote! {.id(#id)}
-                    }
-                    None => quote! {},
+                let id_set = if let Some(ident) = &component.ident {
+                    let id = self.idents.get(ident).unwrap();
+                    quote! {.id(#id)}
+                } else {
+                    quote! {}
                 };
 
                 quote! {
-                    Box::new(#comp_type::builder()#(#component_params)*#set_id.build())
+                    Box::new(#component_type::builder()#(#params)*#id_set.build())
                 }
             });
 
-            /* let mat = if let Some(mat) = entity.material {
-                quote! {
-                    scene.create_material()
-                }
+            let material = if let Some(material_id) = entity.material {
+                quote! {Some(#material_id)}
             } else {
-            }; */
+                quote! {None}
+            };
+
+            let is_enabled = entity.is_enabled;
+
+            let entity_ident = if let Some(ident) = &entity.ident {
+                let entity_name = match ident {
+                    Lit::Str(lit_str) => format!("entity_{}", lit_str.value()),
+                    Lit::ByteStr(lit_byte_str) => format!(
+                        "entity_{}",
+                        String::from_utf8(lit_byte_str.value()).unwrap()
+                    ),
+                    Lit::CStr(lit_cstr) => format!("entity_{}", lit_cstr.value().to_str().unwrap()),
+                    Lit::Byte(lit_byte) => format!("entity_{}", lit_byte.value()),
+                    Lit::Char(lit_char) => format!("entity_{}", lit_char.value()),
+                    Lit::Int(lit_int) => {
+                        format!("entity_{}", lit_int.base10_parse::<u32>().unwrap())
+                    }
+                    Lit::Float(lit_float) => {
+                        format!("entity_{}", lit_float.base10_parse::<f32>().unwrap())
+                    }
+                    Lit::Bool(lit_bool) => format!("entity_{}", lit_bool.value()),
+                    Lit::Verbatim(literal) => format!("entity_{}", literal),
+                    _ => todo!(),
+                };
+                let ident = format_ident!("{}", entity_name);
+                quote! {#ident}
+            } else {
+                quote! {_}
+            };
 
             quote! {
-                scene.create_entity(
-                    #parent,
-                    vec![#(#components),*],
-
-                )
+                let #entity_ident = scene.create_entity(
+                    #parent_id,
+                    vec![#(#component_initializations,)*],
+                    #material,
+                    #is_enabled,
+                );
             }
         });
 
         tokens.extend(quote! {
-            let mut scene = v4::ecs::scene::Scene::new();
+            let mut scene = v4::ecs::scene::Scene::default();
+
+            #(#entity_initializations)*
         });
     }
 }
 
-fn flatten_entities(
-    entity: EntityDescriptor,
-    id_offset: EntityId,
-) -> Vec<FlattenedEntityDescriptor> {
-    let mut flattened = Vec::new();
+impl Parse for EntityDescriptor {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let ident = {
+            if input.peek(Token![_]) {
+                let _: Token![_] = input.parse()?;
+                let _: Token![=] = input.parse()?;
+                None
+            } else if input.peek(syn::token::Brace) {
+                None
+            } else {
+                let raw_ident: Lit = input.parse()?;
+                let _: Token![=] = input.parse()?;
+                match raw_ident {
+                    Lit::Str(lit_str) => {
+                        if lit_str.value() == *"_" {
+                            None
+                        } else {
+                            Some(Lit::Str(lit_str))
+                        }
+                    }
+                    lit => Some(lit),
+                }
+            }
+        };
 
-    let mut num_children_flattened = 0;
-    for child in entity.children {
-        let mut flattened_children = flatten_entities(child, id_offset);
-        for flattened_child in &mut flattened_children {
-            flattened_child.id += num_children_flattened;
-            num_children_flattened += 1;
+        let mut entity_descriptor = EntityDescriptor {
+            ident,
+            components: Vec::new(),
+            material: None,
+            parent: None,
+            is_enabled: true,
+        };
+
+        let content;
+        braced!(content in input);
+        let parameters = content.parse_terminated(EntityParameters::parse, Token![,])?;
+        for param in parameters {
+            match param {
+                EntityParameters::Components(vec) => entity_descriptor.components = vec,
+                EntityParameters::Material(material_descriptor) => {
+                    entity_descriptor.material = Some(material_descriptor)
+                }
+                EntityParameters::Parent(parent) => entity_descriptor.parent = Some(parent),
+                EntityParameters::Enabled(is_enabled) => entity_descriptor.is_enabled = is_enabled,
+            }
         }
-        flattened.extend(flattened_children);
+
+        Ok(entity_descriptor)
     }
-
-    let children_indices = (id_offset..=flattened.len() as EntityId).collect();
-
-    let mut parent_id_offset = flattened.len() as EntityId;
-    let parent = if let Some(parent) = entity.parent {
-        let mut flattened_parent = flatten_entities(*parent, id_offset);
-        for entity in &mut flattened_parent {
-            entity.id += parent_id_offset;
-            parent_id_offset += 1;
-        }
-        let parent_id = flattened_parent.last().unwrap().id;
-        flattened_parent
-            .last_mut()
-            .unwrap()
-            .children
-            .push(parent_id + 1);
-        flattened.extend(flattened_parent);
-        Some(parent_id)
-    } else {
-        None
-    };
-
-    flattened.push(FlattenedEntityDescriptor {
-        ident: entity.ident,
-        components: entity.components,
-        material: None,
-        children: children_indices,
-        parent,
-        id: if let Some(last) = flattened.last() {
-            last.id + 1
-        } else {
-            id_offset
-        },
-    });
-
-    flattened
-}
-
-fn parse_idents(
-    entity_descriptor: EntityDescriptor,
-    id_count: &mut u32,
-) -> (
-    HashMap<Lit, Id>,
-    Vec<FlattenedEntityDescriptor>,
-    HashMap<MaterialId, MaterialDescriptor>,
-) {
-    todo!()
-    /* let mut id_map = HashMap::new();
-    let mut flattened_entities = Vec::new();
-    let mut materials = HashMap::new();
-
-    let mut this_flattened_entity = FlattenedEntityDescriptor::default();
-
-    if let Some(this_ident) = entity_descriptor.ident {
-        *id_count += 1;
-        id_map.insert(this_ident.clone(), Id::Entity(*id_count as EntityId));
-        this_flattened_entity.ident = Some(this_ident);
-    }
-
-    this_flattened_entity.components = entity_descriptor.components;
-
-    for component in &this_flattened_entity.components {
-        if let Some(ident) = &component.ident {
-            *id_count += 1;
-            id_map.insert(ident.clone(), Id::Component(*id_count as ComponentId));
-        }
-    }
-
-    if let Some(material_descriptor) = entity_descriptor.material {
-        if let Some(material_ident) = &material_descriptor.ident {
-            *id_count += 1;
-            id_map.insert(
-                material_ident.clone(),
-                Id::Material(*id_count as MaterialId),
-            );
-
-            materials.insert(*id_count as MaterialId, material_descriptor);
-            this_flattened_entity.material = Some(*id_count as MaterialId);
-        }
-    }
-
-    if let Some(parent_descriptor) = entity_descriptor.parent {
-        let (parent_ids, parent_entities, parent_materials) =
-            parse_idents(*parent_descriptor, id_count);
-        id_map.extend(parent_ids);
-        flattened_entities.extend(parent_entities);
-        materials.extend(parent_materials);
-    }
-
-    for child_descriptor in entity_descriptor.children {
-        let (child_ids, child_entities, child_materials) = parse_idents(child_descriptor, id_count);
-        id_map.extend(child_ids);
-        flattened_entities.extend(child_entities);
-        materials.extend(child_materials);
-    }
-
-    (id_map, flattened_entities, materials) */
 }
 
 impl Parse for EntityParameters {
@@ -255,62 +271,20 @@ impl Parse for EntityParameters {
                 ))
             }
             "material" => Ok(EntityParameters::Material(input.parse()?)),
-            "children" => {
-                let content;
-                bracketed!(content in input);
-                let entities = content.parse_terminated(EntityDescriptor::parse, Token![,])?;
-                Ok(EntityParameters::Children(entities.into_iter().collect()))
-            }
             "parent" => Ok(EntityParameters::Parent(input.parse()?)),
+            "enabled" => {
+                let lit: Lit = input.parse()?;
+                if let Lit::Bool(lit_bool) = lit {
+                    Ok(EntityParameters::Enabled(lit_bool.value))
+                } else {
+                    Err(syn::Error::new_spanned(lit, "Expected a boolean literal"))
+                }
+            }
             _ => Err(syn::Error::new_spanned(
                 param_type,
-                "Invalid argument passed into the entity descriptor.",
+                "Invalid argument passed into the entity descriptor",
             )),
         }
-    }
-}
-
-impl Parse for EntityDescriptor {
-    fn parse(input: ParseStream) -> syn::Result<Self> {
-        let raw_ident: Lit = input.parse()?;
-        let mut ident = match raw_ident {
-            Lit::Str(lit_str) => {
-                if lit_str.value() == *"_" {
-                    None
-                } else {
-                    Some(Lit::Str(lit_str))
-                }
-            }
-            lit => Some(lit),
-        };
-
-        let mut entity_descriptor = EntityDescriptor {
-            ident,
-            components: Vec::new(),
-            material: None,
-            children: Vec::new(),
-            parent: None,
-        };
-
-        let content;
-        braced!(content in input);
-        let parameters = content.parse_terminated(EntityParameters::parse, Token![,])?;
-        for param in parameters {
-            match param {
-                EntityParameters::Components(vec) => entity_descriptor.components = vec,
-                EntityParameters::Material(material_descriptor) => {
-                    entity_descriptor.material = Some(material_descriptor)
-                }
-                EntityParameters::Children(children) => {
-                    entity_descriptor.children = children;
-                }
-                EntityParameters::Parent(parent) => {
-                    entity_descriptor.parent = Some(Box::new(parent))
-                }
-            }
-        }
-
-        Ok(entity_descriptor)
     }
 }
 
@@ -459,7 +433,7 @@ impl Parse for MaterialDescriptor {
                     } else {
                         return Err(syn::Error::new_spanned(
                             param.ident,
-                            "Vertex shader path requires a string literal.",
+                            "Vertex shader path requires a string literal",
                         ));
                     }
                 }
@@ -469,7 +443,7 @@ impl Parse for MaterialDescriptor {
                     } else {
                         return Err(syn::Error::new_spanned(
                             param.ident,
-                            "Fragment shader path requires a string literal.",
+                            "Fragment shader path requires a string literal",
                         ));
                     }
                 }
@@ -477,7 +451,7 @@ impl Parse for MaterialDescriptor {
                 _ => {
                     return Err(syn::Error::new_spanned(
                         param.ident,
-                        "Invalid argument passed into the material descriptor.",
+                        "Invalid argument passed into the material descriptor",
                     ));
                 }
             }

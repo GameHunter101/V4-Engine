@@ -1,5 +1,8 @@
 extern crate proc_macro;
 use proc_macro::TokenStream;
+use quote::quote;
+use scene::SceneDescriptor;
+use syn::parse_macro_input;
 
 mod component;
 mod scene;
@@ -11,6 +14,7 @@ pub fn component(args: TokenStream, item: TokenStream) -> TokenStream {
 
 #[proc_macro]
 pub fn scene(item: TokenStream) -> TokenStream {
-    // scene::
-    item
+    let scene = parse_macro_input!(item as SceneDescriptor);
+
+    quote! {#scene}.into()
 }
