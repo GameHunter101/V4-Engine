@@ -24,11 +24,11 @@ impl PipelineId {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct GeometryDetails {
-    topology: wgpu::PrimitiveTopology,
-    strip_index_format: Option<wgpu::IndexFormat>,
-    front_face: wgpu::FrontFace,
-    cull_mode: Option<wgpu::Face>,
-    polygon_mode: wgpu::PolygonMode,
+    pub topology: wgpu::PrimitiveTopology,
+    pub strip_index_format: Option<wgpu::IndexFormat>,
+    pub front_face: wgpu::FrontFace,
+    pub cull_mode: Option<wgpu::Face>,
+    pub polygon_mode: wgpu::PolygonMode,
 }
 
 impl Default for GeometryDetails {

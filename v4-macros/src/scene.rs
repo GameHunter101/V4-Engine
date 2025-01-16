@@ -3,12 +3,14 @@ use std::collections::HashMap;
 
 use darling::FromMeta;
 use proc_macro::TokenStream;
+use proc_macro2::Span;
 use quote::{format_ident, quote, ToTokens};
 use syn::{
     braced, bracketed, parenthesized,
     parse::{discouraged::AnyDelimiter, Parse, ParseStream},
     parse_macro_input, parse_quote,
     punctuated::Punctuated,
+    spanned::Spanned,
     Expr, ExprCall, ExprLit, ExprPath, FieldValue, Ident, Lit, LitStr, Member, PatLit, PatPath,
     Token,
 };
@@ -19,30 +21,6 @@ pub struct SceneDescriptor {
     idents: HashMap<Lit, Id>,
     relationships: HashMap<EntityId, Vec<EntityId>>,
     materials: Vec<MaterialDescriptor>,
-}
-
-struct TransformedEntityDescriptor {
-    components: Vec<ComponentDescriptor>,
-    material: Option<MaterialId>,
-    parent: Option<EntityId>,
-    id: EntityId,
-    is_enabled: bool,
-    ident: Option<Lit>,
-}
-
-struct EntityDescriptor {
-    ident: Option<Lit>,
-    components: Vec<ComponentDescriptor>,
-    material: Option<MaterialDescriptor>,
-    parent: Option<Lit>,
-    is_enabled: bool,
-}
-
-enum EntityParameters {
-    Components(Vec<ComponentDescriptor>),
-    Material(MaterialDescriptor),
-    Parent(Lit),
-    Enabled(bool),
 }
 
 impl Parse for SceneDescriptor {
@@ -154,11 +132,11 @@ impl quote::ToTokens for SceneDescriptor {
                 }
             });
 
-            let material = if let Some(material_id) = entity.material {
+            /* let material = if let Some(material_id) = entity.material {
                 quote! {Some(#material_id)}
             } else {
                 quote! {None}
-            };
+            }; */
 
             let is_enabled = entity.is_enabled;
 
@@ -180,7 +158,7 @@ impl quote::ToTokens for SceneDescriptor {
                     }
                     Lit::Bool(lit_bool) => format!("entity_{}", lit_bool.value()),
                     Lit::Verbatim(literal) => format!("entity_{}", literal),
-                    _ => todo!(),
+                    _ => "unnamed_entity".to_string(),
                 };
                 let ident = format_ident!("{}", entity_name);
                 quote! {#ident}
@@ -192,7 +170,8 @@ impl quote::ToTokens for SceneDescriptor {
                 let #entity_ident = scene.create_entity(
                     #parent_id,
                     vec![#(#component_initializations,)*],
-                    #material,
+                    // #material,
+                    None,
                     #is_enabled,
                 );
             }
@@ -204,6 +183,38 @@ impl quote::ToTokens for SceneDescriptor {
             #(#entity_initializations)*
         });
     }
+}
+
+struct TransformedEntityDescriptor {
+    components: Vec<ComponentDescriptor>,
+    material: Option<MaterialId>,
+    parent: Option<EntityId>,
+    id: EntityId,
+    is_enabled: bool,
+    ident: Option<Lit>,
+}
+pub enum Id {
+    Entity(EntityId),
+    Component(ComponentId),
+    Material(MaterialId),
+}
+
+impl quote::ToTokens for Id {
+    fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
+        tokens.extend(match self {
+            Id::Entity(id) => quote! {#id},
+            Id::Component(id) => quote! {#id},
+            Id::Material(id) => quote! {#id},
+        });
+    }
+}
+
+struct EntityDescriptor {
+    ident: Option<Lit>,
+    components: Vec<ComponentDescriptor>,
+    material: Option<MaterialDescriptor>,
+    parent: Option<Lit>,
+    is_enabled: bool,
 }
 
 impl Parse for EntityDescriptor {
@@ -255,6 +266,13 @@ impl Parse for EntityDescriptor {
 
         Ok(entity_descriptor)
     }
+}
+
+enum EntityParameters {
+    Components(Vec<ComponentDescriptor>),
+    Material(MaterialDescriptor),
+    Parent(Lit),
+    Enabled(bool),
 }
 
 impl Parse for EntityParameters {
@@ -341,6 +359,28 @@ struct SimpleField {
     value: Option<SimpleFieldValue>,
 }
 
+impl Parse for SimpleField {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let ident = input.parse::<Ident>()?;
+        let colon = input.parse::<Token![:]>();
+        let mut value = None;
+        if colon.is_ok() {
+            if let Ok(expr) = input.parse::<Expr>() {
+                if let Expr::Lit(lit) = expr {
+                    value = Some(SimpleFieldValue::Literal(lit.lit));
+                } else {
+                    value = Some(SimpleFieldValue::Expression(expr));
+                }
+            }
+            if let Ok(lit) = input.parse::<Lit>() {
+                value = Some(SimpleFieldValue::Literal(lit));
+            }
+        }
+
+        Ok(SimpleField { ident, value })
+    }
+}
+
 #[derive(PartialEq)]
 enum SimpleFieldValue {
     Expression(Expr),
@@ -365,28 +405,6 @@ impl SimpleFieldValue {
     }
 }
 
-impl Parse for SimpleField {
-    fn parse(input: ParseStream) -> syn::Result<Self> {
-        let ident = input.parse::<Ident>()?;
-        let colon = input.parse::<Token![:]>();
-        let mut value = None;
-        if colon.is_ok() {
-            if let Ok(expr) = input.parse::<Expr>() {
-                if let Expr::Lit(lit) = expr {
-                    value = Some(SimpleFieldValue::Literal(lit.lit));
-                } else {
-                    value = Some(SimpleFieldValue::Expression(expr));
-                }
-            }
-            if let Ok(lit) = input.parse::<Lit>() {
-                value = Some(SimpleFieldValue::Literal(lit));
-            }
-        }
-
-        Ok(SimpleField { ident, value })
-    }
-}
-
 impl quote::ToTokens for SimpleFieldValue {
     fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
         tokens.extend(match self {
@@ -397,81 +415,255 @@ impl quote::ToTokens for SimpleFieldValue {
 }
 
 struct MaterialDescriptor {
-    vertex_shader_path: LitStr,
-    fragment_shader_path: LitStr,
-    // TODO: textures: TextureDescriptor,
+    pipeline_id: PipelineId,
+    attachments: Vec<MaterialAttachmentDescriptor>,
     ident: Option<Lit>,
 }
 
 impl Parse for MaterialDescriptor {
     fn parse(input: ParseStream) -> syn::Result<Self> {
-        let params = input.parse_terminated(SimpleField::parse, Token![,])?;
+        let content;
+        braced!(content in input);
+        let params = content.parse_terminated(MaterialParameters::parse, Token![,])?;
 
-        let ident = params
-            .iter()
-            .filter(|param| &param.ident.to_string() == "ident" && param.value.is_some())
-            .flat_map(|param| {
-                if let SimpleFieldValue::Literal(ident) = param.value.as_ref().unwrap() {
-                    Some(ident.clone())
-                } else {
-                    None
-                }
-            })
-            .next();
-
-        let mut material_descriptor = MaterialDescriptor {
-            vertex_shader_path: LitStr::from_string("")?,
-            fragment_shader_path: LitStr::from_string("")?,
-            ident,
-        };
+        let mut pipeline_id: Option<PipelineId> = None;
+        let mut attachments: Vec<MaterialAttachmentDescriptor> = Vec::new();
+        let mut ident: Option<Lit> = None;
 
         for param in params {
-            match param.ident.to_string().as_str() {
+            match param {
+                MaterialParameters::Pipeline(specified_pipeline_id) => {
+                    pipeline_id = Some(specified_pipeline_id)
+                }
+                MaterialParameters::Attachments(specified_attachments) => {
+                    attachments = specified_attachments
+                }
+                MaterialParameters::Ident(lit) => ident = Some(lit),
+            }
+        }
+
+        let Some(pipeline_id) = pipeline_id else {
+            return Err(input.error("A pipeline ID must be specified"));
+        };
+
+        Ok(MaterialDescriptor {
+            pipeline_id,
+            attachments,
+            ident,
+        })
+    }
+}
+
+enum MaterialParameters {
+    Pipeline(PipelineId),
+    Attachments(Vec<MaterialAttachmentDescriptor>),
+    Ident(Lit),
+}
+
+impl Parse for MaterialParameters {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let field_identifier: Ident = input.parse()?;
+        let _: Token![:] = input.parse()?;
+
+        match field_identifier.to_string().as_str() {
+            "pipeline" => Ok(Self::Pipeline(input.parse()?)),
+            "attachments" => {
+                let content;
+                bracketed!(content in input);
+                Ok(Self::Attachments(
+                    content
+                        .parse_terminated(MaterialAttachmentDescriptor::parse, Token![,])?
+                        .into_iter()
+                        .collect(),
+                ))
+            }
+            "ident" => Ok(Self::Ident(input.parse()?)),
+            _ => Err(syn::Error::new_spanned(
+                field_identifier,
+                "Invalid argument passed into the material descriptor",
+            )),
+        }
+    }
+}
+
+enum PipelineId {
+    Ident(Lit),
+    Specifier(Expr),
+}
+
+impl Parse for PipelineId {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        // if input.peek(ExprCall) {
+            Ok(Self::Specifier(input.parse()?))
+        /* } else {
+            let val = SimpleFieldValue::Expression(input.parse()?);
+            if let Some(ident) = val.get_ident() {
+                Ok(Self::Ident(ident))
+            } else {
+                let span = match val {
+                    SimpleFieldValue::Expression(expr) => expr.span(),
+                    SimpleFieldValue::Literal(lit) => lit.span(),
+                };
+                Err(syn::Error::new(
+                    span,
+                    "Error getting an identifier for a pipeline ID",
+                ))
+            }
+        } */
+    }
+}
+
+struct PipelineIdDescriptor {
+    vertex_shader_path: LitStr,
+    fragment_shader_path: LitStr,
+    vertex_layouts: Vec<Expr>,
+    geometry_details: Option<GeometryDetailsDescriptor>,
+}
+
+impl Parse for PipelineIdDescriptor {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let content;
+        braced!(content in input);
+        let fields = content.parse_terminated(SimpleField::parse, Token![,])?;
+        let mut vertex_shader_path: Option<LitStr> = None;
+        let mut fragment_shader_path: Option<LitStr> = None;
+        let mut vertex_layouts: Vec<Expr> = Vec::new();
+        let mut geometry_details: Option<GeometryDetailsDescriptor> = None;
+
+        for field in fields {
+            match field.ident.to_string().as_str() {
                 "vertex_shader_path" => {
-                    if let Some(SimpleFieldValue::Literal(Lit::Str(str))) = param.value {
-                        material_descriptor.vertex_shader_path = str;
-                    } else {
-                        return Err(syn::Error::new_spanned(
-                            param.ident,
-                            "Vertex shader path requires a string literal",
-                        ));
+                    if let Some(value) = field.value {
+                        match value {
+                            SimpleFieldValue::Expression(expr) => {
+                                return Err(syn::Error::new(
+                                    expr.span(),
+                                    "Only string literals are valid paths",
+                                ))
+                            }
+                            SimpleFieldValue::Literal(lit) => {
+                                if let Lit::Str(str) = lit {
+                                    vertex_shader_path = Some(str)
+                                } else {
+                                    return Err(syn::Error::new(
+                                        lit.span(),
+                                        "Only string literals are valid paths",
+                                    ));
+                                }
+                            }
+                        }
                     }
                 }
                 "fragment_shader_path" => {
-                    if let Some(SimpleFieldValue::Literal(Lit::Str(str))) = param.value {
-                        material_descriptor.fragment_shader_path = str;
-                    } else {
-                        return Err(syn::Error::new_spanned(
-                            param.ident,
-                            "Fragment shader path requires a string literal",
-                        ));
+                    if let Some(value) = field.value {
+                        match value {
+                            SimpleFieldValue::Expression(expr) => {
+                                return Err(syn::Error::new(
+                                    expr.span(),
+                                    "Only string literals are valid paths",
+                                ))
+                            }
+                            SimpleFieldValue::Literal(lit) => {
+                                if let Lit::Str(str) = lit {
+                                    fragment_shader_path = Some(str)
+                                } else {
+                                    return Err(syn::Error::new(
+                                        lit.span(),
+                                        "Only string literals are valid paths",
+                                    ));
+                                }
+                            }
+                        }
                     }
                 }
-                "ident" => material_descriptor.ident = input.parse()?,
+                "vertex_layouts" => {
+                    /* let content;
+                    // bracketed!(content in input);
+                    vertex_layouts = content
+                        .parse_terminated(Expr::parse, Token![,])?
+                        .into_iter()
+                        .collect(); */
+                    let (_, _, content) = input.parse_any_delimiter()?;
+                    vertex_layouts = content
+                        .parse_terminated(Expr::parse, Token![,])?
+                        .into_iter()
+                        .collect();
+                }
+                "geometry_details" => geometry_details = Some(input.parse()?),
                 _ => {
                     return Err(syn::Error::new_spanned(
-                        param.ident,
-                        "Invalid argument passed into the material descriptor",
-                    ));
+                        field.ident,
+                        "Invalid argument passed into the pipeline descriptor",
+                    ))
                 }
             }
         }
-        Ok(material_descriptor)
+
+        let Some(vertex_shader_path) = vertex_shader_path else {
+            return Err(input.error("A vertex shader path must be specified"));
+        };
+        let Some(fragment_shader_path) = fragment_shader_path else {
+            return Err(input.error("A fragment shader path must be specified"));
+        };
+
+        Ok(PipelineIdDescriptor {
+            vertex_shader_path,
+            fragment_shader_path,
+            vertex_layouts,
+            geometry_details,
+        })
     }
 }
 
-pub enum Id {
-    Entity(EntityId),
-    Component(ComponentId),
-    Material(MaterialId),
+#[derive(Default)]
+struct GeometryDetailsDescriptor {
+    topology: Option<ExprPath>,
+    strip_index_format: Option<ExprPath>,
+    front_face: Option<ExprPath>,
+    cull_mode: Option<ExprPath>,
+    polygon_mode: Option<ExprPath>,
 }
 
-impl quote::ToTokens for Id {
-    fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
-        tokens.extend(match self {
-            Id::Entity(id) => quote! {#id},
-            Id::Component(id) => quote! {#id},
-            Id::Material(id) => quote! {#id},
-        });
+impl Parse for GeometryDetailsDescriptor {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let content;
+        braced!(content in input);
+        let fields = content.parse_terminated(SimpleField::parse, Token![,])?;
+
+        let mut details = GeometryDetailsDescriptor::default();
+
+        for field in fields {
+            match field.ident.to_string().as_str() {
+                "topology" => details.topology = Some(input.parse()?),
+                "strip_index_format" => details.strip_index_format = Some(input.parse()?),
+                "front_face" => details.front_face = Some(input.parse()?),
+                "cull_mode" => details.cull_mode = Some(input.parse()?),
+                "polygon_mode" => details.polygon_mode = Some(input.parse()?),
+                _ => {
+                    return Err(syn::Error::new_spanned(
+                        field.ident,
+                        "Invalid argument passed into the pipeline geometry details descriptor",
+                    ))
+                }
+            }
+        }
+
+        Ok(details)
     }
 }
+
+enum MaterialAttachmentDescriptor {
+    Texture(MaterialTextureAttachment),
+    Buffer(MaterialBufferAttachment),
+}
+
+impl Parse for MaterialAttachmentDescriptor {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        // let ident =
+        Err(input.error("hi"))
+    }
+}
+
+struct MaterialTextureAttachment {}
+
+struct MaterialBufferAttachment {}

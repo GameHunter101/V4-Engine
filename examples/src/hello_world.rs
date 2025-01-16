@@ -7,7 +7,7 @@ use v4::{
         pipeline::{GeometryDetails, PipelineId},
         scene::Scene,
     },
-    V4,
+    scene, V4,
 };
 use wgpu::vertex_attr_array;
 
@@ -32,6 +32,19 @@ pub async fn main() {
 
     let rendering_manager = engine.rendering_manager();
     let device = rendering_manager.device();
+
+    scene! {
+        {
+            material: {
+                pipeline: PipelineId {
+                    vertex_shader_path: "shaders/hello_world/vertex.wgsl",
+                    fragment_shader_path: "shaders/hello_world/fragment.wgsl",
+                    vertex_layouts: ["thing"],
+                },
+                // ident: "some_material"
+            }
+        }
+    }
 
     let mut scene = Scene::default();
     let material = scene.create_material(
