@@ -36,15 +36,18 @@ pub async fn main() {
     scene! {
         {
             material: {
-                pipeline: PipelineId {
+                pipeline: {
                     vertex_shader_path: "shaders/hello_world/vertex.wgsl",
                     fragment_shader_path: "shaders/hello_world/fragment.wgsl",
-                    vertex_layouts: ["thing"],
+                    vertex_layouts: [Vertex::vertex_layout()]
                 },
-                // ident: "some_material"
-            }
+            },
+            components: [MeshComponent<Vertex>()]
         }
     }
+        MeshComponent::<Vertex>::from_obj("assets/models/basic_cube.obj", true)
+            .await
+            .unwrap();
 
     let mut scene = Scene::default();
     let material = scene.create_material(

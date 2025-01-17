@@ -8,11 +8,11 @@ use quote::{format_ident, quote, ToTokens};
 use syn::{
     braced, bracketed, parenthesized,
     parse::{discouraged::AnyDelimiter, Parse, ParseStream},
-    parse_macro_input, parse_quote,
+    parse2, parse_macro_input, parse_quote,
     punctuated::Punctuated,
     spanned::Spanned,
-    Expr, ExprCall, ExprLit, ExprPath, FieldValue, Ident, Lit, LitStr, Member, PatLit, PatPath,
-    Token,
+    Expr, ExprCall, ExprLit, ExprPath, FieldValue, Generics, Ident, Lit, LitStr, Member, PatLit,
+    PatPath, Token,
 };
 use v4_core::ecs::{component::ComponentId, entity::EntityId, material::MaterialId, scene::Scene};
 
@@ -107,6 +107,8 @@ impl quote::ToTokens for SceneDescriptor {
 
             let component_initializations = entity.components.iter().map(|component| {
                 let component_type = &component.component_type;
+                let component_generics = &component.component_generics;
+
                 let params = component.params.iter().map(|param| {
                     let field = &param.ident;
                     if let Some(value) = &param.value {
@@ -128,7 +130,7 @@ impl quote::ToTokens for SceneDescriptor {
                 };
 
                 quote! {
-                    Box::new(#component_type::builder()#(#params)*#id_set.build())
+                    Box::new(#component_type(#component_generics)::builder()#(#params)*#id_set.build())
                 }
             });
 
@@ -308,6 +310,7 @@ impl Parse for EntityParameters {
 
 struct ComponentDescriptor {
     component_type: Ident,
+    component_generics: Generics,
     params: Vec<SimpleField>,
     ident: Option<Lit>,
 }
@@ -315,6 +318,7 @@ struct ComponentDescriptor {
 impl Parse for ComponentDescriptor {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let component_type: Ident = input.parse()?;
+        let generics: Generics = input.parse()?;
 
         let content;
         parenthesized!(content in input);
@@ -347,6 +351,7 @@ impl Parse for ComponentDescriptor {
 
         let mut component = ComponentDescriptor {
             component_type,
+            component_generics: generics,
             params,
             ident,
         };
@@ -488,14 +493,14 @@ impl Parse for MaterialParameters {
 
 enum PipelineId {
     Ident(Lit),
-    Specifier(Expr),
+    Specifier(PipelineIdDescriptor),
 }
 
 impl Parse for PipelineId {
     fn parse(input: ParseStream) -> syn::Result<Self> {
-        // if input.peek(ExprCall) {
+        if input.peek(syn::token::Brace) {
             Ok(Self::Specifier(input.parse()?))
-        /* } else {
+        } else {
             let val = SimpleFieldValue::Expression(input.parse()?);
             if let Some(ident) = val.get_ident() {
                 Ok(Self::Ident(ident))
@@ -509,14 +514,14 @@ impl Parse for PipelineId {
                     "Error getting an identifier for a pipeline ID",
                 ))
             }
-        } */
+        }
     }
 }
 
 struct PipelineIdDescriptor {
     vertex_shader_path: LitStr,
     fragment_shader_path: LitStr,
-    vertex_layouts: Vec<Expr>,
+    vertex_layouts: Vec<ExprCall>,
     geometry_details: Option<GeometryDetailsDescriptor>,
 }
 
@@ -527,7 +532,7 @@ impl Parse for PipelineIdDescriptor {
         let fields = content.parse_terminated(SimpleField::parse, Token![,])?;
         let mut vertex_shader_path: Option<LitStr> = None;
         let mut fragment_shader_path: Option<LitStr> = None;
-        let mut vertex_layouts: Vec<Expr> = Vec::new();
+        let mut vertex_layouts: Vec<ExprCall> = Vec::new();
         let mut geometry_details: Option<GeometryDetailsDescriptor> = None;
 
         for field in fields {
@@ -577,17 +582,20 @@ impl Parse for PipelineIdDescriptor {
                     }
                 }
                 "vertex_layouts" => {
-                    /* let content;
-                    // bracketed!(content in input);
-                    vertex_layouts = content
-                        .parse_terminated(Expr::parse, Token![,])?
-                        .into_iter()
-                        .collect(); */
-                    let (_, _, content) = input.parse_any_delimiter()?;
-                    vertex_layouts = content
-                        .parse_terminated(Expr::parse, Token![,])?
-                        .into_iter()
-                        .collect();
+                    if let Some(value) = field.value {
+                        match value {
+                            SimpleFieldValue::Expression(expr) => {
+                                let stream = quote! {#expr};
+                                vertex_layouts = parse2::<VertexLayoutsDescriptor>(stream)?.0;
+                            }
+                            SimpleFieldValue::Literal(lit) => {
+                                return Err(syn::Error::new(
+                                    lit.span(),
+                                    "Invalid value for vertex layout",
+                                ))
+                            }
+                        }
+                    }
                 }
                 "geometry_details" => geometry_details = Some(input.parse()?),
                 _ => {
@@ -612,6 +620,21 @@ impl Parse for PipelineIdDescriptor {
             vertex_layouts,
             geometry_details,
         })
+    }
+}
+
+struct VertexLayoutsDescriptor(Vec<ExprCall>);
+
+impl Parse for VertexLayoutsDescriptor {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let content;
+        bracketed!(content in input);
+        Ok(Self(
+            content
+                .parse_terminated(ExprCall::parse, Token![,])?
+                .into_iter()
+                .collect(),
+        ))
     }
 }
 
