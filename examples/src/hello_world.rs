@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use tokio::sync::Mutex;
 use v4::{
-    builtin_components::mesh_component::{MeshComponent, VertexDescriptor},
+    builtin_components::mesh_component::{MeshComponent, MeshComponentBuilder, VertexDescriptor},
     ecs::{
         pipeline::{GeometryDetails, PipelineId},
         scene::Scene,
@@ -42,12 +42,12 @@ pub async fn main() {
                     vertex_layouts: [Vertex::vertex_layout()]
                 },
             },
-            components: [MeshComponent<Vertex>()]
+            components: [MeshComponent<Vertex>::from_obj("assets/models/basic_cube.obj", true).await.unwrap()]
         }
     }
-        MeshComponent::<Vertex>::from_obj("assets/models/basic_cube.obj", true)
-            .await
-            .unwrap();
+    MeshComponent::<Vertex>::from_obj("assets/models/basic_cube.obj", true)
+        .await
+        .unwrap();
 
     let mut scene = Scene::default();
     let material = scene.create_material(

@@ -123,17 +123,17 @@ pub fn component_impl(args: TokenStream, item: TokenStream) -> TokenStream {
         impl #generics #builder_ident #generics {
             #(#builder_methods)*
 
-            fn enabled(mut self, enabled: bool) -> Self {
+            pub fn enabled(mut self, enabled: bool) -> Self {
                 self.enabled = enabled;
                 self
             }
 
-            fn id(mut self, id: v4::ecs::component::ComponentId) -> Self {
+            pub fn id(mut self, id: v4::ecs::component::ComponentId) -> Self {
                 self.id = id;
                 self
             }
 
-            fn build(self) -> #ident #generics {
+            pub fn build(self) -> #ident #generics {
                 use std::hash::{DefaultHasher, Hash, Hasher};
 
                 let mut hasher = DefaultHasher::new();
@@ -157,7 +157,7 @@ pub fn component_impl(args: TokenStream, item: TokenStream) -> TokenStream {
         }
 
         impl #generics #ident #generics {
-            fn builder() -> #builder_ident #generics {
+            pub fn builder() -> #builder_ident #generics {
                 #builder_ident::default()
             }
         }

@@ -2,8 +2,7 @@
 use std::collections::HashMap;
 
 use darling::FromMeta;
-use proc_macro::TokenStream;
-use proc_macro2::Span;
+use proc_macro2::{Span, TokenStream as TokenStream2};
 use quote::{format_ident, quote, ToTokens};
 use syn::{
     braced, bracketed, parenthesized,
@@ -11,8 +10,8 @@ use syn::{
     parse2, parse_macro_input, parse_quote,
     punctuated::Punctuated,
     spanned::Spanned,
-    Expr, ExprCall, ExprLit, ExprPath, FieldValue, Generics, Ident, Lit, LitStr, Member, PatLit,
-    PatPath, Token,
+    Expr, ExprAwait, ExprCall, ExprField, ExprLit, ExprPath, FieldValue, Generics, Ident, Lit,
+    LitStr, Member, PatLit, PatPath, Token,
 };
 use v4_core::ecs::{component::ComponentId, entity::EntityId, material::MaterialId, scene::Scene};
 
@@ -98,7 +97,7 @@ impl Parse for SceneDescriptor {
 }
 
 impl quote::ToTokens for SceneDescriptor {
-    fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
+    fn to_tokens(&self, tokens: &mut TokenStream2) {
         let entity_initializations = self.entities.iter().map(|entity| {
             let parent_id = match entity.parent {
                 Some(id) => quote! {Some(#id)},
@@ -107,31 +106,45 @@ impl quote::ToTokens for SceneDescriptor {
 
             let component_initializations = entity.components.iter().map(|component| {
                 let component_type = &component.component_type;
-                let component_generics = &component.component_generics;
-
-                let params = component.params.iter().map(|param| {
-                    let field = &param.ident;
-                    if let Some(value) = &param.value {
-                        if let Some(ident) = value.get_ident() {
-                            let id = self.idents.get(&ident).unwrap();
-                            quote! {.#field(#id)}
-                        } else {
-                            quote! {.#field(#value)}
-                        }
-                    } else {
-                        quote! {.#field(#field)}
-                    }
-                });
-                let id_set = if let Some(ident) = &component.ident {
-                    let id = self.idents.get(ident).unwrap();
-                    quote! {.id(#id)}
-                } else {
+                let component_generics =
+                if component.generics.params.is_empty() {
                     quote! {}
+                } else {
+                    let generics = &component.generics;
+                    quote!{::#generics}
                 };
 
-                quote! {
-                    Box::new(#component_type(#component_generics)::builder()#(#params)*#id_set.build())
+                if let Some(constructor) = &component.custom_constructor {
+
+                    quote! {
+                        Box::new(#component_type #component_generics::#constructor)
+                    }
+                } else {
+                    let params = component.params.iter().map(|param| {
+                        let field = &param.ident;
+                        if let Some(value) = &param.value {
+                            if let Some(ident) = value.get_ident() {
+                                let id = self.idents.get(&ident).unwrap();
+                                quote! {.#field(#id)}
+                            } else {
+                                quote! {.#field(#value)}
+                            }
+                        } else {
+                            quote! {.#field(#field)}
+                        }
+                    });
+                    let id_set = if let Some(ident) = &component.ident {
+                        let id = self.idents.get(ident).unwrap();
+                        quote! {.id(#id)}
+                    } else {
+                        quote! {}
+                    };
+
+                    quote! {
+                        Box::new(#component_type #component_generics::builder()#(#params)*#id_set.build())
+                    }
                 }
+
             });
 
             /* let material = if let Some(material_id) = entity.material {
@@ -310,8 +323,9 @@ impl Parse for EntityParameters {
 
 struct ComponentDescriptor {
     component_type: Ident,
-    component_generics: Generics,
+    generics: Generics,
     params: Vec<SimpleField>,
+    custom_constructor: Option<ComponentConstructor>,
     ident: Option<Lit>,
 }
 
@@ -320,42 +334,133 @@ impl Parse for ComponentDescriptor {
         let component_type: Ident = input.parse()?;
         let generics: Generics = input.parse()?;
 
+        if input.peek(Token![::]) {
+            let _: Token![::] = input.parse()?;
+            let mut custom_constructor: ComponentConstructor = input.parse()?;
+            let ident = custom_constructor.component_ident.take();
+
+            Ok(ComponentDescriptor {
+                component_type,
+                generics,
+                params: Vec::new(),
+                custom_constructor: Some(custom_constructor),
+                ident,
+            })
+        } else {
+            let content;
+            parenthesized!(content in input);
+
+            let mut params: Vec<SimpleField> = content
+                .parse_terminated(SimpleField::parse, Token![,])?
+                .into_iter()
+                .collect();
+
+            let ident = params
+                .iter()
+                .filter(|param| &param.ident.to_string() == "ident" && param.value.is_some())
+                .flat_map(|param| {
+                    if let SimpleFieldValue::Literal(ident) = param.value.as_ref().unwrap() {
+                        Some(ident.clone())
+                    } else {
+                        None
+                    }
+                })
+                .next();
+
+            if let Some(ident) = &ident {
+                params.remove(
+                    params
+                        .iter()
+                        .position(|param| {
+                            param.value == Some(SimpleFieldValue::Literal(ident.clone()))
+                        })
+                        .unwrap(),
+                );
+            }
+
+            Ok(ComponentDescriptor {
+                component_type,
+                generics,
+                params,
+                custom_constructor: None,
+                ident,
+            })
+        }
+    }
+}
+
+struct ComponentConstructor {
+    constructor_ident: Ident,
+    parameters: Punctuated<Expr, Token![,]>,
+    postfix: Option<TokenStream2>,
+    component_ident: Option<Lit>,
+}
+
+impl Parse for ComponentConstructor {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let constructor_ident: Ident = input.parse()?;
         let content;
         parenthesized!(content in input);
+        let mut parameters = content.parse_terminated(Expr::parse, Token![,])?;
 
-        let mut params: Vec<SimpleField> = content
-            .parse_terminated(SimpleField::parse, Token![,])?
-            .into_iter()
-            .collect();
-
-        let ident = params
+        let ident_search = parameters
             .iter()
-            .filter(|param| &param.ident.to_string() == "ident" && param.value.is_some())
-            .flat_map(|param| {
-                if let SimpleFieldValue::Literal(ident) = param.value.as_ref().unwrap() {
-                    Some(ident.clone())
-                } else {
-                    None
+            .enumerate()
+            .flat_map(|(i, param)| {
+                if let Expr::Call(ExprCall { func, args, .. }) = param {
+                    if let Expr::Path(ExprPath { path, .. }) = *func.clone() {
+                        if let Some(possible_ident) = path.get_ident() {
+                            if &possible_ident.to_string() == "ident" {
+                                if let Some(Expr::Lit(lit)) = args.first() {
+                                    return Some((i, lit.lit.clone()));
+                                }
+                            }
+                        }
+                    }
                 }
+                None
             })
             .next();
 
-        if let Some(ident) = &ident {
-            params.remove(
-                params
-                    .iter()
-                    .position(|param| param.value == Some(SimpleFieldValue::Literal(ident.clone())))
-                    .unwrap(),
-            );
-        }
+        let ident = if let Some((index, ident)) = ident_search {
+            parameters =
+                Punctuated::from_iter(parameters.into_iter().enumerate().flat_map(|(i, param)| {
+                    if i != index {
+                        Some(param)
+                    } else {
+                        None
+                    }
+                }));
 
-        let mut component = ComponentDescriptor {
-            component_type,
-            component_generics: generics,
-            params,
-            ident,
+            Some(ident)
+        } else {
+            None
         };
-        Ok(component)
+
+
+        let postfix: Option<TokenStream2> = if input.is_empty() {
+            None
+        } else {
+            Some(input.parse()?)
+        };
+
+        Ok(ComponentConstructor {
+            constructor_ident,
+            parameters,
+            postfix,
+            component_ident: ident,
+        })
+    }
+}
+
+impl quote::ToTokens for ComponentConstructor {
+    fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
+        let constructor_ident = &self.constructor_ident;
+        let parameters = &self.parameters;
+        let postfix = &self.postfix;
+        tokens.extend(quote! {
+            #constructor_ident(#parameters)#postfix
+        });
     }
 }
 
