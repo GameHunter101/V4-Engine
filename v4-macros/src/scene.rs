@@ -19,7 +19,8 @@ pub struct SceneDescriptor {
     entities: Vec<TransformedEntityDescriptor>,
     idents: HashMap<Lit, Id>,
     relationships: HashMap<EntityId, Vec<EntityId>>,
-    materials: Vec<MaterialDescriptor>,
+    materials: Vec<TransformedMaterialDescriptor>,
+    pipelines: Vec<PipelineIdDescriptor>
 }
 
 impl Parse for SceneDescriptor {
@@ -31,15 +32,46 @@ impl Parse for SceneDescriptor {
         let mut idents: HashMap<Lit, Id> = HashMap::new();
         let mut relationships: HashMap<EntityId, Vec<EntityId>> = HashMap::new();
         let mut materials = Vec::new();
+        let mut pipelines = Vec::new();
 
         let mut current_ident = 1;
         let transformed_entities = entities.into_iter().map(|entity| {
 
-            let material_id = if let Some(material) = entity.material {
+            let material_id = if let Some(mut material) = entity.material {
+                let pipeline_id = match &material.pipeline_id {
+                    PipelineIdVariants::Ident(pipeline_ident) => match idents.get(pipeline_ident) {
+                        Some(id) => {
+                            if let Id::Pipeline(id) = *id {
+                                Ok(id)
+                            } else {
+                                return Err(syn::Error::new(pipeline_ident.span(), 
+                                    format!("Two objects share the same identifier: \"{pipeline_ident:?}\"")));
+                            }
+                        },
+                        None => Err(syn::Error::new(
+                            pipeline_ident.span(),
+                            format!("The pipeline \"{pipeline_ident:?}\" could not be found. If you declared it, make sure it is declared above the current entity")
+                        )),
+                    },
+                    PipelineIdVariants::Specifier(pipeline_id_descriptor) => {
+                        let pipeline_id = pipelines.len();
+                        if let Some(pipeline_ident) = &pipeline_id_descriptor.ident {
+                            idents.insert(pipeline_ident.clone(), Id::Pipeline(pipeline_id));
+                        }
+                        pipelines.push(pipeline_id_descriptor.clone());
+
+                        Ok(pipeline_id)
+                    },
+                }?;
+
                 if let Some(ident) = &material.ident {
                     idents.insert(ident.clone(), Id::Material(materials.len()));
                 }
-                materials.push(material);
+
+                materials.push(TransformedMaterialDescriptor {
+                    pipeline_id: usize::MAX,
+                    attachments: material.attachments,
+                });
                 Some(materials.len() - 1)
             } else {
                 None
@@ -47,7 +79,7 @@ impl Parse for SceneDescriptor {
 
             let mut transformed_entity = TransformedEntityDescriptor {
                 components: entity.components,
-                material: material_id,
+                material_id,
                 parent: None,
                 id: current_ident,
                 is_enabled: entity.is_enabled,
@@ -92,12 +124,82 @@ impl Parse for SceneDescriptor {
             idents,
             relationships,
             materials,
+            pipelines,
         })
     }
 }
 
 impl quote::ToTokens for SceneDescriptor {
     fn to_tokens(&self, tokens: &mut TokenStream2) {
+
+        let pipeline_id_initializations: Vec<TokenStream2> = self.pipelines.iter().map(
+            |PipelineIdDescriptor { vertex_shader_path, fragment_shader_path, vertex_layouts, geometry_details, .. }| {
+                let geometry_details = match geometry_details {
+                    Some(GeometryDetailsDescriptor { topology, strip_index_format, front_face, cull_mode, polygon_mode }) => {
+                        let topology = if let Some(topology) = topology {
+                            quote! {topology: #topology}
+                        } else {
+                            quote! {topology: Default::default()}
+                        };
+
+                        let strip_index_format = if let Some(strip_index_format) = strip_index_format {
+                            quote! {strip_index_format: #strip_index_format}
+                        } else {
+                            quote! {strip_index_format: Default::default()}
+                        };
+
+                        let front_face = if let Some(front_face) = front_face {
+                            quote! {front_face: #front_face}
+                        } else {
+                            quote! {front_face: Default::default()}
+                        };
+
+                        let cull_mode = if let Some(cull_mode) = cull_mode {
+                            quote! {cull_mode: #cull_mode}
+                        } else {
+                            quote! {cull_mode: Default::default()}
+                        };
+
+                        let polygon_mode = if let Some(polygon_mode) = polygon_mode {
+                            quote! {polygon_mode: #polygon_mode}
+                        } else {
+                            quote! {polygon_mode: Default::default()}
+                        };
+
+                        quote! {
+                        v4::ecs::pipeline::GeometryDetails {
+                            #topology,
+                            #strip_index_format,
+                            #front_face,
+                            #cull_mode,
+                            #polygon_mode,
+                        }
+                    }},
+                    None => quote! {v4::ecs::pipeline::GeometryDetails::default()},
+                };
+                quote! {
+                    v4::ecs::pipeline::PipelineId {
+                        vertex_shader_path: #vertex_shader_path,
+                        fragment_shader_path: #fragment_shader_path,
+                        vertex_layouts: vec![#(#vertex_layouts),*],
+                        #geometry_details,
+                    }
+                }
+        }).collect();
+
+        let material_initializations = self.materials.iter().map(|mat| {
+            let pipeline_id_index = mat.pipeline_id;
+            let pipeline_id = &pipeline_id_initializations[pipeline_id_index];
+            let attachments = &mat.attachments;
+            quote! {
+                scene.create_material(
+                    device,
+                    #pipeline_id,
+                    attachments: #(#attachments),*,
+                );
+            }
+        });
+
         let entity_initializations = self.entities.iter().map(|entity| {
             let parent_id = match entity.parent {
                 Some(id) => quote! {Some(#id)},
@@ -147,11 +249,11 @@ impl quote::ToTokens for SceneDescriptor {
 
             });
 
-            /* let material = if let Some(material_id) = entity.material {
+            let material = if let Some(material_id) = &entity.material_id {
                 quote! {Some(#material_id)}
             } else {
                 quote! {None}
-            }; */
+            };
 
             let is_enabled = entity.is_enabled;
 
@@ -185,8 +287,7 @@ impl quote::ToTokens for SceneDescriptor {
                 let #entity_ident = scene.create_entity(
                     #parent_id,
                     vec![#(#component_initializations,)*],
-                    // #material,
-                    None,
+                    #material,
                     #is_enabled,
                 );
             }
@@ -195,6 +296,8 @@ impl quote::ToTokens for SceneDescriptor {
         tokens.extend(quote! {
             let mut scene = v4::ecs::scene::Scene::default();
 
+            #(#material_initializations)*
+
             #(#entity_initializations)*
         });
     }
@@ -202,7 +305,7 @@ impl quote::ToTokens for SceneDescriptor {
 
 struct TransformedEntityDescriptor {
     components: Vec<ComponentDescriptor>,
-    material: Option<MaterialId>,
+    material_id: Option<MaterialId>,
     parent: Option<EntityId>,
     id: EntityId,
     is_enabled: bool,
@@ -212,6 +315,7 @@ pub enum Id {
     Entity(EntityId),
     Component(ComponentId),
     Material(MaterialId),
+    Pipeline(usize),
 }
 
 impl quote::ToTokens for Id {
@@ -220,6 +324,7 @@ impl quote::ToTokens for Id {
             Id::Entity(id) => quote! {#id},
             Id::Component(id) => quote! {#id},
             Id::Material(id) => quote! {#id},
+            Id::Pipeline(id) => quote! {#id},
         });
     }
 }
@@ -437,7 +542,6 @@ impl Parse for ComponentConstructor {
             None
         };
 
-
         let postfix: Option<TokenStream2> = if input.is_empty() {
             None
         } else {
@@ -525,7 +629,7 @@ impl quote::ToTokens for SimpleFieldValue {
 }
 
 struct MaterialDescriptor {
-    pipeline_id: PipelineId,
+    pipeline_id: PipelineIdVariants,
     attachments: Vec<MaterialAttachmentDescriptor>,
     ident: Option<Lit>,
 }
@@ -536,7 +640,7 @@ impl Parse for MaterialDescriptor {
         braced!(content in input);
         let params = content.parse_terminated(MaterialParameters::parse, Token![,])?;
 
-        let mut pipeline_id: Option<PipelineId> = None;
+        let mut pipeline_id: Option<PipelineIdVariants> = None;
         let mut attachments: Vec<MaterialAttachmentDescriptor> = Vec::new();
         let mut ident: Option<Lit> = None;
 
@@ -564,8 +668,13 @@ impl Parse for MaterialDescriptor {
     }
 }
 
+struct TransformedMaterialDescriptor {
+    pipeline_id: usize,
+    attachments: Vec<MaterialAttachmentDescriptor>,
+}
+
 enum MaterialParameters {
-    Pipeline(PipelineId),
+    Pipeline(PipelineIdVariants),
     Attachments(Vec<MaterialAttachmentDescriptor>),
     Ident(Lit),
 }
@@ -596,12 +705,13 @@ impl Parse for MaterialParameters {
     }
 }
 
-enum PipelineId {
+#[derive(Clone)]
+enum PipelineIdVariants {
     Ident(Lit),
     Specifier(PipelineIdDescriptor),
 }
 
-impl Parse for PipelineId {
+impl Parse for PipelineIdVariants {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         if input.peek(syn::token::Brace) {
             Ok(Self::Specifier(input.parse()?))
@@ -623,11 +733,13 @@ impl Parse for PipelineId {
     }
 }
 
+#[derive(Clone)]
 struct PipelineIdDescriptor {
     vertex_shader_path: LitStr,
     fragment_shader_path: LitStr,
     vertex_layouts: Vec<ExprCall>,
     geometry_details: Option<GeometryDetailsDescriptor>,
+    ident: Option<Lit>,
 }
 
 impl Parse for PipelineIdDescriptor {
@@ -639,6 +751,7 @@ impl Parse for PipelineIdDescriptor {
         let mut fragment_shader_path: Option<LitStr> = None;
         let mut vertex_layouts: Vec<ExprCall> = Vec::new();
         let mut geometry_details: Option<GeometryDetailsDescriptor> = None;
+        let mut ident: Option<Lit> = None;
 
         for field in fields {
             match field.ident.to_string().as_str() {
@@ -703,6 +816,7 @@ impl Parse for PipelineIdDescriptor {
                     }
                 }
                 "geometry_details" => geometry_details = Some(input.parse()?),
+                "ident" => ident = Some(input.parse()?),
                 _ => {
                     return Err(syn::Error::new_spanned(
                         field.ident,
@@ -724,6 +838,7 @@ impl Parse for PipelineIdDescriptor {
             fragment_shader_path,
             vertex_layouts,
             geometry_details,
+            ident,
         })
     }
 }
@@ -743,7 +858,7 @@ impl Parse for VertexLayoutsDescriptor {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 struct GeometryDetailsDescriptor {
     topology: Option<ExprPath>,
     strip_index_format: Option<ExprPath>,
@@ -781,17 +896,131 @@ impl Parse for GeometryDetailsDescriptor {
 }
 
 enum MaterialAttachmentDescriptor {
-    Texture(MaterialTextureAttachment),
-    Buffer(MaterialBufferAttachment),
+    Texture(MaterialTextureAttachmentDescriptor),
+    Buffer(MaterialBufferAttachmentDescriptor),
 }
 
 impl Parse for MaterialAttachmentDescriptor {
     fn parse(input: ParseStream) -> syn::Result<Self> {
-        // let ident =
-        Err(input.error("hi"))
+        let ident: Ident = input.parse()?;
+        match input.to_string().as_str() {
+            "Texture" => Ok(MaterialAttachmentDescriptor::Texture(input.parse()?)),
+            "Buffer" => Ok(MaterialAttachmentDescriptor::Buffer(input.parse()?)),
+            _ => Err(syn::Error::new(ident.span(), "Invalid Material Attachment"))
+        }
     }
 }
 
-struct MaterialTextureAttachment {}
+impl quote::ToTokens for MaterialAttachmentDescriptor {
+    fn to_tokens(&self, tokens: &mut TokenStream2) {
+        match self {
+            MaterialAttachmentDescriptor::Texture(material_texture_attachment_descriptor) => {
+                let texture = match &material_texture_attachment_descriptor.texture {
+                    Some(tex) => quote! {texture: #tex},
+                    None => quote! {texture,},
+                };
+                let visibility = match &material_texture_attachment_descriptor.visibility {
+                    Some(vis) => quote! {visibility: #vis},
+                    None => quote! {visibility,},
+                };
+                tokens.extend(quote! {
+                    v4::ecs::material::MaterialTextureAttachment {
+                        #texture,
+                        #visibility,
+                    }
+                })
+            },
+            MaterialAttachmentDescriptor::Buffer(material_buffer_attachment_descriptor) => {
+                let texture = match &material_buffer_attachment_descriptor.buffer {
+                    Some(tex) => quote! {texture: #tex},
+                    None => quote! {texture,},
+                };
+                let visibility = match &material_buffer_attachment_descriptor.visibility {
+                    Some(vis) => quote! {visibility: #vis},
+                    None => quote! {visibility,},
+                };
+                tokens.extend(quote! {
+                    v4::ecs::material::MaterialTextureAttachment {
+                        #texture,
+                        #visibility,
+                    }
+                })
+            },
+        };
 
-struct MaterialBufferAttachment {}
+
+
+    }
+}
+
+struct MaterialTextureAttachmentDescriptor {
+    texture: Option<Expr>,
+    visibility: Option<ExprPath>,
+}
+
+impl Parse for MaterialTextureAttachmentDescriptor {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let content;
+        parenthesized!(content in input);
+        let fields = content.parse_terminated(SimpleField::parse, Token![,])?;
+        let mut texture: Option<Expr> = None;
+        let mut visibility: Option<ExprPath> = None;
+        for field in fields {
+            match field.ident.to_string().as_str() {
+                "texture" => texture = match field.value {
+                    Some(value) =>  Some(match value {
+                        SimpleFieldValue::Expression(expr) => Ok(expr),
+                        SimpleFieldValue::Literal(lit) => Err(syn::Error::new(lit.span(), "Invalid texture value")),
+                    }?),
+                    None => None,
+                },
+                "visibility" => visibility = match field.value {
+                    Some(value) => Some(match value {
+                        SimpleFieldValue::Expression(expr) => if let Expr::Path(path) = expr {Ok(path)} else {Err(syn::Error::new(expr.span(), "Invalid texture visibility value"))},
+                        SimpleFieldValue::Literal(lit) => Err(syn::Error::new(lit.span(), "Invalid texture visibility value")),
+                    }?),
+                    None => None,
+                },
+                    _ => {}
+                }
+
+            }
+        Ok(MaterialTextureAttachmentDescriptor { texture, visibility })
+    }
+}
+
+struct MaterialBufferAttachmentDescriptor {
+    buffer: Option<Expr>,
+    visibility: Option<ExprPath>,
+}
+
+impl Parse for MaterialBufferAttachmentDescriptor {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let content;
+        parenthesized!(content in input);
+        let fields = content.parse_terminated(SimpleField::parse, Token![,])?;
+        let mut buffer: Option<Expr> = None;
+        let mut visibility: Option<ExprPath> = None;
+        for field in fields {
+            match field.ident.to_string().as_str() {
+                "buffer" => buffer = match field.value {
+                    Some(value) =>  Some(match value {
+                        SimpleFieldValue::Expression(expr) => Ok(expr),
+                        SimpleFieldValue::Literal(lit) => Err(syn::Error::new(lit.span(), "Invalid buffer value")),
+                    }?),
+                    None => None,
+                },
+                "visibility" => visibility = match field.value {
+                    Some(value) => Some(match value {
+                        SimpleFieldValue::Expression(expr) => if let Expr::Path(path) = expr {Ok(path)} else {Err(syn::Error::new(expr.span(), "Invalid texture visibility value"))},
+                        SimpleFieldValue::Literal(lit) => Err(syn::Error::new(lit.span(), "Invalid buffer visibility value")),
+                    }?),
+                    None => None,
+                },
+                    _ => {}
+                }
+
+            }
+        Ok(MaterialBufferAttachmentDescriptor { buffer, visibility })
+    }
+}

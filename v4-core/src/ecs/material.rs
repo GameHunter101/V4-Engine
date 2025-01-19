@@ -5,14 +5,14 @@ use crate::engine_support::texture_support::Texture;
 
 #[derive(Debug)]
 pub struct MaterialTextureAttachment {
-    texture: Texture,
-    visibility: ShaderStages,
+    pub texture: Texture,
+    pub visibility: ShaderStages,
 }
 
 #[derive(Debug)]
 pub struct MaterialBufferAttachment {
-    buffer: Buffer,
-    visibility: ShaderStages,
+    pub buffer: Buffer,
+    pub visibility: ShaderStages,
 }
 
 #[derive(Debug)]
