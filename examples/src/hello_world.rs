@@ -2,11 +2,7 @@ use std::sync::Arc;
 
 use tokio::sync::Mutex;
 use v4::{
-    builtin_components::mesh_component::{MeshComponent, MeshComponentBuilder, VertexDescriptor},
-    ecs::{
-        pipeline::{GeometryDetails, PipelineId},
-        scene::Scene,
-    },
+    builtin_components::mesh_component::{MeshComponent, VertexDescriptor},
     scene, V4,
 };
 use wgpu::vertex_attr_array;
@@ -30,11 +26,9 @@ pub async fn main() {
         async_test(clone);
     });
 
-    let rendering_manager = engine.rendering_manager();
-    let device = rendering_manager.device();
-
     scene! {
-        {
+        scene: hello_scene
+        _ = {
             material: {
                 pipeline: {
                     vertex_shader_path: "shaders/hello_world/vertex.wgsl",
@@ -42,55 +36,13 @@ pub async fn main() {
                     vertex_layouts: [Vertex::vertex_layout()]
                 },
             },
-            components: [MeshComponent<Vertex>::from_obj("assets/models/basic_cube.obj", true).await.unwrap()]
+            components: [
+                MeshComponent<Vertex>::from_obj("assets/models/basic_cube.obj", true).await.unwrap()
+            ]
         }
     }
-    MeshComponent::<Vertex>::from_obj("assets/models/basic_cube.obj", true)
-        .await
-        .unwrap();
 
-    let mut scene = Scene::default();
-    let material = scene.create_material(
-        device,
-        PipelineId {
-            vertex_shader_path: "shaders/hello_world/vertex.wgsl",
-            fragment_shader_path: "shaders/hello_world/fragment.wgsl",
-            vertex_layouts: vec![Vertex::vertex_layout()],
-            geometry_details: GeometryDetails::default(),
-        },
-        Vec::new(),
-    );
-
-    let _mesh_component = MeshComponent::new(
-        vec![vec![
-            Vertex {
-                pos: [-1.0, 1.0, 0.0],
-            },
-            Vertex {
-                pos: [-1.0, -1.0, 0.0],
-            },
-            Vertex {
-                pos: [1.0, -1.0, 0.0],
-            },
-        ]],
-        vec![vec![0, 1, 2]],
-        true,
-        vec![0],
-    );
-
-    let cube_mesh_component =
-        MeshComponent::<Vertex>::from_obj("assets/models/basic_cube.obj", true)
-            .await
-            .unwrap();
-
-    scene.create_entity(
-        None,
-        vec![Box::new(cube_mesh_component)],
-        Some(material),
-        true,
-    );
-
-    engine.attach_scene(scene);
+    engine.attach_scene(hello_scene);
 
     engine.main_loop().await;
 }

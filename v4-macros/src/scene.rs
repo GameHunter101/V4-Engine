@@ -16,6 +16,7 @@ use syn::{
 use v4_core::ecs::{component::ComponentId, entity::EntityId, material::MaterialId, scene::Scene};
 
 pub struct SceneDescriptor {
+    scene_ident: Option<Ident>,
     entities: Vec<TransformedEntityDescriptor>,
     idents: HashMap<Lit, Id>,
     relationships: HashMap<EntityId, Vec<EntityId>>,
@@ -25,6 +26,17 @@ pub struct SceneDescriptor {
 
 impl Parse for SceneDescriptor {
     fn parse(input: ParseStream) -> syn::Result<Self> {
+        let scene_ident:Option<Ident> = if input.peek(Ident) && input.peek2(Token![:]) {
+            let keyword:Ident = input.parse()?;
+            if &keyword.to_string() != "scene" {
+                return Err(syn::Error::new(keyword.span(), "Invalid identifier found. If you meant to specify a scene name you can do so using 'scene: {name}'"));
+            }
+            let _: Token![:] = input.parse()?;
+            Some(input.parse()?)
+        } else {
+            None
+        };
+
         let entities: Vec<EntityDescriptor> = input
             .parse_terminated(EntityDescriptor::parse, Token![,])?
             .into_iter()
@@ -69,7 +81,7 @@ impl Parse for SceneDescriptor {
                 }
 
                 materials.push(TransformedMaterialDescriptor {
-                    pipeline_id: usize::MAX,
+                    pipeline_id,
                     attachments: material.attachments,
                 });
                 Some(materials.len() - 1)
@@ -120,6 +132,7 @@ impl Parse for SceneDescriptor {
         }).collect::<syn::Result<Vec<TransformedEntityDescriptor>>>()?;
 
         Ok(Self {
+            scene_ident,
             entities: transformed_entities,
             idents,
             relationships,
@@ -131,60 +144,14 @@ impl Parse for SceneDescriptor {
 
 impl quote::ToTokens for SceneDescriptor {
     fn to_tokens(&self, tokens: &mut TokenStream2) {
+        let scene_name = match &self.scene_ident {
+            Some(ident) => quote!{#ident},
+            None => quote!{scene},
+        };
 
         let pipeline_id_initializations: Vec<TokenStream2> = self.pipelines.iter().map(
-            |PipelineIdDescriptor { vertex_shader_path, fragment_shader_path, vertex_layouts, geometry_details, .. }| {
-                let geometry_details = match geometry_details {
-                    Some(GeometryDetailsDescriptor { topology, strip_index_format, front_face, cull_mode, polygon_mode }) => {
-                        let topology = if let Some(topology) = topology {
-                            quote! {topology: #topology}
-                        } else {
-                            quote! {topology: Default::default()}
-                        };
-
-                        let strip_index_format = if let Some(strip_index_format) = strip_index_format {
-                            quote! {strip_index_format: #strip_index_format}
-                        } else {
-                            quote! {strip_index_format: Default::default()}
-                        };
-
-                        let front_face = if let Some(front_face) = front_face {
-                            quote! {front_face: #front_face}
-                        } else {
-                            quote! {front_face: Default::default()}
-                        };
-
-                        let cull_mode = if let Some(cull_mode) = cull_mode {
-                            quote! {cull_mode: #cull_mode}
-                        } else {
-                            quote! {cull_mode: Default::default()}
-                        };
-
-                        let polygon_mode = if let Some(polygon_mode) = polygon_mode {
-                            quote! {polygon_mode: #polygon_mode}
-                        } else {
-                            quote! {polygon_mode: Default::default()}
-                        };
-
-                        quote! {
-                        v4::ecs::pipeline::GeometryDetails {
-                            #topology,
-                            #strip_index_format,
-                            #front_face,
-                            #cull_mode,
-                            #polygon_mode,
-                        }
-                    }},
-                    None => quote! {v4::ecs::pipeline::GeometryDetails::default()},
-                };
-                quote! {
-                    v4::ecs::pipeline::PipelineId {
-                        vertex_shader_path: #vertex_shader_path,
-                        fragment_shader_path: #fragment_shader_path,
-                        vertex_layouts: vec![#(#vertex_layouts),*],
-                        #geometry_details,
-                    }
-                }
+            |pipeline| {
+                quote!{#pipeline}
         }).collect();
 
         let material_initializations = self.materials.iter().map(|mat| {
@@ -192,10 +159,9 @@ impl quote::ToTokens for SceneDescriptor {
             let pipeline_id = &pipeline_id_initializations[pipeline_id_index];
             let attachments = &mat.attachments;
             quote! {
-                scene.create_material(
-                    device,
+                #scene_name.create_material(
                     #pipeline_id,
-                    attachments: #(#attachments),*,
+                    vec![#(#attachments),*]
                 );
             }
         });
@@ -284,7 +250,7 @@ impl quote::ToTokens for SceneDescriptor {
             };
 
             quote! {
-                let #entity_ident = scene.create_entity(
+                let #entity_ident = #scene_name.create_entity(
                     #parent_id,
                     vec![#(#component_initializations,)*],
                     #material,
@@ -293,8 +259,9 @@ impl quote::ToTokens for SceneDescriptor {
             }
         });
 
+
         tokens.extend(quote! {
-            let mut scene = v4::ecs::scene::Scene::default();
+            let mut #scene_name = v4::ecs::scene::Scene::default();
 
             #(#material_initializations)*
 
@@ -843,6 +810,25 @@ impl Parse for PipelineIdDescriptor {
     }
 }
 
+impl quote::ToTokens for PipelineIdDescriptor {
+    fn to_tokens(&self, tokens: &mut TokenStream2) {
+        let PipelineIdDescriptor { vertex_shader_path, fragment_shader_path, vertex_layouts, geometry_details, .. } = self;
+        let geometry_details = match geometry_details {
+            Some(geo) => quote!{#geo},
+            None => quote! {v4::ecs::pipeline::GeometryDetails::default()},
+        };
+        tokens.extend(quote! {
+            v4::ecs::pipeline::PipelineId {
+                vertex_shader_path: #vertex_shader_path,
+                fragment_shader_path: #fragment_shader_path,
+                vertex_layouts: vec![#(#vertex_layouts),*],
+                geometry_details: #geometry_details,
+            }
+        });
+    }
+
+}
+
 struct VertexLayoutsDescriptor(Vec<ExprCall>);
 
 impl Parse for VertexLayoutsDescriptor {
@@ -892,6 +878,52 @@ impl Parse for GeometryDetailsDescriptor {
         }
 
         Ok(details)
+    }
+}
+
+impl quote::ToTokens for GeometryDetailsDescriptor {
+    fn to_tokens(&self, tokens: &mut TokenStream2) {
+        let GeometryDetailsDescriptor { topology, strip_index_format, front_face, cull_mode, polygon_mode } = self;
+
+        let topology = if let Some(topology) = topology {
+            quote! {topology: #topology}
+        } else {
+            quote! {topology: Default::default()}
+        };
+
+        let strip_index_format = if let Some(strip_index_format) = strip_index_format {
+            quote! {strip_index_format: #strip_index_format}
+        } else {
+            quote! {strip_index_format: Default::default()}
+        };
+
+        let front_face = if let Some(front_face) = front_face {
+            quote! {front_face: #front_face}
+        } else {
+            quote! {front_face: Default::default()}
+        };
+
+        let cull_mode = if let Some(cull_mode) = cull_mode {
+            quote! {cull_mode: #cull_mode}
+        } else {
+            quote! {cull_mode: Default::default()}
+        };
+
+        let polygon_mode = if let Some(polygon_mode) = polygon_mode {
+            quote! {polygon_mode: #polygon_mode}
+        } else {
+            quote! {polygon_mode: Default::default()}
+        };
+
+        tokens.extend(quote! {
+            v4::ecs::pipeline::GeometryDetails {
+            #topology,
+            #strip_index_format,
+            #front_face,
+            #cull_mode,
+            #polygon_mode,
+            }
+        });
     }
 }
 
@@ -947,9 +979,6 @@ impl quote::ToTokens for MaterialAttachmentDescriptor {
                 })
             },
         };
-
-
-
     }
 }
 

@@ -1,34 +1,23 @@
 use v4::{
-    builtin_actions::{WorkloadAction, WorkloadOutputFreeAction},
-    component,
-    ecs::{
+    builtin_actions::{WorkloadAction, WorkloadOutputFreeAction}, component, ecs::{
         component::{ComponentDetails, ComponentSystem},
-        scene::{Scene, WorkloadOutput},
-    },
-    V4,
+        scene::WorkloadOutput,
+    }, scene, V4
 };
 
 #[tokio::main]
 pub async fn main() {
     let mut engine = V4::builder().build().await;
 
-    let mut scene = Scene::default();
-
-    let workload_component = WorkloadTesterComponent::builder().duration(2).build();
-    let workload_component_2 = WorkloadTesterComponent::builder().duration(3).build();
-
-    let temp = TempComponent::builder().build();
-
-    scene.create_entity(
-        None,
-        vec![
-            Box::new(workload_component),
-            Box::new(workload_component_2),
-            Box::new(temp),
-        ],
-        None,
-        true,
-    );
+    scene! {
+        _ = {
+            components: [
+                WorkloadTesterComponent(initialized_time: std::time::Instant::now(), duration: 2),
+                WorkloadTesterComponent(initialized_time: std::time::Instant::now(), duration: 3),
+                TempComponent()
+            ]
+        }
+    }
 
     engine.attach_scene(scene);
 

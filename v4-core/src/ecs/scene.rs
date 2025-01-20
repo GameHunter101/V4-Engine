@@ -91,6 +91,10 @@ impl Scene {
         self.workload_output_receiver = Some(workload_output_receiver);
         self.engine_action_sender = Some(engine_action_sender);
 
+        for material in &mut self.materials {
+            material.initialize(device);
+        }
+
         let action_queue: ActionQueue = self
             .components
             .iter_mut()
@@ -181,23 +185,22 @@ impl Scene {
         component_id: ComponentId,
         workload_output_index: usize,
     ) {
-        self.workload_outputs
+        let outputs = self.workload_outputs
             .get_mut(&component_id)
-            .expect("Failed to get workloads assigned to the given component ID.")
-            .remove(workload_output_index);
+            .expect("Failed to get workloads assigned to the given component ID.");
+        if !outputs.is_empty() {
+            outputs.remove(workload_output_index);
+        }
     }
 
     pub fn create_material(
         &mut self,
-        device: &Device,
         pipeline_id: PipelineId,
         attachments: Vec<MaterialAttachment>,
     ) -> MaterialId {
         let new_material = Material::new(
-            device,
             self.materials.len(),
-            pipeline_id.vertex_shader_path,
-            pipeline_id.fragment_shader_path,
+            pipeline_id.clone(),
             attachments,
         );
 

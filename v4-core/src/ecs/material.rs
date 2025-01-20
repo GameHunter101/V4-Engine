@@ -2,6 +2,8 @@ use wgpu::{BindGroup, BindGroupLayout, Buffer, Device, ShaderStages};
 
 use crate::engine_support::texture_support::Texture;
 
+use super::pipeline::PipelineId;
+
 
 #[derive(Debug)]
 pub struct MaterialTextureAttachment {
@@ -26,8 +28,7 @@ pub type MaterialId = usize;
 #[derive(Debug)]
 pub struct Material {
     id: MaterialId,
-    vertex_shader_path: &'static str,
-    fragment_shader_path: &'static str,
+    pipeline_id: PipelineId,
     attachments: Vec<MaterialAttachment>,
     bind_group_layouts: Vec<BindGroupLayout>,
     bind_groups: Vec<BindGroup>,
@@ -35,31 +36,34 @@ pub struct Material {
 
 impl Material {
     pub fn new(
-        device: &Device,
         id: MaterialId,
-        vertex_shader_path: &'static str,
-        fragment_shader_path: &'static str,
+        pipeline_id: PipelineId,
         attachments: Vec<MaterialAttachment>,
     ) -> Self {
-        let (bind_group_layouts, bind_groups): (Vec<BindGroupLayout>, Vec<BindGroup>) = attachments
-            .iter()
-            .map(|attachment| {
-                let bind_group_layout =
-                    Self::create_attachment_bind_group_layout(device, id, attachment);
-                let bind_group =
-                    Self::create_attachment_bind_group(device, id, attachment, &bind_group_layout);
-                (bind_group_layout, bind_group)
-            })
-            .unzip();
 
         Self {
             id,
             attachments,
-            vertex_shader_path,
-            fragment_shader_path,
-            bind_group_layouts,
-            bind_groups,
+            pipeline_id,
+            bind_group_layouts: Vec::new(),
+            bind_groups: Vec::new(),
         }
+    }
+
+    pub fn initialize(&mut self, device: &Device) {
+        let (bind_group_layouts, bind_groups): (Vec<BindGroupLayout>, Vec<BindGroup>) = self.attachments
+            .iter()
+            .map(|attachment| {
+                let bind_group_layout =
+                    Self::create_attachment_bind_group_layout(device, self.id, attachment);
+                let bind_group =
+                    Self::create_attachment_bind_group(device, self.id, attachment, &bind_group_layout);
+                (bind_group_layout, bind_group)
+            })
+            .unzip();
+
+        self.bind_group_layouts = bind_group_layouts;
+        self.bind_groups = bind_groups;
     }
 
     pub fn create_attachment_bind_group_layout(
