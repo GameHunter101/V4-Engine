@@ -2,16 +2,16 @@
 use std::collections::HashMap;
 
 use darling::FromMeta;
-use proc_macro2::{Span, TokenStream as TokenStream2};
+use proc_macro2::{Span, TokenTree, TokenStream as TokenStream2};
 use quote::{format_ident, quote, ToTokens};
 use syn::{
     braced, bracketed, parenthesized,
-    parse::{discouraged::AnyDelimiter, Parse, ParseStream},
+    parse::{discouraged::{AnyDelimiter, Speculative}, Parse, ParseStream},
     parse2, parse_macro_input, parse_quote,
     punctuated::Punctuated,
     spanned::Spanned,
-    Expr, ExprAwait, ExprCall, ExprField, ExprLit, ExprPath, FieldValue, Generics, Ident, Lit,
-    LitStr, Member, PatLit, PatPath, Token,
+    Expr, ExprAwait, ExprCall, ExprField, ExprLit, ExprMethodCall, ExprPath, FieldValue, Generics,
+    Ident, Lit, LitStr, Member, PatLit, PatPath, Token,
 };
 use v4_core::ecs::{component::ComponentId, entity::EntityId, material::MaterialId, scene::Scene};
 
@@ -21,13 +21,13 @@ pub struct SceneDescriptor {
     idents: HashMap<Lit, Id>,
     relationships: HashMap<EntityId, Vec<EntityId>>,
     materials: Vec<TransformedMaterialDescriptor>,
-    pipelines: Vec<PipelineIdDescriptor>
+    pipelines: Vec<PipelineIdDescriptor>,
 }
 
 impl Parse for SceneDescriptor {
     fn parse(input: ParseStream) -> syn::Result<Self> {
-        let scene_ident:Option<Ident> = if input.peek(Ident) && input.peek2(Token![:]) {
-            let keyword:Ident = input.parse()?;
+        let scene_ident: Option<Ident> = if input.peek(Ident) && input.peek2(Token![:]) {
+            let keyword: Ident = input.parse()?;
             if &keyword.to_string() != "scene" {
                 return Err(syn::Error::new(keyword.span(), "Invalid identifier found. If you meant to specify a scene name you can do so using 'scene: {name}'"));
             }
@@ -56,8 +56,7 @@ impl Parse for SceneDescriptor {
                             if let Id::Pipeline(id) = *id {
                                 Ok(id)
                             } else {
-                                return Err(syn::Error::new(pipeline_ident.span(), 
-                                    format!("Two objects share the same identifier: \"{pipeline_ident:?}\"")));
+                                return Err(syn::Error::new(pipeline_ident.span(), format!("Two objects share the same identifier: \"{pipeline_ident:?}\"")));
                             }
                         },
                         None => Err(syn::Error::new(
@@ -145,14 +144,17 @@ impl Parse for SceneDescriptor {
 impl quote::ToTokens for SceneDescriptor {
     fn to_tokens(&self, tokens: &mut TokenStream2) {
         let scene_name = match &self.scene_ident {
-            Some(ident) => quote!{#ident},
-            None => quote!{scene},
+            Some(ident) => quote! {#ident},
+            None => quote! {scene},
         };
 
-        let pipeline_id_initializations: Vec<TokenStream2> = self.pipelines.iter().map(
-            |pipeline| {
-                quote!{#pipeline}
-        }).collect();
+        let pipeline_id_initializations: Vec<TokenStream2> = self
+            .pipelines
+            .iter()
+            .map(|pipeline| {
+                quote! {#pipeline}
+            })
+            .collect();
 
         let material_initializations = self.materials.iter().map(|mat| {
             let pipeline_id_index = mat.pipeline_id;
@@ -252,13 +254,12 @@ impl quote::ToTokens for SceneDescriptor {
             quote! {
                 let #entity_ident = #scene_name.create_entity(
                     #parent_id,
-                    vec![#(#component_initializations,)*],
+                    vec![#(#component_initializations),*],
                     #material,
                     #is_enabled,
                 );
             }
         });
-
 
         tokens.extend(quote! {
             let mut #scene_name = v4::ecs::scene::Scene::default();
@@ -509,10 +510,17 @@ impl Parse for ComponentConstructor {
             None
         };
 
-        let postfix: Option<TokenStream2> = if input.is_empty() {
+        let postfix: Option<TokenStream2> = if input.is_empty() || input.peek(Token![,]) {
             None
         } else {
-            Some(input.parse()?)
+            let mut tokens = quote! {};
+
+            while !input.peek(Token![,]) && !input.is_empty() {
+                let token: TokenTree = input.parse()?;
+                tokens.extend(token.to_token_stream());
+            }
+
+            Some(tokens)
         };
 
         Ok(ComponentConstructor {
@@ -521,6 +529,37 @@ impl Parse for ComponentConstructor {
             postfix,
             component_ident: ident,
         })
+    }
+}
+
+enum PostfixParse {
+    Await(Token![await]),
+    Method(ExprMethodCall),
+}
+
+impl Parse for PostfixParse {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        if input.peek(Token![.]) {
+            let _: Token![.] = input.parse()?;
+
+            if let Ok(expr_await) = input.parse::<Token![await]>() {
+                return Ok(PostfixParse::Await(expr_await));
+            }
+            if let Ok(expr_method_call) = input.parse::<ExprMethodCall>() {
+                return Ok(PostfixParse::Method(expr_method_call));
+            }
+        }
+
+        Err(input.error("Invalid constructor postfix operator"))
+    }
+}
+
+impl quote::ToTokens for PostfixParse {
+    fn to_tokens(&self, tokens: &mut TokenStream2) {
+        tokens.extend(match self {
+            PostfixParse::Await(expr_await) => quote! {#expr_await},
+            PostfixParse::Method(expr_method_call) => quote! {#expr_method_call},
+        });
     }
 }
 
@@ -812,9 +851,15 @@ impl Parse for PipelineIdDescriptor {
 
 impl quote::ToTokens for PipelineIdDescriptor {
     fn to_tokens(&self, tokens: &mut TokenStream2) {
-        let PipelineIdDescriptor { vertex_shader_path, fragment_shader_path, vertex_layouts, geometry_details, .. } = self;
+        let PipelineIdDescriptor {
+            vertex_shader_path,
+            fragment_shader_path,
+            vertex_layouts,
+            geometry_details,
+            ..
+        } = self;
         let geometry_details = match geometry_details {
-            Some(geo) => quote!{#geo},
+            Some(geo) => quote! {#geo},
             None => quote! {v4::ecs::pipeline::GeometryDetails::default()},
         };
         tokens.extend(quote! {
@@ -826,7 +871,6 @@ impl quote::ToTokens for PipelineIdDescriptor {
             }
         });
     }
-
 }
 
 struct VertexLayoutsDescriptor(Vec<ExprCall>);
@@ -883,7 +927,13 @@ impl Parse for GeometryDetailsDescriptor {
 
 impl quote::ToTokens for GeometryDetailsDescriptor {
     fn to_tokens(&self, tokens: &mut TokenStream2) {
-        let GeometryDetailsDescriptor { topology, strip_index_format, front_face, cull_mode, polygon_mode } = self;
+        let GeometryDetailsDescriptor {
+            topology,
+            strip_index_format,
+            front_face,
+            cull_mode,
+            polygon_mode,
+        } = self;
 
         let topology = if let Some(topology) = topology {
             quote! {topology: #topology}
@@ -938,7 +988,7 @@ impl Parse for MaterialAttachmentDescriptor {
         match input.to_string().as_str() {
             "Texture" => Ok(MaterialAttachmentDescriptor::Texture(input.parse()?)),
             "Buffer" => Ok(MaterialAttachmentDescriptor::Buffer(input.parse()?)),
-            _ => Err(syn::Error::new(ident.span(), "Invalid Material Attachment"))
+            _ => Err(syn::Error::new(ident.span(), "Invalid Material Attachment")),
         }
     }
 }
@@ -961,7 +1011,7 @@ impl quote::ToTokens for MaterialAttachmentDescriptor {
                         #visibility,
                     }
                 })
-            },
+            }
             MaterialAttachmentDescriptor::Buffer(material_buffer_attachment_descriptor) => {
                 let texture = match &material_buffer_attachment_descriptor.buffer {
                     Some(tex) => quote! {texture: #tex},
@@ -977,7 +1027,7 @@ impl quote::ToTokens for MaterialAttachmentDescriptor {
                         #visibility,
                     }
                 })
-            },
+            }
         };
     }
 }
@@ -996,25 +1046,45 @@ impl Parse for MaterialTextureAttachmentDescriptor {
         let mut visibility: Option<ExprPath> = None;
         for field in fields {
             match field.ident.to_string().as_str() {
-                "texture" => texture = match field.value {
-                    Some(value) =>  Some(match value {
-                        SimpleFieldValue::Expression(expr) => Ok(expr),
-                        SimpleFieldValue::Literal(lit) => Err(syn::Error::new(lit.span(), "Invalid texture value")),
-                    }?),
-                    None => None,
-                },
-                "visibility" => visibility = match field.value {
-                    Some(value) => Some(match value {
-                        SimpleFieldValue::Expression(expr) => if let Expr::Path(path) = expr {Ok(path)} else {Err(syn::Error::new(expr.span(), "Invalid texture visibility value"))},
-                        SimpleFieldValue::Literal(lit) => Err(syn::Error::new(lit.span(), "Invalid texture visibility value")),
-                    }?),
-                    None => None,
-                },
-                    _ => {}
+                "texture" => {
+                    texture = match field.value {
+                        Some(value) => Some(match value {
+                            SimpleFieldValue::Expression(expr) => Ok(expr),
+                            SimpleFieldValue::Literal(lit) => {
+                                Err(syn::Error::new(lit.span(), "Invalid texture value"))
+                            }
+                        }?),
+                        None => None,
+                    }
                 }
-
+                "visibility" => {
+                    visibility = match field.value {
+                        Some(value) => Some(match value {
+                            SimpleFieldValue::Expression(expr) => {
+                                if let Expr::Path(path) = expr {
+                                    Ok(path)
+                                } else {
+                                    Err(syn::Error::new(
+                                        expr.span(),
+                                        "Invalid texture visibility value",
+                                    ))
+                                }
+                            }
+                            SimpleFieldValue::Literal(lit) => Err(syn::Error::new(
+                                lit.span(),
+                                "Invalid texture visibility value",
+                            )),
+                        }?),
+                        None => None,
+                    }
+                }
+                _ => {}
             }
-        Ok(MaterialTextureAttachmentDescriptor { texture, visibility })
+        }
+        Ok(MaterialTextureAttachmentDescriptor {
+            texture,
+            visibility,
+        })
     }
 }
 
@@ -1032,24 +1102,41 @@ impl Parse for MaterialBufferAttachmentDescriptor {
         let mut visibility: Option<ExprPath> = None;
         for field in fields {
             match field.ident.to_string().as_str() {
-                "buffer" => buffer = match field.value {
-                    Some(value) =>  Some(match value {
-                        SimpleFieldValue::Expression(expr) => Ok(expr),
-                        SimpleFieldValue::Literal(lit) => Err(syn::Error::new(lit.span(), "Invalid buffer value")),
-                    }?),
-                    None => None,
-                },
-                "visibility" => visibility = match field.value {
-                    Some(value) => Some(match value {
-                        SimpleFieldValue::Expression(expr) => if let Expr::Path(path) = expr {Ok(path)} else {Err(syn::Error::new(expr.span(), "Invalid texture visibility value"))},
-                        SimpleFieldValue::Literal(lit) => Err(syn::Error::new(lit.span(), "Invalid buffer visibility value")),
-                    }?),
-                    None => None,
-                },
-                    _ => {}
+                "buffer" => {
+                    buffer = match field.value {
+                        Some(value) => Some(match value {
+                            SimpleFieldValue::Expression(expr) => Ok(expr),
+                            SimpleFieldValue::Literal(lit) => {
+                                Err(syn::Error::new(lit.span(), "Invalid buffer value"))
+                            }
+                        }?),
+                        None => None,
+                    }
                 }
-
+                "visibility" => {
+                    visibility = match field.value {
+                        Some(value) => Some(match value {
+                            SimpleFieldValue::Expression(expr) => {
+                                if let Expr::Path(path) = expr {
+                                    Ok(path)
+                                } else {
+                                    Err(syn::Error::new(
+                                        expr.span(),
+                                        "Invalid texture visibility value",
+                                    ))
+                                }
+                            }
+                            SimpleFieldValue::Literal(lit) => Err(syn::Error::new(
+                                lit.span(),
+                                "Invalid buffer visibility value",
+                            )),
+                        }?),
+                        None => None,
+                    }
+                }
+                _ => {}
             }
+        }
         Ok(MaterialBufferAttachmentDescriptor { buffer, visibility })
     }
 }

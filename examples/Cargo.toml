@@ -14,3 +14,5 @@ glyphon.workspace = true
 winit_input_helper.workspace = true
 async-trait.workspace = true
 winit.workspace = true
+nalgebra.workspace = true
+algoe.workspace = true

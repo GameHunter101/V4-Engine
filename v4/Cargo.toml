@@ -8,7 +8,7 @@ authors.workspace = true
 bytemuck.workspace = true
 # env_logger.workspace = true
 wgpu.workspace = true
-# nalgebra.workspace = true
+nalgebra.workspace = true
 # smaa.workspace = true
 # futures.workspace = true
 # tokio.workspace = true
@@ -23,5 +23,6 @@ async-trait.workspace = true
 # imgui-winit-support.workspace = true
 tobj.workspace = true
 glyphon.workspace = true
+algoe.workspace = true
 v4-core = { path = "../v4-core" }
 v4-macros = { path = "../v4-macros" }

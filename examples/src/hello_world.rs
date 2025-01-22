@@ -1,8 +1,13 @@
 use std::sync::Arc;
 
+use algoe::rotor::Rotor3;
+use nalgebra::Vector3;
 use tokio::sync::Mutex;
 use v4::{
-    builtin_components::mesh_component::{MeshComponent, VertexDescriptor},
+    builtin_components::{
+        mesh_component::{MeshComponent, VertexDescriptor},
+        transform_component::{TransformComponent, TransformComponentBuilder},
+    },
     scene, V4,
 };
 use wgpu::vertex_attr_array;
@@ -37,7 +42,8 @@ pub async fn main() {
                 },
             },
             components: [
-                MeshComponent<Vertex>::from_obj("assets/models/basic_cube.obj", true).await.unwrap()
+                MeshComponent<Vertex>::from_obj("assets/models/basic_cube.obj", true).await.unwrap(),
+                TransformComponent(position: Vector3::new(0.0, 0.0, 5.0), scale: Vector3::new(1.0, 1.0, 1.0)),
             ]
         }
     }
