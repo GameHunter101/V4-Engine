@@ -2,49 +2,40 @@ use std::fmt::Debug;
 
 use crate::v4;
 use bytemuck::{Pod, Zeroable};
-use v4_core::ecs::{
-    component::{ComponentDetails, ComponentId, ComponentSystem},
-    entity::EntityId,
-};
+use v4_core::ecs::component::{ComponentDetails, ComponentId, ComponentSystem};
 use v4_macros::component;
-use wgpu::{util::DeviceExt, Buffer, Device, Queue, RenderPass, VertexBufferLayout};
+use wgpu::{util::DeviceExt, Buffer, Device, Queue, RenderPass, VertexAttribute};
 
 pub trait VertexDescriptor: Debug + Pod + Zeroable {
-    fn vertex_layout() -> VertexBufferLayout<'static>;
+    const ATTRIBUTES: &[VertexAttribute];
+    fn vertex_layout() -> wgpu::VertexBufferLayout<'static> {
+        wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<Self>() as wgpu::BufferAddress,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: Self::ATTRIBUTES,
+        }
+    }
+
+    fn len() -> u64 {
+        Self::ATTRIBUTES.len() as u64
+    }
 
     fn from_pos_normal_coords(pos: Vec<f32>, normal: Vec<f32>, tex_coords: Vec<f32>) -> Self;
 }
 
 #[derive(Debug)]
 #[component(rendering_order = 500)]
-pub struct MeshComponent<V> {
+pub struct MeshComponent<V: VertexDescriptor> {
     vertices: Vec<Vec<V>>,
     indices: Vec<Vec<u32>>,
+    #[default]
     vertex_buffer: Option<Vec<Buffer>>,
+    #[default]
     index_buffer: Option<Vec<Buffer>>,
     enabled_models: Vec<usize>,
 }
 
 impl<V: VertexDescriptor> MeshComponent<V> {
-    pub fn new(
-        vertices: Vec<Vec<V>>,
-        indices: Vec<Vec<u32>>,
-        is_enabled: bool,
-        enabled_models: Vec<usize>,
-    ) -> Self {
-        Self {
-            vertices,
-            indices,
-            vertex_buffer: None,
-            index_buffer: None,
-            enabled_models,
-            parent_entity_id: EntityId::MAX,
-            is_initialized: false,
-            is_enabled,
-            id: ComponentId::MAX,
-        }
-    }
-
     pub async fn from_obj(path: &str, is_enabled: bool) -> Result<Self, tobj::LoadError> {
         let (models, _materials) = tobj::load_obj(
             path,

@@ -6,7 +6,7 @@ use tokio::sync::Mutex;
 use v4::{
     builtin_components::{
         mesh_component::{MeshComponent, VertexDescriptor},
-        transform_component::{TransformComponent, TransformComponentBuilder},
+        transform_component::TransformComponent,
     },
     scene, V4,
 };
@@ -43,7 +43,7 @@ pub async fn main() {
             },
             components: [
                 MeshComponent<Vertex>::from_obj("assets/models/basic_cube.obj", true).await.unwrap(),
-                TransformComponent(position: Vector3::new(0.0, 0.0, 5.0), scale: Vector3::new(1.0, 1.0, 1.0)),
+                TransformComponent(position: Vector3::new(0.0, 0.0, 5.0)),
             ]
         }
     }
@@ -75,13 +75,7 @@ struct Vertex {
 }
 
 impl VertexDescriptor for Vertex {
-    fn vertex_layout() -> wgpu::VertexBufferLayout<'static> {
-        wgpu::VertexBufferLayout {
-            array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
-            step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &vertex_attr_array![0 => Float32x3],
-        }
-    }
+    const ATTRIBUTES: &[wgpu::VertexAttribute] = &vertex_attr_array![0 => Float32x3];
 
     fn from_pos_normal_coords(pos: Vec<f32>, _normal: Vec<f32>, _tex_coords: Vec<f32>) -> Self {
         Self {

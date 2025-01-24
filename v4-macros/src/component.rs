@@ -1,7 +1,11 @@
 use darling::{ast::NestedMeta, FromMeta};
 use proc_macro::TokenStream;
+use proc_macro2::TokenStream as TokenStream2;
 use quote::{format_ident, quote};
-use syn::{parse::Parser, parse_macro_input, Ident, ItemStruct};
+use syn::{
+    parse::Parser, parse_macro_input, punctuated::Punctuated, Expr, GenericParam, Ident,
+    ItemStruct, Token, TypeParam,
+};
 
 #[allow(unused)]
 #[derive(Debug, FromMeta)]
@@ -35,6 +39,27 @@ pub fn component_impl(args: TokenStream, item: TokenStream) -> TokenStream {
                     }
                 },
             )
+        })
+        .collect();
+
+    let field_defaults: Vec<TokenStream2> = component_struct
+        .fields
+        .iter_mut()
+        .map(|field| {
+            let field_ident = field.ident.clone().unwrap();
+            if let Some(attr) = field.attrs.first().take() {
+                if attr.path().is_ident("default") {
+                    if let Ok(expr) = attr.parse_args::<Expr>() {
+                        return quote! {#field_ident: Some(#expr)};
+                    } else {
+                        return quote! {#field_ident: Some(Default::default())};
+                    }
+                } else {
+                    panic!("Invalid attribute for field {field_ident}");
+                }
+            }
+
+            quote! {#field_ident: None}
         })
         .collect();
 
@@ -85,6 +110,18 @@ pub fn component_impl(args: TokenStream, item: TokenStream) -> TokenStream {
         );
     }
 
+    match &mut component_struct.fields {
+        syn::Fields::Named(fields_named) => fields_named
+            .named
+            .iter_mut()
+            .for_each(|field| field.attrs = Vec::new()),
+        syn::Fields::Unnamed(fields_unnamed) => fields_unnamed
+            .unnamed
+            .iter_mut()
+            .for_each(|field| field.attrs = Vec::new()),
+        _ => {}
+    }
+
     #[allow(clippy::collapsible_match)]
     let rendering_order = if attr_args.is_empty() {
         0
@@ -101,6 +138,39 @@ pub fn component_impl(args: TokenStream, item: TokenStream) -> TokenStream {
         }
     };
 
+    let impl_post_params: Punctuated<GenericParam, Token![,]> = generics
+        .params
+        .clone()
+        .into_iter()
+        .map(|generic| match generic {
+            GenericParam::Lifetime(lifetime_param) => GenericParam::Lifetime(lifetime_param),
+            GenericParam::Type(mut type_param) => {
+                type_param.colon_token = None;
+                type_param.bounds.clear();
+                type_param.eq_token = None;
+                type_param.default = None;
+                GenericParam::Type(type_param)
+            }
+            GenericParam::Const(const_param) => {
+                let param = TypeParam {
+                    attrs: Vec::new(),
+                    ident: const_param.ident,
+                    colon_token: None,
+                    bounds: Punctuated::new(),
+                    eq_token: None,
+                    default: None,
+                };
+                GenericParam::Type(param)
+            }
+        })
+        .collect();
+
+    let impl_post_params = if impl_post_params.is_empty() {
+        quote! {}
+    } else {
+        quote! {<#impl_post_params>}
+    };
+
     quote! {
         #component_struct
 
@@ -110,17 +180,17 @@ pub fn component_impl(args: TokenStream, item: TokenStream) -> TokenStream {
             id: v4::ecs::component::ComponentId,
         }
 
-        impl #generics Default for #builder_ident #generics {
+        impl #generics Default for #builder_ident #impl_post_params {
             fn default() -> Self {
                 Self {
-                    #(#builder_field_idents: None,)*
+                    #(#field_defaults,)*
                     enabled: true,
                     id: 0,
                 }
             }
         }
 
-        impl #generics #builder_ident #generics {
+        impl #generics #builder_ident #impl_post_params {
             #(#builder_methods)*
 
             pub fn enabled(mut self, enabled: bool) -> Self {
@@ -133,7 +203,7 @@ pub fn component_impl(args: TokenStream, item: TokenStream) -> TokenStream {
                 self
             }
 
-            pub fn build(self) -> #ident #generics {
+            pub fn build(self) -> #ident #impl_post_params {
                 use std::hash::{DefaultHasher, Hash, Hasher};
 
                 let mut hasher = DefaultHasher::new();
@@ -156,13 +226,13 @@ pub fn component_impl(args: TokenStream, item: TokenStream) -> TokenStream {
             }
         }
 
-        impl #generics #ident #generics {
-            pub fn builder() -> #builder_ident #generics {
+        impl #generics #ident #impl_post_params {
+            pub fn builder() -> #builder_ident #impl_post_params {
                 #builder_ident::default()
             }
         }
 
-        impl #generics v4::ecs::component::ComponentDetails for #ident #generics {
+        impl #generics v4::ecs::component::ComponentDetails for #ident #impl_post_params {
             fn id(&self) -> v4::ecs::component::ComponentId {
                 self.id
             }

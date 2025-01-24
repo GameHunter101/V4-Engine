@@ -2,16 +2,19 @@
 use std::collections::HashMap;
 
 use darling::FromMeta;
-use proc_macro2::{Span, TokenTree, TokenStream as TokenStream2};
+use proc_macro2::{Span, TokenStream as TokenStream2, TokenTree};
 use quote::{format_ident, quote, ToTokens};
 use syn::{
     braced, bracketed, parenthesized,
-    parse::{discouraged::{AnyDelimiter, Speculative}, Parse, ParseStream},
+    parse::{
+        discouraged::{AnyDelimiter, Speculative},
+        Parse, ParseStream,
+    },
     parse2, parse_macro_input, parse_quote,
     punctuated::Punctuated,
     spanned::Spanned,
-    Expr, ExprAwait, ExprCall, ExprField, ExprLit, ExprMethodCall, ExprPath, FieldValue, Generics,
-    Ident, Lit, LitStr, Member, PatLit, PatPath, Token,
+    AngleBracketedGenericArguments, Expr, ExprAwait, ExprCall, ExprField, ExprLit, ExprMethodCall,
+    ExprPath, FieldValue, Generics, Ident, Lit, LitStr, Member, PatLit, PatPath, Token,
 };
 use v4_core::ecs::{component::ComponentId, entity::EntityId, material::MaterialId, scene::Scene};
 
@@ -130,6 +133,29 @@ impl Parse for SceneDescriptor {
             Ok(transformed_entity)
         }).collect::<syn::Result<Vec<TransformedEntityDescriptor>>>()?;
 
+        /* let component_initializations = transformed_entities[0].components.iter().map(|component| {
+                let component_type = &component.component_type;
+                let component_generics =
+                if component.generics.args.is_empty() {
+                    quote! {}
+                } else {
+                    let generics = &component.generics;
+                    quote!{::#generics}
+                };
+
+                if let Some(constructor) = &component.custom_constructor {
+
+                    quote! {
+                        Box::new(#component_type #component_generics::#constructor)
+                    }
+                } else {
+                    quote!{"bad"}
+                }
+
+            }).next().unwrap();
+
+        Err(input.error(component_initializations)) */
+
         Ok(Self {
             scene_ident,
             entities: transformed_entities,
@@ -177,11 +203,10 @@ impl quote::ToTokens for SceneDescriptor {
             let component_initializations = entity.components.iter().map(|component| {
                 let component_type = &component.component_type;
                 let component_generics =
-                if component.generics.params.is_empty() {
-                    quote! {}
-                } else {
-                    let generics = &component.generics;
+                if let Some(generics) = &component.generics {
                     quote!{::#generics}
+                } else {
+                    quote! {}
                 };
 
                 if let Some(constructor) = &component.custom_constructor {
@@ -396,7 +421,7 @@ impl Parse for EntityParameters {
 
 struct ComponentDescriptor {
     component_type: Ident,
-    generics: Generics,
+    generics: Option<AngleBracketedGenericArguments>,
     params: Vec<SimpleField>,
     custom_constructor: Option<ComponentConstructor>,
     ident: Option<Lit>,
@@ -405,7 +430,11 @@ struct ComponentDescriptor {
 impl Parse for ComponentDescriptor {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let component_type: Ident = input.parse()?;
-        let generics: Generics = input.parse()?;
+        let generics: Option<AngleBracketedGenericArguments> = if input.peek(Token![<]) {
+            Some(input.parse()?)
+        } else {
+            None
+        };
 
         if input.peek(Token![::]) {
             let _: Token![::] = input.parse()?;
@@ -532,42 +561,15 @@ impl Parse for ComponentConstructor {
     }
 }
 
-enum PostfixParse {
-    Await(Token![await]),
-    Method(ExprMethodCall),
-}
-
-impl Parse for PostfixParse {
-    fn parse(input: ParseStream) -> syn::Result<Self> {
-        if input.peek(Token![.]) {
-            let _: Token![.] = input.parse()?;
-
-            if let Ok(expr_await) = input.parse::<Token![await]>() {
-                return Ok(PostfixParse::Await(expr_await));
-            }
-            if let Ok(expr_method_call) = input.parse::<ExprMethodCall>() {
-                return Ok(PostfixParse::Method(expr_method_call));
-            }
-        }
-
-        Err(input.error("Invalid constructor postfix operator"))
-    }
-}
-
-impl quote::ToTokens for PostfixParse {
-    fn to_tokens(&self, tokens: &mut TokenStream2) {
-        tokens.extend(match self {
-            PostfixParse::Await(expr_await) => quote! {#expr_await},
-            PostfixParse::Method(expr_method_call) => quote! {#expr_method_call},
-        });
-    }
-}
-
 impl quote::ToTokens for ComponentConstructor {
     fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
         let constructor_ident = &self.constructor_ident;
         let parameters = &self.parameters;
         let postfix = &self.postfix;
+        /* panic!("{}",
+        quote! {
+                #constructor_ident(#parameters)#postfix
+            }); */
         tokens.extend(quote! {
             #constructor_ident(#parameters)#postfix
         });
