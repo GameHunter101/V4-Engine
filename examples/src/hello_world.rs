@@ -38,12 +38,12 @@ pub async fn main() {
                 pipeline: {
                     vertex_shader_path: "shaders/hello_world/vertex.wgsl",
                     fragment_shader_path: "shaders/hello_world/fragment.wgsl",
-                    vertex_layouts: [Vertex::vertex_layout()]
+                    vertex_layouts: [Vertex::vertex_layout(), TransformComponent::vertex_layout::<1>()]
                 },
             },
             components: [
                 MeshComponent<Vertex>::from_obj("assets/models/basic_cube.obj", true).await.unwrap(),
-                TransformComponent(position: Vector3::new(0.0, 0.0, 5.0)),
+                TransformComponent(position: Vector3::new(0.0, 0.0, 0.5)),
             ]
         }
     }

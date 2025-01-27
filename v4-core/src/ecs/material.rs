@@ -1,9 +1,8 @@
-use wgpu::{BindGroup, BindGroupLayout, Buffer, Device, ShaderStages};
+use wgpu::{util::DeviceExt, BindGroup, BindGroupLayout, Buffer, Device, ShaderStages};
 
 use crate::engine_support::texture_support::Texture;
 
 use super::pipeline::PipelineId;
-
 
 #[derive(Debug)]
 pub struct MaterialTextureAttachment {
@@ -40,7 +39,6 @@ impl Material {
         pipeline_id: PipelineId,
         attachments: Vec<MaterialAttachment>,
     ) -> Self {
-
         Self {
             id,
             attachments,
@@ -51,16 +49,21 @@ impl Material {
     }
 
     pub fn initialize(&mut self, device: &Device) {
-        let (bind_group_layouts, bind_groups): (Vec<BindGroupLayout>, Vec<BindGroup>) = self.attachments
-            .iter()
-            .map(|attachment| {
-                let bind_group_layout =
-                    Self::create_attachment_bind_group_layout(device, self.id, attachment);
-                let bind_group =
-                    Self::create_attachment_bind_group(device, self.id, attachment, &bind_group_layout);
-                (bind_group_layout, bind_group)
-            })
-            .unzip();
+        let (bind_group_layouts, bind_groups): (Vec<BindGroupLayout>, Vec<BindGroup>) =
+            self.attachments
+                .iter()
+                .map(|attachment| {
+                    let bind_group_layout =
+                        Self::create_attachment_bind_group_layout(device, self.id, attachment);
+                    let bind_group = Self::create_attachment_bind_group(
+                        device,
+                        self.id,
+                        attachment,
+                        &bind_group_layout,
+                    );
+                    (bind_group_layout, bind_group)
+                })
+                .unzip();
 
         self.bind_group_layouts = bind_group_layouts;
         self.bind_groups = bind_groups;
@@ -154,5 +157,9 @@ impl Material {
 
     pub fn attachments(&self) -> &[MaterialAttachment] {
         self.attachments.as_ref()
+    }
+
+    pub fn uses_camera(&self) -> bool {
+        self.pipeline_id.uses_camera
     }
 }

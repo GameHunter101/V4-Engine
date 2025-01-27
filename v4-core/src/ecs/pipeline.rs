@@ -9,6 +9,7 @@ pub struct PipelineId {
     pub vertex_shader_path: &'static str,
     pub fragment_shader_path: &'static str,
     pub vertex_layouts: Vec<wgpu::VertexBufferLayout<'static>>,
+    pub uses_camera: bool,
     pub geometry_details: GeometryDetails,
 }
 
@@ -49,9 +50,39 @@ pub fn create_render_pipeline(
     bind_group_layouts: &[BindGroupLayout],
     render_format: TextureFormat,
 ) -> RenderPipeline {
+    let camera_layout = if id.uses_camera {
+        Some(
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some(&format!("{id:?} Pipeline Camera Bind Group Layout")),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+            }),
+        )
+    } else {
+        None
+    };
+
+    let bind_group_layouts: Vec<&wgpu::BindGroupLayout> =
+        if let Some(camera_layout) = &camera_layout {
+            vec![camera_layout]
+                .into_iter()
+                .chain(bind_group_layouts.iter())
+                .collect::<Vec<_>>()
+        } else {
+            bind_group_layouts.iter().collect()
+        };
+
     let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some(&format!("{id:?} Pipeline Layout")),
-        bind_group_layouts: &bind_group_layouts.iter().collect::<Vec<_>>(),
+        bind_group_layouts: &bind_group_layouts,
         push_constant_ranges: &[],
     });
 

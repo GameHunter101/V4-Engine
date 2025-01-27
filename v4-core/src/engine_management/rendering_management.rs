@@ -1,9 +1,15 @@
 use std::{collections::HashMap, fmt::Debug};
 
 use smaa::SmaaTarget;
-use wgpu::{rwh::{HasDisplayHandle, HasWindowHandle}, RenderPipeline};
+use wgpu::{
+    rwh::{HasDisplayHandle, HasWindowHandle},
+    RenderPipeline,
+};
 
-use crate::{ecs::{pipeline::PipelineId, scene::Scene}, engine_support::texture_support};
+use crate::{
+    ecs::{pipeline::PipelineId, scene::Scene},
+    engine_support::texture_support,
+};
 
 use super::font_management::FontState;
 
@@ -113,7 +119,12 @@ impl<'a> RenderingManager {
         }
     }
 
-    pub fn render(&mut self, scene: &mut Scene, pipelines: &HashMap<PipelineId, RenderPipeline>, font_state: &mut FontState) {
+    pub fn render(
+        &mut self,
+        scene: &mut Scene,
+        pipelines: &HashMap<PipelineId, RenderPipeline>,
+        font_state: &mut FontState,
+    ) {
         let output = self.surface.get_current_texture().unwrap();
 
         let view = output
@@ -161,6 +172,17 @@ impl<'a> RenderingManager {
                 for material in materials_for_pipeline {
                     let material_bind_groups = material.bind_groups();
                     let mut bind_group_count_accumulated = 0;
+
+                    if material.uses_camera() {
+                        render_pass.set_bind_group(
+                            0,
+                            scene
+                                .active_camera_buffer()
+                                .expect("No active camera buffer set"),
+                            &[],
+                        );
+                    }
+
                     let material_attachments = material.attachments();
                     for (i, bind_group) in material_bind_groups.iter().enumerate() {
                         render_pass.set_bind_group(bind_group_count_accumulated, bind_group, &[]);

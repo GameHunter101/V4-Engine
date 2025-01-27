@@ -7,7 +7,7 @@ use std::{
 };
 
 use crossbeam_channel::{Receiver, Sender};
-use wgpu::{Device, Queue};
+use wgpu::{BindGroup, Buffer, Device, Queue};
 use winit_input_helper::WinitInputHelper;
 
 use crate::{engine_management::engine_action::EngineAction, EngineDetails};
@@ -35,6 +35,9 @@ pub struct Scene {
     workload_outputs: WorkloadOutputCollection,
     engine_action_sender: Option<Sender<Box<dyn EngineAction>>>,
     pub new_pipelines_needed: bool,
+    active_camera: Option<ComponentId>,
+    active_camera_buffer: Option<Buffer>,
+    active_camera_bind_group: Option<BindGroup>,
 }
 
 impl Debug for Scene {
@@ -75,6 +78,9 @@ impl Default for Scene {
             engine_action_sender: None,
             workload_outputs: HashMap::new(),
             new_pipelines_needed: false,
+            active_camera: None,
+            active_camera_buffer: None,
+            active_camera_bind_group: None,
         }
     }
 }
@@ -91,16 +97,16 @@ impl Scene {
         self.workload_output_receiver = Some(workload_output_receiver);
         self.engine_action_sender = Some(engine_action_sender);
 
-        for material in &mut self.materials {
-            material.initialize(device);
-        }
-
         let action_queue: ActionQueue = self
             .components
             .iter_mut()
             .flat_map(|component| component.initialize(device))
             .collect();
         self.execute_action_queue(action_queue).await;
+
+        for material in &mut self.materials {
+            material.initialize(device);
+        }
     }
 
     pub async fn update(
@@ -185,7 +191,8 @@ impl Scene {
         component_id: ComponentId,
         workload_output_index: usize,
     ) {
-        let outputs = self.workload_outputs
+        let outputs = self
+            .workload_outputs
             .get_mut(&component_id)
             .expect("Failed to get workloads assigned to the given component ID.");
         if !outputs.is_empty() {
@@ -239,28 +246,36 @@ impl Scene {
     }
 
     pub fn get_components_per_material(&self) -> HashMap<MaterialId, Vec<&Component>> {
-        let mut output: HashMap<MaterialId, Vec<&Component>> = self
-            .materials
+        self.materials
             .iter()
-            .map(|mat| (mat.id(), Vec::new()))
-            .collect();
-
-        for component in &self.components {
-            let component_parent_entity_id = component.parent_entity_id();
-            let parent_entity_material_id =
-                self.entities[&component_parent_entity_id].active_material();
-            if let Some(parent_entity_material_id) = parent_entity_material_id {
-                if self.entities[&component_parent_entity_id].is_enabled() && component.is_enabled()
-                {
-                    output
-                        .get_mut(&parent_entity_material_id)
-                        .unwrap()
-                        .push(component);
-                }
-            }
-        }
-
-        output
+            .map(|material| {
+                let components: Vec<&Component> = self
+                    .entities
+                    .values()
+                    .flat_map(|ent| {
+                        if let Some(mat) = ent.active_material() {
+                            if mat == material.id() {
+                                Some(ent.id())
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
+                    })
+                    .flat_map(|ent_id| {
+                        let mut components = self
+                            .components
+                            .iter()
+                            .filter(|comp| comp.parent_entity_id() == ent_id)
+                            .collect::<Vec<&Component>>();
+                        components.sort_by_key(|a| a.rendering_order());
+                        components
+                    })
+                    .collect();
+                (material.id(), components)
+            })
+            .collect()
     }
 
     pub fn create_entity(
@@ -347,5 +362,13 @@ impl Scene {
                 .try_send(action)
                 .expect("Failed to send engine action.");
         }
+    }
+
+    pub fn set_active_camera(&mut self, camera: Option<ComponentId>) {
+        self.active_camera = camera;
+    }
+
+    pub fn active_camera(&self) -> Option<u32> {
+        self.active_camera
     }
 }

@@ -109,7 +109,7 @@ impl Action for UpdateTextComponentAction {
             self.text_metrics,
             self.text_display_info,
         ); */
-        scene.send_engine_action(Box::new(UpdateTextBufferEngineAction{
+        scene.send_engine_action(Box::new(UpdateTextBufferEngineAction {
             component_id: self.component_id,
             text: self.text,
             text_attributes: self.text_attributes,
@@ -146,5 +146,23 @@ impl Action for CreateEntityAction {
             self.active_material,
             self.is_enabled,
         );
+    }
+}
+
+#[derive(Debug)]
+pub struct SetActiveCameraAction(ComponentId);
+
+impl Action for SetActiveCameraAction {
+    fn execute(self: Box<Self>, scene: &mut Scene) {
+        scene.set_active_camera(Some(self.0));
+    }
+}
+
+#[derive(Debug)]
+pub struct DisableCameraAction;
+
+impl Action for DisableCameraAction {
+    fn execute(self: Box<Self>, scene: &mut Scene) {
+        scene.set_active_camera(None);
     }
 }
