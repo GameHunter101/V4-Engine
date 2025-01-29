@@ -1,8 +1,11 @@
 use v4::{
-    builtin_actions::{WorkloadAction, WorkloadOutputFreeAction}, component, ecs::{
-        component::{ComponentDetails, ComponentSystem},
+    builtin_actions::{WorkloadAction, WorkloadOutputFreeAction},
+    component,
+    ecs::{
+        component::{ComponentDetails, ComponentId, ComponentSystem},
         scene::WorkloadOutput,
-    }, scene, V4
+    },
+    scene, V4,
 };
 
 #[tokio::main]
@@ -58,6 +61,7 @@ impl ComponentSystem for WorkloadTesterComponent {
             v4::ecs::component::ComponentId,
             Vec<v4::ecs::scene::WorkloadOutput>,
         >,
+        _active_camera: Option<ComponentId>,
     ) -> v4::ecs::actions::ActionQueue {
         if self.initialized_time.elapsed().as_secs_f32() % 1.0 <= 0.01 {
             // println!("Creating workload");
@@ -98,6 +102,7 @@ impl ComponentSystem for TempComponent {
             v4::ecs::component::ComponentId,
             Vec<v4::ecs::scene::WorkloadOutput>,
         >,
+        _active_camera: Option<ComponentId>,
     ) -> v4::ecs::actions::ActionQueue {
         if engine_details.initialization_time.elapsed().as_millis() % 100 == 0 {
             println!("Check");

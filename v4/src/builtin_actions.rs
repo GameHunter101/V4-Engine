@@ -13,6 +13,7 @@ use v4_core::{
         font_management::{TextAttributes, TextComponentProperties, TextDisplayInfo},
     },
 };
+use wgpu::{util::DeviceExt, Device, Queue};
 
 pub struct WorkloadAction(pub ComponentId, pub Workload);
 
@@ -27,7 +28,7 @@ impl Debug for WorkloadAction {
 
 #[async_trait::async_trait]
 impl Action for WorkloadAction {
-    async fn execute_async(self: Box<Self>, scene: &mut Scene) {
+    async fn execute_async(self: Box<Self>, scene: &mut Scene, _device: &Device, _queue: &Queue) {
         scene.attach_workload(self.0, self.1).await;
     }
 }
@@ -37,7 +38,7 @@ pub struct WorkloadOutputFreeAction(pub ComponentId, pub usize);
 
 #[async_trait::async_trait]
 impl Action for WorkloadOutputFreeAction {
-    async fn execute_async(self: Box<Self>, scene: &mut Scene) {
+    async fn execute_async(self: Box<Self>, scene: &mut Scene, _device: &Device, _queue: &Queue) {
         scene.free_workload_output(self.0, self.1).await;
     }
 }
@@ -46,7 +47,7 @@ impl Action for WorkloadOutputFreeAction {
 pub struct EntityToggleAction(pub EntityId, pub Option<bool>);
 
 impl Action for EntityToggleAction {
-    fn execute(self: Box<Self>, scene: &mut Scene) {
+    fn execute(self: Box<Self>, scene: &mut Scene, _device: &Device, _queue: &Queue) {
         let entity = scene.get_entity_mut(self.0);
         if let Some(entity) = entity {
             match self.1 {
@@ -61,7 +62,7 @@ impl Action for EntityToggleAction {
 pub struct ComponentToggleAction(pub ComponentId, pub Option<bool>);
 
 impl Action for ComponentToggleAction {
-    fn execute(self: Box<Self>, scene: &mut Scene) {
+    fn execute(self: Box<Self>, scene: &mut Scene, _device: &Device, _queue: &Queue) {
         let component = scene.get_component_mut(self.0);
         if let Some(component) = component {
             let component_enabled = component.is_enabled();
@@ -80,7 +81,7 @@ pub struct RegisterUiComponentAction {
 }
 
 impl Action for RegisterUiComponentAction {
-    fn execute(self: Box<Self>, scene: &mut Scene) {
+    fn execute(self: Box<Self>, scene: &mut Scene, _device: &Device, _queue: &Queue) {
         if let Some(text_component_properties) = self.text_component_properties {
             scene.send_engine_action(Box::new(CreateTextBufferEngineAction {
                 component_id: self.component_id,
@@ -101,7 +102,7 @@ pub struct UpdateTextComponentAction {
 }
 
 impl Action for UpdateTextComponentAction {
-    fn execute(self: Box<Self>, scene: &mut Scene) {
+    fn execute(self: Box<Self>, scene: &mut Scene, _device: &Device, _queue: &Queue) {
         /* scene.update_text_buffer(
             self.component_id,
             self.text,
@@ -123,7 +124,7 @@ impl Action for UpdateTextComponentAction {
 pub struct SetEntityActiveMaterialAction(pub EntityId, pub MaterialId);
 
 impl Action for SetEntityActiveMaterialAction {
-    fn execute(self: Box<Self>, scene: &mut Scene) {
+    fn execute(self: Box<Self>, scene: &mut Scene, _device: &Device, _queue: &Queue) {
         if let Some(entity) = scene.get_entity_mut(self.0) {
             entity.set_active_material(self.1);
         }
@@ -139,7 +140,7 @@ pub struct CreateEntityAction {
 }
 
 impl Action for CreateEntityAction {
-    fn execute(self: Box<Self>, scene: &mut Scene) {
+    fn execute(self: Box<Self>, scene: &mut Scene, _device: &Device, _queue: &Queue) {
         scene.create_entity(
             self.entity_parent_id,
             self.components,
@@ -150,10 +151,10 @@ impl Action for CreateEntityAction {
 }
 
 #[derive(Debug)]
-pub struct SetActiveCameraAction(ComponentId);
+pub struct SetActiveCameraAction(pub ComponentId);
 
 impl Action for SetActiveCameraAction {
-    fn execute(self: Box<Self>, scene: &mut Scene) {
+    fn execute(self: Box<Self>, scene: &mut Scene, _device: &Device, _queue: &Queue) {
         scene.set_active_camera(Some(self.0));
     }
 }
@@ -162,7 +163,49 @@ impl Action for SetActiveCameraAction {
 pub struct DisableCameraAction;
 
 impl Action for DisableCameraAction {
-    fn execute(self: Box<Self>, scene: &mut Scene) {
+    fn execute(self: Box<Self>, scene: &mut Scene, _device: &Device, _queue: &Queue) {
         scene.set_active_camera(None);
+    }
+}
+
+#[derive(Debug)]
+pub struct UpdateCameraBufferAction(pub [[f32; 4]; 4]);
+
+impl Action for UpdateCameraBufferAction {
+    fn execute(self: Box<Self>, scene: &mut Scene, device: &Device, queue: &Queue) {
+        if let Some(camera_buffer) = scene.active_camera_buffer() {
+            queue.write_buffer(camera_buffer, 0, bytemuck::cast_slice(&self.0));
+        } else {
+            let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some(&format!("Scene {} Camera Buffer", scene.scene_index())),
+                contents: bytemuck::cast_slice(&self.0),
+                usage: wgpu::BufferUsages::UNIFORM,
+            });
+            let bind_group_layout =
+                device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some(&format!("Scene {} Camera Bind Group", scene.scene_index())),
+                    entries: &[wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    }],
+                });
+
+            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some(&format!("Scene {} Camera Bind Group", scene.scene_index())),
+                layout: &bind_group_layout,
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::Buffer(buffer.as_entire_buffer_binding()),
+                }],
+            });
+            scene.set_active_camera_bind_group(Some(bind_group));
+            scene.set_active_camera_buffer(Some(buffer));
+        }
     }
 }

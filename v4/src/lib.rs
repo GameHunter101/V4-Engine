@@ -28,5 +28,6 @@ pub mod engine_support {
 pub mod builtin_components {
     pub mod mesh_component;
     pub mod transform_component;
+    pub mod camera_component;
 }
 

@@ -27,6 +27,7 @@ pub trait ComponentSystem: ComponentDetails + Debug {
         other_components: &[&mut Component],
         engine_details: &EngineDetails,
         workload_outputs: &HashMap<ComponentId, Vec<WorkloadOutput>>,
+        active_camera: Option<ComponentId>,
     ) -> ActionQueue {
         Vec::new()
     }

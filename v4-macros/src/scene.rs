@@ -14,7 +14,7 @@ use syn::{
     punctuated::Punctuated,
     spanned::Spanned,
     AngleBracketedGenericArguments, Expr, ExprAwait, ExprCall, ExprField, ExprLit, ExprMethodCall,
-    ExprPath, FieldValue, Generics, Ident, Lit, LitStr, Member, PatLit, PatPath, Token,
+    ExprPath, FieldValue, Generics, Ident, Lit, LitBool, LitStr, Member, PatLit, PatPath, Token,
 };
 use v4_core::ecs::{component::ComponentId, entity::EntityId, material::MaterialId, scene::Scene};
 
@@ -132,29 +132,6 @@ impl Parse for SceneDescriptor {
 
             Ok(transformed_entity)
         }).collect::<syn::Result<Vec<TransformedEntityDescriptor>>>()?;
-
-        /* let component_initializations = transformed_entities[0].components.iter().map(|component| {
-                let component_type = &component.component_type;
-                let component_generics =
-                if component.generics.args.is_empty() {
-                    quote! {}
-                } else {
-                    let generics = &component.generics;
-                    quote!{::#generics}
-                };
-
-                if let Some(constructor) = &component.custom_constructor {
-
-                    quote! {
-                        Box::new(#component_type #component_generics::#constructor)
-                    }
-                } else {
-                    quote!{"bad"}
-                }
-
-            }).next().unwrap();
-
-        Err(input.error(component_initializations)) */
 
         Ok(Self {
             scene_ident,
@@ -746,6 +723,7 @@ struct PipelineIdDescriptor {
     vertex_shader_path: LitStr,
     fragment_shader_path: LitStr,
     vertex_layouts: Vec<ExprCall>,
+    uses_camera: LitBool,
     geometry_details: Option<GeometryDetailsDescriptor>,
     ident: Option<Lit>,
 }
@@ -758,6 +736,7 @@ impl Parse for PipelineIdDescriptor {
         let mut vertex_shader_path: Option<LitStr> = None;
         let mut fragment_shader_path: Option<LitStr> = None;
         let mut vertex_layouts: Vec<ExprCall> = Vec::new();
+        let mut uses_camera: Option<LitBool> = None;
         let mut geometry_details: Option<GeometryDetailsDescriptor> = None;
         let mut ident: Option<Lit> = None;
 
@@ -823,8 +802,17 @@ impl Parse for PipelineIdDescriptor {
                         }
                     }
                 }
+                "uses_camera" => {
+                    if let Some(SimpleFieldValue::Literal(Lit::Bool(bool))) = field.value {
+                        uses_camera = Some(bool);
+                    }
+                }
                 "geometry_details" => geometry_details = Some(input.parse()?),
-                "ident" => ident = Some(input.parse()?),
+                "ident" => {
+                    if let Some(SimpleFieldValue::Literal(lit)) = field.value {
+                        ident = Some(lit);
+                    }
+                }
                 _ => {
                     return Err(syn::Error::new_spanned(
                         field.ident,
@@ -841,10 +829,15 @@ impl Parse for PipelineIdDescriptor {
             return Err(input.error("A fragment shader path must be specified"));
         };
 
+        let Some(uses_camera) = uses_camera else {
+            return Err(input.error("The usage of the camera must be specified"));
+        };
+
         Ok(PipelineIdDescriptor {
             vertex_shader_path,
             fragment_shader_path,
             vertex_layouts,
+            uses_camera,
             geometry_details,
             ident,
         })
@@ -857,6 +850,7 @@ impl quote::ToTokens for PipelineIdDescriptor {
             vertex_shader_path,
             fragment_shader_path,
             vertex_layouts,
+            uses_camera,
             geometry_details,
             ..
         } = self;
@@ -869,6 +863,7 @@ impl quote::ToTokens for PipelineIdDescriptor {
                 vertex_shader_path: #vertex_shader_path,
                 fragment_shader_path: #fragment_shader_path,
                 vertex_layouts: vec![#(#vertex_layouts),*],
+                uses_camera: #uses_camera,
                 geometry_details: #geometry_details,
             }
         });

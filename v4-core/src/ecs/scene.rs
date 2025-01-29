@@ -89,6 +89,7 @@ impl Scene {
     pub async fn initialize(
         &mut self,
         device: &Device,
+        queue: &Queue,
         workload_sender: Sender<WorkloadPacket>,
         workload_output_receiver: Receiver<(ComponentId, WorkloadOutput)>,
         engine_action_sender: Sender<Box<dyn EngineAction>>,
@@ -102,7 +103,7 @@ impl Scene {
             .iter_mut()
             .flat_map(|component| component.initialize(device))
             .collect();
-        self.execute_action_queue(action_queue).await;
+        self.execute_action_queue(action_queue, device, queue).await;
 
         for material in &mut self.materials {
             material.initialize(device);
@@ -129,6 +130,7 @@ impl Scene {
                     .insert(component_id, vec![workload_output]);
             }
         }
+        let active_camera = self.active_camera();
         let all_components = &mut self.components;
         let actions: Vec<_> = (0..all_components.len())
             .map(|i| {
@@ -155,6 +157,7 @@ impl Scene {
                                     &chain,
                                     engine_details,
                                     workload_outputs,
+                                    active_camera,
                                 )
                                 .await
                         } else {
@@ -171,7 +174,7 @@ impl Scene {
             .flat_map(|actions| actions.unwrap_or_default())
             .collect();
 
-        self.execute_action_queue(action_queue).await;
+        self.execute_action_queue(action_queue, device, queue).await;
     }
 
     pub async fn attach_workload(&mut self, component_id: ComponentId, workload: Workload) {
@@ -205,11 +208,7 @@ impl Scene {
         pipeline_id: PipelineId,
         attachments: Vec<MaterialAttachment>,
     ) -> MaterialId {
-        let new_material = Material::new(
-            self.materials.len(),
-            pipeline_id.clone(),
-            attachments,
-        );
+        let new_material = Material::new(self.materials.len(), pipeline_id.clone(), attachments);
 
         if let Some(entry) = self
             .pipeline_to_corresponding_materials
@@ -346,9 +345,14 @@ impl Scene {
             .collect()
     }
 
-    pub async fn execute_action_queue(&mut self, action_queue: ActionQueue) {
+    pub async fn execute_action_queue(
+        &mut self,
+        action_queue: ActionQueue,
+        device: &Device,
+        queue: &Queue,
+    ) {
         for action in action_queue {
-            action.execute_async(self).await;
+            action.execute_async(self, device, queue).await;
         }
     }
 
@@ -370,5 +374,25 @@ impl Scene {
 
     pub fn active_camera(&self) -> Option<u32> {
         self.active_camera
+    }
+
+    pub fn active_camera_buffer(&self) -> Option<&Buffer> {
+        self.active_camera_buffer.as_ref()
+    }
+
+    pub fn active_camera_bind_group(&self) -> Option<&BindGroup> {
+        self.active_camera_bind_group.as_ref()
+    }
+
+    pub fn set_active_camera_buffer(&mut self, active_camera_buffer: Option<Buffer>) {
+        self.active_camera_buffer = active_camera_buffer;
+    }
+
+    pub fn set_active_camera_bind_group(&mut self, active_camera_bind_group: Option<BindGroup>) {
+        self.active_camera_bind_group = active_camera_bind_group;
+    }
+
+    pub fn scene_index(&self) -> usize {
+        self.scene_index
     }
 }

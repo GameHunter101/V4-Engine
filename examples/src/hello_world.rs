@@ -38,7 +38,8 @@ pub async fn main() {
                 pipeline: {
                     vertex_shader_path: "shaders/hello_world/vertex.wgsl",
                     fragment_shader_path: "shaders/hello_world/fragment.wgsl",
-                    vertex_layouts: [Vertex::vertex_layout(), TransformComponent::vertex_layout::<1>()]
+                    vertex_layouts: [Vertex::vertex_layout(), TransformComponent::vertex_layout::<1>()],
+                    uses_camera: true,
                 },
             },
             components: [

@@ -137,10 +137,12 @@ impl V4 {
                         }
                         if !self.initialized_scene {
                             let device = self.rendering_manager.device();
+                            let queue = self.rendering_manager.queue();
                             let workload_output_receiver = workload_output_receiver.clone();
                             TokioScope::scope_and_block(|scope| {
                                 let proc = self.scenes[self.active_scene].initialize(
                                     device,
+                                    queue,
                                     workload_sender.clone(),
                                     workload_output_receiver,
                                     engine_action_sender.clone(),

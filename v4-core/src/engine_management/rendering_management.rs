@@ -177,7 +177,7 @@ impl<'a> RenderingManager {
                         render_pass.set_bind_group(
                             0,
                             scene
-                                .active_camera_buffer()
+                                .active_camera_bind_group()
                                 .expect("No active camera buffer set"),
                             &[],
                         );

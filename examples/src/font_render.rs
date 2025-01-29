@@ -78,6 +78,7 @@ impl ComponentSystem for TextComponent {
             v4::ecs::component::ComponentId,
             Vec<v4::ecs::scene::WorkloadOutput>,
         >,
+        _active_camera: Option<ComponentId>,
     ) -> v4::ecs::actions::ActionQueue {
         let text = input_manager.text();
 
@@ -129,6 +130,7 @@ impl ComponentSystem for ToggleComponent {
             v4::ecs::component::ComponentId,
             Vec<v4::ecs::scene::WorkloadOutput>,
         >,
+        _active_camera: Option<ComponentId>,
     ) -> v4::ecs::actions::ActionQueue {
         let text = input_manager.text();
 
