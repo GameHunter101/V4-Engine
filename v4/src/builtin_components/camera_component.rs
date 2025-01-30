@@ -15,7 +15,7 @@ use winit_input_helper::WinitInputHelper;
 
 #[derive(Debug)]
 #[component]
-struct CameraComponent {
+pub struct CameraComponent {
     field_of_view: f32,
     aspect_ratio: f32,
     near_plane: f32,
@@ -61,10 +61,10 @@ impl RawCameraData {
 
         #[rustfmt::skip]
         let matrix = [
-            [c / aspect_ratio,  0.0,    0.0,                    0.0],
-            [0.0,               c,      0.0,                    0.0],
-            [0.0,               0.0,    far_plane / difference, -far_plane * near_plane / difference],
-            [0.0,               0.0,    1.0,                    0.0],
+            [c * aspect_ratio,  0.0,    0.0,                                    0.0],
+            [0.0,               c,      0.0,                                    0.0],
+            [0.0,               0.0,    far_plane / difference,                 1.0],
+            [0.0,               0.0,    -far_plane * near_plane / difference,   0.0],
         ];
         Self { matrix }
     }

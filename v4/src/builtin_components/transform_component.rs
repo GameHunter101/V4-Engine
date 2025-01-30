@@ -1,7 +1,7 @@
 use crate::v4;
 use algoe::rotor::Rotor3;
 use bytemuck::{cast_slice, Pod, Zeroable};
-use nalgebra::{Matrix3, Matrix4, Vector3, Vector4};
+use nalgebra::{Matrix3, Translation3, Vector3};
 use v4_core::ecs::component::ComponentSystem;
 use v4_macros::component;
 use wgpu::{util::DeviceExt, BufferUsages, VertexAttribute, VertexBufferLayout};
@@ -82,12 +82,7 @@ impl RawTransformData {
         ])
         .to_homogeneous();
 
-        let transformation_matrix = Matrix4::from_columns(&[
-            Vector4::x(),
-            Vector4::y(),
-            value.position.to_homogeneous(),
-            Vector4::w(),
-        ]);
+        let transformation_matrix = Translation3::from(value.position).to_homogeneous();
 
         let scale_matrix = Matrix3::from_columns(&[
             Vector3::x() * value.scale.x,

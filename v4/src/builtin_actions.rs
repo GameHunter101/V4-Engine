@@ -179,7 +179,7 @@ impl Action for UpdateCameraBufferAction {
             let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some(&format!("Scene {} Camera Buffer", scene.scene_index())),
                 contents: bytemuck::cast_slice(&self.0),
-                usage: wgpu::BufferUsages::UNIFORM,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             });
             let bind_group_layout =
                 device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {

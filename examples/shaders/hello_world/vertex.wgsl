@@ -9,6 +9,13 @@ struct TransformData {
     @location(4) mat_3: vec4<f32>,
 }
 
+struct Camera {
+    mat: mat4x4<f32>
+}
+
+@group(0) @binding(0)
+var<uniform> camera: Camera;
+
 @vertex
 fn main(input: VertexInput, transform: TransformData) -> @builtin(position) vec4<f32> {
     let mat = mat4x4<f32>(
@@ -18,5 +25,5 @@ fn main(input: VertexInput, transform: TransformData) -> @builtin(position) vec4
         transform.mat_3,
     );
 
-    return mat * vec4f(input.position, 1.0);
+    return camera.mat * (mat * vec4f(input.position, 1.0));
 }

@@ -25,6 +25,7 @@ pub struct SceneDescriptor {
     relationships: HashMap<EntityId, Vec<EntityId>>,
     materials: Vec<TransformedMaterialDescriptor>,
     pipelines: Vec<PipelineIdDescriptor>,
+    active_camera: Option<Lit>,
 }
 
 impl Parse for SceneDescriptor {
@@ -39,6 +40,19 @@ impl Parse for SceneDescriptor {
         } else {
             None
         };
+
+        let active_camera = if input.peek(syn::Ident) {
+            let ident: Ident = input.parse()?;
+            if &ident.to_string() == "active_camera" {
+                let _: Token![:] = input.parse()?;
+                let entity_ident: Lit = input.parse()?;
+                Ok(Some(entity_ident))
+            } else {
+                Err(syn::Error::new(ident.span(), "Invalid specifier. In order to specify the active camera, use the `active_camera` field"))
+            }
+        } else {
+            Ok(None)
+        }?;
 
         let entities: Vec<EntityDescriptor> = input
             .parse_terminated(EntityDescriptor::parse, Token![,])?
@@ -133,6 +147,12 @@ impl Parse for SceneDescriptor {
             Ok(transformed_entity)
         }).collect::<syn::Result<Vec<TransformedEntityDescriptor>>>()?;
 
+        if let Some(active_camera_ident) = active_camera.as_ref() {
+            if !idents.contains_key(active_camera_ident) {
+                return Err(syn::Error::new(active_camera_ident.span(), "The identifier was not found. Make sure to specify which the identifier on an entity"));
+            }
+        }
+
         Ok(Self {
             scene_ident,
             entities: transformed_entities,
@@ -140,6 +160,7 @@ impl Parse for SceneDescriptor {
             relationships,
             materials,
             pipelines,
+            active_camera,
         })
     }
 }
@@ -263,12 +284,23 @@ impl quote::ToTokens for SceneDescriptor {
             }
         });
 
+        let camera_set = if let Some(active_camera) = &self.active_camera {
+            let id = &self.idents[active_camera];
+            quote! {
+                #scene_name.set_active_camera(Some(#id));
+            }
+        } else {
+            quote! {}
+        };
+
         tokens.extend(quote! {
             let mut #scene_name = v4::ecs::scene::Scene::default();
 
             #(#material_initializations)*
 
             #(#entity_initializations)*
+
+            #camera_set
         });
     }
 }

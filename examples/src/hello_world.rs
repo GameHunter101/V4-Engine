@@ -1,12 +1,10 @@
 use std::sync::Arc;
 
-use algoe::rotor::Rotor3;
 use nalgebra::Vector3;
 use tokio::sync::Mutex;
 use v4::{
     builtin_components::{
-        mesh_component::{MeshComponent, VertexDescriptor},
-        transform_component::TransformComponent,
+        camera_component::CameraComponent, mesh_component::{MeshComponent, VertexDescriptor}, transform_component::TransformComponent
     },
     scene, V4,
 };
@@ -33,6 +31,7 @@ pub async fn main() {
 
     scene! {
         scene: hello_scene
+        active_camera: "cam"
         _ = {
             material: {
                 pipeline: {
@@ -44,7 +43,12 @@ pub async fn main() {
             },
             components: [
                 MeshComponent<Vertex>::from_obj("assets/models/basic_cube.obj", true).await.unwrap(),
-                TransformComponent(position: Vector3::new(0.0, 0.0, 0.5)),
+                TransformComponent(position: Vector3::new(0.0, 0.0, 2.0)),
+            ]
+        },
+        "cam_ent" = {
+            components: [
+                CameraComponent(field_of_view: 80.0, aspect_ratio: 1.0, near_plane: 0.1, far_plane: 50.0, ident: "cam")
             ]
         }
     }
