@@ -172,6 +172,7 @@ pub fn component_impl(args: TokenStream, item: TokenStream) -> TokenStream {
     };
 
     quote! {
+        #[derive(Debug)]
         #component_struct
 
         pub struct #builder_ident #generics {

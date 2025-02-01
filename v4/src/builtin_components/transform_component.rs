@@ -1,12 +1,11 @@
 use crate::v4;
 use algoe::rotor::Rotor3;
 use bytemuck::{cast_slice, Pod, Zeroable};
-use nalgebra::{Matrix3, Translation3, Vector3};
+use nalgebra::{Matrix3, Matrix4, Translation3, Vector3};
 use v4_core::ecs::component::ComponentSystem;
 use v4_macros::component;
 use wgpu::{util::DeviceExt, BufferUsages, VertexAttribute, VertexBufferLayout};
 
-#[derive(Debug)]
 #[component]
 pub struct TransformComponent {
     position: Vector3<f32>,
@@ -47,6 +46,26 @@ impl TransformComponent {
             attributes,
         }
     }
+
+    pub fn create_matrix(&self) -> Matrix4<f32> {
+        let rotation_matrix = Matrix3::from_columns(&[
+            self.rotation * Vector3::x(),
+            self.rotation * Vector3::y(),
+            self.rotation * Vector3::z(),
+        ])
+        .to_homogeneous();
+
+        let transformation_matrix = Translation3::from(self.position).to_homogeneous();
+
+        let scale_matrix = Matrix3::from_columns(&[
+            Vector3::x() * self.scale.x,
+            Vector3::y() * self.scale.y,
+            Vector3::z() * self.scale.z,
+        ])
+        .to_homogeneous();
+
+        transformation_matrix * rotation_matrix * scale_matrix
+    }
 }
 
 impl ComponentSystem for TransformComponent {
@@ -74,25 +93,9 @@ pub struct RawTransformData {
 }
 
 impl RawTransformData {
-    fn from_component(value: &TransformComponent) -> Self {
-        let rotation_matrix = Matrix3::from_columns(&[
-            value.rotation * Vector3::x(),
-            value.rotation * Vector3::y(),
-            value.rotation * Vector3::z(),
-        ])
-        .to_homogeneous();
-
-        let transformation_matrix = Translation3::from(value.position).to_homogeneous();
-
-        let scale_matrix = Matrix3::from_columns(&[
-            Vector3::x() * value.scale.x,
-            Vector3::y() * value.scale.y,
-            Vector3::z() * value.scale.z,
-        ])
-        .to_homogeneous();
-
-        let matrix = (transformation_matrix * rotation_matrix * scale_matrix).into();
-
-        RawTransformData { matrix }
+    fn from_component(comp: &TransformComponent) -> Self {
+        RawTransformData {
+            matrix: comp.create_matrix().into(),
+        }
     }
 }

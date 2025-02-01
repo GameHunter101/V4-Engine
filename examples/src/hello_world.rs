@@ -1,7 +1,4 @@
-use std::sync::Arc;
-
 use nalgebra::Vector3;
-use tokio::sync::Mutex;
 use v4::{
     builtin_components::{
         camera_component::CameraComponent, mesh_component::{MeshComponent, VertexDescriptor}, transform_component::TransformComponent
@@ -23,12 +20,6 @@ pub async fn main() {
         .build()
         .await;
 
-    let results = Arc::new(Mutex::new(Vec::new()));
-    let clone = results.clone();
-    std::thread::spawn(move || {
-        async_test(clone);
-    });
-
     scene! {
         scene: hello_scene
         active_camera: "cam"
@@ -48,7 +39,8 @@ pub async fn main() {
         },
         "cam_ent" = {
             components: [
-                CameraComponent(field_of_view: 80.0, aspect_ratio: 1.0, near_plane: 0.1, far_plane: 50.0, ident: "cam")
+                CameraComponent(field_of_view: 80.0, aspect_ratio: 1.0, near_plane: 0.1, far_plane: 50.0, ident: "cam"),
+                // TransformComponent(position: Vector3::new(1.0, 0.0, 0.0)),
             ]
         }
     }
@@ -56,21 +48,6 @@ pub async fn main() {
     engine.attach_scene(hello_scene);
 
     engine.main_loop().await;
-}
-
-#[tokio::main]
-async fn async_test(results: Arc<Mutex<Vec<u64>>>) {
-    async_scoped::TokioScope::scope_and_block(|scope| {
-        (0..100).for_each(|i| {
-            let res = results.clone();
-            let task = async move {
-                tokio::time::sleep(std::time::Duration::from_millis(i * 100)).await;
-                res.lock().await.push(i);
-                i
-            };
-            scope.spawn(task);
-        });
-    });
 }
 
 #[repr(C)]

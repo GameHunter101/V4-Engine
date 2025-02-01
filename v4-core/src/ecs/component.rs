@@ -1,18 +1,25 @@
-use std::{collections::HashMap, fmt::Debug};
+use downcast_rs::{impl_downcast, DowncastSync};
+use std::{collections::HashMap, fmt::Debug, ops::Range};
 use wgpu::{Device, Queue, RenderPass};
 use winit_input_helper::WinitInputHelper;
 
 use crate::EngineDetails;
 
-use super::{actions::ActionQueue, entity::EntityId, scene::WorkloadOutput};
+use super::{
+    actions::ActionQueue,
+    entity::{Entity, EntityId},
+    scene::WorkloadOutput,
+};
 
 pub type ComponentId = u32;
 
-pub type Component = Box<dyn ComponentSystem + Send + Sync>;
+pub type Component = Box<dyn ComponentSystem>;
 
 #[allow(unused)]
 #[async_trait::async_trait]
-pub trait ComponentSystem: ComponentDetails + Debug {
+pub trait ComponentSystem:
+    ComponentDetails + Debug + DowncastSync + Send + Sync
+{
     fn initialize(&mut self, device: &Device) -> ActionQueue {
         self.set_initialized();
         Vec::new()
@@ -27,6 +34,8 @@ pub trait ComponentSystem: ComponentDetails + Debug {
         other_components: &[&mut Component],
         engine_details: &EngineDetails,
         workload_outputs: &HashMap<ComponentId, Vec<WorkloadOutput>>,
+        entities: &HashMap<EntityId, Entity>,
+        entity_component_groups: HashMap<EntityId, Range<usize>>,
         active_camera: Option<ComponentId>,
     ) -> ActionQueue {
         Vec::new()
@@ -34,6 +43,7 @@ pub trait ComponentSystem: ComponentDetails + Debug {
 
     fn render(&self, device: &Device, queue: &Queue, render_pass: &mut RenderPass) {}
 }
+impl_downcast!(sync ComponentSystem);
 
 pub trait ComponentDetails {
     fn id(&self) -> ComponentId;

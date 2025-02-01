@@ -1,4 +1,4 @@
-use wgpu::{util::DeviceExt, BindGroup, BindGroupLayout, Buffer, Device, ShaderStages};
+use wgpu::{BindGroup, BindGroupLayout, Buffer, Device, ShaderStages};
 
 use crate::engine_support::texture_support::Texture;
 

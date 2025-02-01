@@ -24,5 +24,6 @@ winit_input_helper.workspace = true
 tobj.workspace = true
 glyphon.workspace = true
 algoe.workspace = true
+downcast-rs.workspace = true
 v4-core = { path = "../v4-core" }
 v4-macros = { path = "../v4-macros" }

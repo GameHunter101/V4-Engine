@@ -3,6 +3,7 @@ use std::{
     collections::{HashMap, HashSet},
     fmt::Debug,
     future::Future,
+    ops::Range,
     pin::Pin,
 };
 
@@ -26,6 +27,7 @@ pub struct Scene {
     scene_index: usize,
     components: Vec<Component>,
     entities: HashMap<EntityId, Entity>,
+    entity_component_groupings: HashMap<EntityId, Range<usize>>,
     ui_components: Vec<ComponentId>,
     materials: Vec<Material>,
     pipeline_to_corresponding_materials: HashMap<PipelineId, Vec<MaterialId>>,
@@ -69,6 +71,7 @@ impl Default for Scene {
             scene_index,
             components: Vec::new(),
             entities: HashMap::new(),
+            entity_component_groupings: HashMap::new(),
             ui_components: Vec::new(),
             materials: Vec::new(),
             pipeline_to_corresponding_materials: HashMap::new(),
@@ -101,7 +104,7 @@ impl Scene {
         let action_queue: ActionQueue = self
             .components
             .iter_mut()
-            .flat_map(|component| component.initialize(device))
+            .flat_map(|comp| comp.initialize(device))
             .collect();
         self.execute_action_queue(action_queue, device, queue).await;
 
@@ -130,48 +133,63 @@ impl Scene {
                     .insert(component_id, vec![workload_output]);
             }
         }
+
         let active_camera = self.active_camera();
-        let all_components = &mut self.components;
+        let entities = &self.entities;
+        let all_components: &mut Vec<Component> = &mut self.components;
+
         let actions: Vec<_> = (0..all_components.len())
             .map(|i| {
                 if !all_components[i].is_enabled() {
                     return Vec::new();
                 }
+                let (previous_components, rest_of_components) = all_components.split_at_mut(i);
+                let Some((current_component, later_components)) =
+                    rest_of_components.split_first_mut()
+                else {
+                    return Vec::new();
+                };
+                let other_components: Vec<&mut Component> = previous_components
+                    .iter_mut()
+                    .chain(later_components.iter_mut())
+                    .collect();
+
+                let mut entity_component_groupings = self.entity_component_groupings.clone();
+                for grouping in entity_component_groupings.values_mut() {
+                    if grouping.start > i {
+                        grouping.start -=1;
+                    }
+                    if grouping.end > i {
+                        grouping.end -=1;
+                    }
+                }
+
                 let (_, outputs) = async_scoped::TokioScope::scope_and_block(|scope| {
-                    let (components_before, components_after_and_this) =
-                        all_components.split_at_mut(i);
                     let workload_outputs = &self.workload_outputs;
-                    scope.spawn(async move {
-                        if let Some((component, components_after)) =
-                            components_after_and_this.split_first_mut()
-                        {
-                            let chain: Vec<&mut Component> = components_before
-                                .iter_mut()
-                                .chain(components_after.iter_mut())
-                                .collect();
-                            component
-                                .update(
-                                    device,
-                                    queue,
-                                    input_manager,
-                                    &chain,
-                                    engine_details,
-                                    workload_outputs,
-                                    active_camera,
-                                )
-                                .await
-                        } else {
-                            Vec::new()
-                        }
-                    })
+                    scope.spawn(async {
+                        current_component
+                            .update(
+                                device,
+                                queue,
+                                input_manager,
+                                &other_components,
+                                engine_details,
+                                workload_outputs,
+                                entities,
+                                entity_component_groupings,
+                                active_camera,
+                            )
+                            .await
+                    });
                 });
                 outputs
             })
             .collect();
+
         let action_queue: ActionQueue = actions
             .into_iter()
             .flatten()
-            .flat_map(|actions| actions.unwrap_or_default())
+            .flat_map(|queue| queue.unwrap_or_default())
             .collect();
 
         self.execute_action_queue(action_queue, device, queue).await;
@@ -250,11 +268,11 @@ impl Scene {
             .map(|material| {
                 let components: Vec<&Component> = self
                     .entities
-                    .values()
-                    .flat_map(|ent| {
+                    .iter()
+                    .flat_map(|(id, ent)| {
                         if let Some(mat) = ent.active_material() {
                             if mat == material.id() {
-                                Some(ent.id())
+                                Some(&self.components[self.entity_component_groupings[id].clone()])
                             } else {
                                 None
                             }
@@ -262,15 +280,7 @@ impl Scene {
                             None
                         }
                     })
-                    .flat_map(|ent_id| {
-                        let mut components = self
-                            .components
-                            .iter()
-                            .filter(|comp| comp.parent_entity_id() == ent_id)
-                            .collect::<Vec<&Component>>();
-                        components.sort_by_key(|a| a.rendering_order());
-                        components
-                    })
+                    .flatten()
                     .collect();
                 (material.id(), components)
             })
@@ -280,7 +290,7 @@ impl Scene {
     pub fn create_entity(
         &mut self,
         parent: Option<EntityId>,
-        components: Vec<Component>,
+        mut components: Vec<Component>,
         material: Option<MaterialId>,
         is_enabled: bool,
     ) -> EntityId {
@@ -293,21 +303,32 @@ impl Scene {
         );
         let id = entity.id();
 
+        if let Some(parent) = parent {
+            self.entities.get_mut(&parent).unwrap().push_child(id);
+        }
+
         self.entities.insert(id, entity);
         self.total_entities_created += 1;
 
-        for component in components {
-            let insert_index = self
-                .components
-                .iter()
-                .position(|comp| comp.rendering_order() >= component.rendering_order())
-                .unwrap_or(self.components.len());
-            self.components.insert(insert_index, component);
-            self.components
-                .get_mut(insert_index)
-                .unwrap()
-                .set_parent_entity(id);
-        }
+        components
+            .iter_mut()
+            .for_each(|comp| comp.set_parent_entity(id));
+        // let starting_index = self.components.len();
+        /* while let Some(comp) = components.pop() {
+            if self.components.len() == starting_index {
+                self.components.push(comp);
+                continue;
+            }
+
+            
+        } */
+        components.sort_by_key(|a| a.rendering_order());
+        self.entity_component_groupings.insert(
+            id,
+            self.components.len()..(self.components.len() + components.len() + 1),
+        );
+        dbg!(&components.iter().map(|comp| comp.rendering_order()).collect::<Vec<i32>>());
+        self.components.append(&mut components);
 
         id
     }
@@ -323,7 +344,7 @@ impl Scene {
     pub fn get_component(&self, component_id: ComponentId) -> Option<&Component> {
         self.components
             .iter()
-            .find(|&comp| comp.id() == component_id)
+            .find(|comp| comp.id() == component_id)
     }
 
     pub fn get_component_mut(&mut self, component_id: ComponentId) -> Option<&mut Component> {

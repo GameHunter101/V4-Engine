@@ -53,11 +53,15 @@ impl Entity {
         self.is_enabled
     }
 
-    pub fn children_ids(&self) -> &[u32] {
+    pub fn children_ids(&self) -> &[EntityId] {
         &self.children_ids
     }
 
-    pub fn parent_entity_id(&self) -> u32 {
+    pub fn parent_entity_id(&self) -> EntityId {
         self.parent_entity_id
+    }
+
+    pub fn push_child(&mut self, child: EntityId) {
+        self.children_ids.push(child);
     }
 }

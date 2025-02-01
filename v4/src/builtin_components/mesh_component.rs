@@ -23,7 +23,6 @@ pub trait VertexDescriptor: Debug + Pod + Zeroable {
     fn from_pos_normal_coords(pos: Vec<f32>, normal: Vec<f32>, tex_coords: Vec<f32>) -> Self;
 }
 
-#[derive(Debug)]
 #[component(rendering_order = 500)]
 pub struct MeshComponent<V: VertexDescriptor> {
     vertices: Vec<Vec<V>>,
@@ -93,7 +92,7 @@ impl<V: VertexDescriptor> MeshComponent<V> {
     }
 }
 
-impl<V: VertexDescriptor> ComponentSystem for MeshComponent<V> {
+impl<V: VertexDescriptor + Send + Sync> ComponentSystem for MeshComponent<V> {
     fn initialize(&mut self, device: &Device) -> v4_core::ecs::actions::ActionQueue {
         self.vertex_buffer = Some(
             self.enabled_models

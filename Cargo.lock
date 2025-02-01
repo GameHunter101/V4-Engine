@@ -569,6 +569,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "75b325c5dbd37f80359721ad39aca5a29fb04c89279657cffdda8736d0c0b9d2"
 
 [[package]]
+name = "downcast-rs"
+version = "2.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ea8a8b81cacc08888170eef4d13b775126db426d0b348bee9d18c2c1eaf123cf"
+
+[[package]]
 name = "either"
 version = "1.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2248,11 +2254,12 @@ checksum = "ebc1c04c71510c7f702b52b7c350734c9ff1295c464a03335b00bb84fc54f853"
 
 [[package]]
 name = "v4"
-version = "0.2.5"
+version = "0.2.6"
 dependencies = [
  "algoe",
  "async-trait",
  "bytemuck",
+ "downcast-rs 2.0.1",
  "glyphon",
  "nalgebra",
  "tobj",
@@ -2264,12 +2271,13 @@ dependencies = [
 
 [[package]]
 name = "v4-core"
-version = "0.2.5"
+version = "0.2.6"
 dependencies = [
  "async-scoped",
  "async-trait",
  "bytemuck",
  "crossbeam-channel",
+ "downcast-rs 2.0.1",
  "env_logger",
  "futures",
  "glyphon",
@@ -2288,7 +2296,7 @@ dependencies = [
 
 [[package]]
 name = "v4-examples"
-version = "0.2.5"
+version = "0.2.6"
 dependencies = [
  "algoe",
  "async-scoped",
@@ -2414,7 +2422,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "056535ced7a150d45159d3a8dc30f91a2e2d588ca0b23f70e56033622b8016f6"
 dependencies = [
  "cc",
- "downcast-rs",
+ "downcast-rs 1.2.1",
  "rustix",
  "scoped-tls",
  "smallvec",

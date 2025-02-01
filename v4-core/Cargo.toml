@@ -23,3 +23,4 @@ winit_input_helper.workspace = true
 imgui-winit-support.workspace = true
 glyphon.workspace = true
 crossbeam-channel.workspace = true
+downcast-rs.workspace = true

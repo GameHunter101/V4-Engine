@@ -1,8 +1,11 @@
+use std::{collections::HashMap, ops::Range};
+
 use v4::{
     builtin_actions::{WorkloadAction, WorkloadOutputFreeAction},
     component,
     ecs::{
         component::{ComponentDetails, ComponentId, ComponentSystem},
+        entity::{Entity, EntityId},
         scene::WorkloadOutput,
     },
     scene, V4,
@@ -27,7 +30,6 @@ pub async fn main() {
     engine.main_loop().await;
 }
 
-#[derive(Debug)]
 #[component]
 struct WorkloadTesterComponent {
     initialized_time: std::time::Instant,
@@ -57,10 +59,9 @@ impl ComponentSystem for WorkloadTesterComponent {
         _input_manager: &winit_input_helper::WinitInputHelper,
         _other_components: &[&mut v4::ecs::component::Component],
         _engine_details: &v4::EngineDetails,
-        workload_outputs: &std::collections::HashMap<
-            v4::ecs::component::ComponentId,
-            Vec<v4::ecs::scene::WorkloadOutput>,
-        >,
+        workload_outputs: &HashMap<ComponentId, Vec<v4::ecs::scene::WorkloadOutput>>,
+        _entities: &HashMap<EntityId, Entity>,
+        _entity_component_groups: HashMap<EntityId, Range<usize>>,
         _active_camera: Option<ComponentId>,
     ) -> v4::ecs::actions::ActionQueue {
         if self.initialized_time.elapsed().as_secs_f32() % 1.0 <= 0.01 {
@@ -85,7 +86,6 @@ impl ComponentSystem for WorkloadTesterComponent {
     }
 }
 
-#[derive(Debug)]
 #[component]
 struct TempComponent {}
 
@@ -98,10 +98,9 @@ impl ComponentSystem for TempComponent {
         _input_manager: &winit_input_helper::WinitInputHelper,
         _other_components: &[&mut v4::ecs::component::Component],
         engine_details: &v4::EngineDetails,
-        _workload_outputs: &std::collections::HashMap<
-            v4::ecs::component::ComponentId,
-            Vec<v4::ecs::scene::WorkloadOutput>,
-        >,
+        _workload_outputs: &HashMap<ComponentId, Vec<v4::ecs::scene::WorkloadOutput>>,
+        _entities: &HashMap<EntityId, Entity>,
+        _entity_component_groups: HashMap<EntityId, Range<usize>>,
         _active_camera: Option<ComponentId>,
     ) -> v4::ecs::actions::ActionQueue {
         if engine_details.initialization_time.elapsed().as_millis() % 100 == 0 {

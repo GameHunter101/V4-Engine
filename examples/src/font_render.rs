@@ -1,18 +1,21 @@
+use std::{collections::HashMap, ops::Range};
+
 use v4::{
     builtin_actions::UpdateTextComponentAction,
     component,
-    ecs::component::{ComponentDetails, ComponentId, ComponentSystem},
+    ecs::{
+        component::{ComponentDetails, ComponentId, ComponentSystem},
+        entity::{Entity, EntityId},
+    },
     engine_management::font_management::{TextComponentProperties, TextDisplayInfo},
     scene, V4,
 };
 
-#[derive(Debug)]
 #[component]
 struct TextComponent {
     text: String,
 }
 
-#[derive(Debug)]
 #[component]
 struct ToggleComponent {
     text_component: ComponentId,
@@ -74,10 +77,9 @@ impl ComponentSystem for TextComponent {
         input_manager: &winit_input_helper::WinitInputHelper,
         _other_components: &[&mut v4::ecs::component::Component],
         _engine_details: &v4::EngineDetails,
-        _workload_outputs: &std::collections::HashMap<
-            v4::ecs::component::ComponentId,
-            Vec<v4::ecs::scene::WorkloadOutput>,
-        >,
+        _workload_outputs: &HashMap<ComponentId, Vec<v4::ecs::scene::WorkloadOutput>>,
+        _entities: &HashMap<EntityId, Entity>,
+        _entity_component_groups: HashMap<EntityId, Range<usize>>,
         _active_camera: Option<ComponentId>,
     ) -> v4::ecs::actions::ActionQueue {
         let text = input_manager.text();
@@ -126,10 +128,9 @@ impl ComponentSystem for ToggleComponent {
         input_manager: &winit_input_helper::WinitInputHelper,
         _other_components: &[&mut v4::ecs::component::Component],
         _engine_details: &v4::EngineDetails,
-        _workload_outputs: &std::collections::HashMap<
-            v4::ecs::component::ComponentId,
-            Vec<v4::ecs::scene::WorkloadOutput>,
-        >,
+        _workload_outputs: &HashMap<ComponentId, Vec<v4::ecs::scene::WorkloadOutput>>,
+        _entities: &HashMap<EntityId, Entity>,
+        _entity_component_groups: HashMap<EntityId, Range<usize>>,
         _active_camera: Option<ComponentId>,
     ) -> v4::ecs::actions::ActionQueue {
         let text = input_manager.text();

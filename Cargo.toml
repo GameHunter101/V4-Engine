@@ -7,7 +7,7 @@ members = [ "examples", "v4",
 resolver = "2"
 
 [workspace.package]
-version = "0.2.5"
+version = "0.2.6"
 authors = ["Lior Carmeli"]
 
 [workspace.dependencies]
@@ -31,6 +31,7 @@ glyphon = "=0.6.0"
 tobj = { version = "4.0.2", features = ["async"] }
 crossbeam-channel = "0.5.14"
 algoe = { git = "https://github.com/GameHunter101/Algoe" }
+downcast-rs = "2.0.1"
 
 [workspace.dependencies.image]
 version = "0.25.2"
