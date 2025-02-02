@@ -13,6 +13,8 @@ pub struct TransformComponent {
     rotation: Rotor3,
     #[default(Vector3::new(1.0, 1.0, 1.0))]
     scale: Vector3<f32>,
+    #[default(true)]
+    uses_buffer: bool,
 }
 
 impl TransformComponent {
@@ -75,14 +77,16 @@ impl ComponentSystem for TransformComponent {
         _queue: &wgpu::Queue,
         render_pass: &mut wgpu::RenderPass,
     ) {
-        let raw_data = RawTransformData::from_component(self);
-        let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some(&format!("Transform Component {} Buffer", self.id)),
-            contents: cast_slice(&[raw_data]),
-            usage: BufferUsages::VERTEX,
-        });
+        if self.uses_buffer {
+            let raw_data = RawTransformData::from_component(self);
+            let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some(&format!("Transform Component {} Buffer", self.id)),
+                contents: cast_slice(&[raw_data]),
+                usage: BufferUsages::VERTEX,
+            });
 
-        render_pass.set_vertex_buffer(1, buffer.slice(..));
+            render_pass.set_vertex_buffer(1, buffer.slice(..));
+        }
     }
 }
 

@@ -41,7 +41,7 @@ impl ComponentSystem for CameraComponent {
     ) -> ActionQueue {
         if let Some(active) = active_camera {
             if active == self.id() {
-                /* let sibling_components =
+                let sibling_components =
                     &other_components[entity_component_groups[&self.parent_entity_id].clone()];
 
                 let transform_component: Option<&TransformComponent> = sibling_components
@@ -53,9 +53,9 @@ impl ComponentSystem for CameraComponent {
                             None
                         }
                     })
-                    .next(); */
+                    .next();
                 return vec![Box::new(UpdateCameraBufferAction(
-                    RawCameraData::from_component(self, None).matrix,
+                    RawCameraData::from_component(self, transform_component).matrix,
                 ))];
             }
         }
@@ -89,10 +89,10 @@ impl RawCameraData {
 
         #[rustfmt::skip]
         let projection_matrix= Matrix4::new(
-            c * aspect_ratio,  0.0,    0.0,                                    0.0,
-            0.0,               c,      0.0,                                    0.0,
-            0.0,               0.0,    far_plane / difference,                 1.0,
-            0.0,               0.0,    -far_plane * near_plane / difference,   0.0,
+            c * aspect_ratio,  0.0,    0.0,                     0.0,
+            0.0,               c,      0.0,                     0.0,
+            0.0,               0.0,    far_plane / difference,  - (far_plane * near_plane) / difference,
+            0.0,               0.0,    1.0,                     0.0,
         );
 
         Self {

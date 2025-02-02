@@ -325,9 +325,8 @@ impl Scene {
         components.sort_by_key(|a| a.rendering_order());
         self.entity_component_groupings.insert(
             id,
-            self.components.len()..(self.components.len() + components.len() + 1),
+            self.components.len()..(self.components.len() + components.len()),
         );
-        dbg!(&components.iter().map(|comp| comp.rendering_order()).collect::<Vec<i32>>());
         self.components.append(&mut components);
 
         id

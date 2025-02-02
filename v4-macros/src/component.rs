@@ -1,19 +1,30 @@
-use darling::{ast::NestedMeta, FromMeta};
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::{format_ident, quote};
 use syn::{
     parse::Parser, parse_macro_input, punctuated::Punctuated, Expr, GenericParam, Ident,
-    ItemStruct, Token, TypeParam,
+    ItemStruct, Meta, MetaNameValue, Token, TypeParam,
 };
 
-#[allow(unused)]
-#[derive(Debug, FromMeta)]
-struct ComponentSpecs {
-    rendering_order: Option<i32>,
-}
-
 pub fn component_impl(args: TokenStream, item: TokenStream) -> TokenStream {
+    let args = parse_macro_input!(args with Punctuated::<Meta, Token![,]>::parse_terminated);
+    let rendering_order_expr: Option<Expr> = args.into_iter().flat_map(|arg| {
+        if let Meta::NameValue(MetaNameValue { path, value, .. }) = arg {
+            if let Some(name) = path.get_ident() {
+                if &name.to_string() == "rendering_order" {
+                    return Some(value);
+                }
+            }
+        }
+        None
+    }).next();
+
+    let rendering_order = if let Some(expr) = rendering_order_expr {
+        quote!{#expr}
+    } else {
+        quote!{0}
+    };
+
     let mut component_struct = parse_macro_input!(item as ItemStruct);
 
     let ident = component_struct.ident.clone();
@@ -69,13 +80,6 @@ pub fn component_impl(args: TokenStream, item: TokenStream) -> TokenStream {
         .map(|field| field.ident.clone())
         .collect();
 
-    let attr_args = match NestedMeta::parse_meta_list(args.into()) {
-        Ok(v) => v,
-        Err(e) => {
-            return TokenStream::from(darling::Error::from(e).write_errors());
-        }
-    };
-
     if let syn::Fields::Named(fields) = &mut component_struct.fields {
         fields.named.push(
             syn::Field::parse_named
@@ -121,22 +125,6 @@ pub fn component_impl(args: TokenStream, item: TokenStream) -> TokenStream {
             .for_each(|field| field.attrs = Vec::new()),
         _ => {}
     }
-
-    #[allow(clippy::collapsible_match)]
-    let rendering_order = if attr_args.is_empty() {
-        0
-    } else {
-        match &attr_args[0] {
-            NestedMeta::Lit(lit) => {
-                if let syn::Lit::Int(lit_int) = lit {
-                    lit_int.base10_parse().unwrap_or(0)
-                } else {
-                    0
-                }
-            }
-            _ => 0,
-        }
-    };
 
     let impl_post_params: Punctuated<GenericParam, Token![,]> = generics
         .params

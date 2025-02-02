@@ -1,7 +1,12 @@
+use core::f32;
+
+use algoe::bivector::Bivector;
 use nalgebra::Vector3;
 use v4::{
     builtin_components::{
-        camera_component::CameraComponent, mesh_component::{MeshComponent, VertexDescriptor}, transform_component::TransformComponent
+        camera_component::CameraComponent,
+        mesh_component::{MeshComponent, VertexDescriptor},
+        transform_component::TransformComponent,
     },
     scene, V4,
 };
@@ -40,7 +45,7 @@ pub async fn main() {
         "cam_ent" = {
             components: [
                 CameraComponent(field_of_view: 80.0, aspect_ratio: 1.0, near_plane: 0.1, far_plane: 50.0, ident: "cam"),
-                // TransformComponent(position: Vector3::new(1.0, 0.0, 0.0)),
+                TransformComponent(position: Vector3::new(1.0, 0.0, 0.0), rotation: (Bivector::new(0.0, 1.0, 0.0) * std::f32::consts::FRAC_PI_8).exponentiate(), uses_buffer: false),
             ]
         }
     }
