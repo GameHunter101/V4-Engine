@@ -30,6 +30,7 @@ pub struct Scene {
     entity_component_groupings: HashMap<EntityId, Range<usize>>,
     ui_components: Vec<ComponentId>,
     materials: Vec<Material>,
+    screen_space_materials: Vec<MaterialId>,
     pipeline_to_corresponding_materials: HashMap<PipelineId, Vec<MaterialId>>,
     total_entities_created: u32,
     workload_sender: Option<Sender<WorkloadPacket>>,
@@ -74,6 +75,7 @@ impl Default for Scene {
             entity_component_groupings: HashMap::new(),
             ui_components: Vec::new(),
             materials: Vec::new(),
+            screen_space_materials: Vec::new(),
             pipeline_to_corresponding_materials: HashMap::new(),
             total_entities_created: 0,
             workload_sender: None,
@@ -313,15 +315,6 @@ impl Scene {
         components
             .iter_mut()
             .for_each(|comp| comp.set_parent_entity(id));
-        // let starting_index = self.components.len();
-        /* while let Some(comp) = components.pop() {
-            if self.components.len() == starting_index {
-                self.components.push(comp);
-                continue;
-            }
-
-            
-        } */
         components.sort_by_key(|a| a.rendering_order());
         self.entity_component_groupings.insert(
             id,
@@ -350,6 +343,10 @@ impl Scene {
         self.components
             .iter_mut()
             .find(|comp| comp.id() == component_id)
+    }
+
+    pub fn get_material(&self, material_id: MaterialId) -> Option<&Material> {
+        self.materials.get(material_id)
     }
 
     pub fn enabled_ui_components(&self) -> HashSet<ComponentId> {
@@ -414,5 +411,9 @@ impl Scene {
 
     pub fn scene_index(&self) -> usize {
         self.scene_index
+    }
+
+    pub fn screen_space_materials(&self) -> &[usize] {
+        &self.screen_space_materials
     }
 }

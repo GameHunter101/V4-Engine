@@ -1,22 +1,16 @@
-#![allow(unused)]
 use std::collections::HashMap;
 
-use darling::FromMeta;
-use proc_macro2::{Span, TokenStream as TokenStream2, TokenTree};
+use proc_macro2::{TokenStream as TokenStream2, TokenTree};
 use quote::{format_ident, quote, ToTokens};
 use syn::{
     braced, bracketed, parenthesized,
-    parse::{
-        discouraged::{AnyDelimiter, Speculative},
-        Parse, ParseStream,
-    },
-    parse2, parse_macro_input, parse_quote,
+    parse::{Parse, ParseStream},
+    parse2,
     punctuated::Punctuated,
     spanned::Spanned,
-    AngleBracketedGenericArguments, Expr, ExprAwait, ExprCall, ExprField, ExprLit, ExprMethodCall,
-    ExprPath, FieldValue, Generics, Ident, Lit, LitBool, LitStr, Member, PatLit, PatPath, Token,
+    AngleBracketedGenericArguments, Expr, ExprCall, ExprPath, Ident, Lit, LitBool, LitStr, Token,
 };
-use v4_core::ecs::{component::ComponentId, entity::EntityId, material::MaterialId, scene::Scene};
+use v4_core::ecs::{component::ComponentId, entity::EntityId, material::MaterialId};
 
 pub struct SceneDescriptor {
     scene_ident: Option<Ident>,
@@ -66,7 +60,7 @@ impl Parse for SceneDescriptor {
         let mut current_ident = 1;
         let transformed_entities = entities.into_iter().map(|entity| {
 
-            let material_id = if let Some(mut material) = entity.material {
+            let material_id = if let Some(material) = entity.material {
                 let pipeline_id = match &material.pipeline_id {
                     PipelineIdVariants::Ident(pipeline_ident) => match idents.get(pipeline_ident) {
                         Some(id) => {
@@ -105,7 +99,7 @@ impl Parse for SceneDescriptor {
                 None
             };
 
-            let mut transformed_entity = TransformedEntityDescriptor {
+            let transformed_entity = TransformedEntityDescriptor {
                 components: entity.components,
                 material_id,
                 parent: None,
@@ -892,10 +886,11 @@ impl quote::ToTokens for PipelineIdDescriptor {
         };
         tokens.extend(quote! {
             v4::ecs::pipeline::PipelineId {
-                vertex_shader_path: #vertex_shader_path,
-                fragment_shader_path: #fragment_shader_path,
+                vertex_shader: v4::ecs::pipeline::PipelineShader::Path(#vertex_shader_path),
+                fragment_shader: v4::ecs::pipeline::PipelineShader::Path(#fragment_shader_path),
                 vertex_layouts: vec![#(#vertex_layouts),*],
                 uses_camera: #uses_camera,
+                is_screen_space: false,
                 geometry_details: #geometry_details,
             }
         });

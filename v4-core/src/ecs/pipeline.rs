@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use wgpu::{BindGroupLayout, Device, RenderPipeline, TextureFormat, VertexBufferLayout};
 
 use crate::engine_support::texture_support::Texture;
@@ -6,10 +8,11 @@ use crate::engine_support::texture_support::Texture;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PipelineId {
-    pub vertex_shader_path: &'static str,
-    pub fragment_shader_path: &'static str,
+    pub vertex_shader: PipelineShader,
+    pub fragment_shader: PipelineShader,
     pub vertex_layouts: Vec<wgpu::VertexBufferLayout<'static>>,
     pub uses_camera: bool,
+    pub is_screen_space: bool,
     pub geometry_details: GeometryDetails,
 }
 
@@ -21,6 +24,12 @@ impl PipelineId {
     pub fn geometry_details(&self) -> &GeometryDetails {
         &self.geometry_details
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum PipelineShader {
+    Path(&'static str),
+    Raw(Cow<'static, str>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -86,20 +95,20 @@ pub fn create_render_pipeline(
         push_constant_ranges: &[],
     });
 
-    let vertex_shader_module = load_shader_module_descriptor(device, id.vertex_shader_path);
+    let vertex_shader_module = load_shader_module_descriptor(device, &id.vertex_shader);
     if let Err(error) = vertex_shader_module {
         panic!(
-            "Vertex shader error for shader {}: {error}",
-            id.vertex_shader_path
+            "Vertex shader error for shader {:?}: {error}",
+            id.vertex_shader
         );
     }
     let vertex_shader_module = vertex_shader_module.unwrap();
 
-    let fragment_shader_module = load_shader_module_descriptor(device, id.fragment_shader_path);
+    let fragment_shader_module = load_shader_module_descriptor(device, &id.fragment_shader);
     if let Err(error) = fragment_shader_module {
         panic!(
-            "Fragment shader error for shader {}: {error}",
-            id.fragment_shader_path
+            "Fragment shader error for shader {:?}: {error}",
+            id.fragment_shader
         );
     }
     let fragment_shader_module = fragment_shader_module.unwrap();
@@ -151,12 +160,22 @@ pub fn create_render_pipeline(
 
 pub fn load_shader_module_descriptor(
     device: &Device,
-    shader_path: &'static str,
+    shader: &PipelineShader,
 ) -> Result<wgpu::ShaderModule, std::io::Error> {
-    let shader_contents_bytes = std::fs::read(shader_path)?;
-    let shader_contents = String::from_utf8_lossy(&shader_contents_bytes);
-    Ok(device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some(&format!("{shader_path} Shader Module")),
-        source: wgpu::ShaderSource::Wgsl(shader_contents),
-    }))
+    match shader {
+        PipelineShader::Path(shader_path) => {
+            let shader_contents_bytes = std::fs::read(shader_path)?;
+            let contents = String::from_utf8_lossy(&shader_contents_bytes);
+            Ok(device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: None,
+                source: wgpu::ShaderSource::Wgsl(contents),
+            }))
+        }
+        PipelineShader::Raw(contents) => {
+            Ok(device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: None,
+                source: wgpu::ShaderSource::Wgsl(contents.clone()),
+            }))
+        }
+    }
 }

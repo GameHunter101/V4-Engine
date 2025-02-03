@@ -3,7 +3,8 @@ use std::{collections::HashMap, fmt::Debug};
 use smaa::SmaaTarget;
 use wgpu::{
     rwh::{HasDisplayHandle, HasWindowHandle},
-    RenderPipeline,
+    util::DeviceExt,
+    RenderPipeline, TextureUsages,
 };
 
 use crate::{
@@ -78,7 +79,7 @@ impl<'a> RenderingManager {
             .unwrap_or(surface_caps.formats[0]);
 
         let config = wgpu::SurfaceConfiguration {
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            usage: TextureUsages::RENDER_ATTACHMENT,
             format,
             width: window_size.width,
             height: window_size.height,
@@ -125,11 +126,33 @@ impl<'a> RenderingManager {
         pipelines: &HashMap<PipelineId, RenderPipeline>,
         font_state: &mut FontState,
     ) {
+        let screen_space_materials = scene.screen_space_materials();
         let output = self.surface.get_current_texture().unwrap();
+        let raw_render_tex = if screen_space_materials.is_empty() {
+            &output.texture
+        } else {
+            &self.device.create_texture(&wgpu::TextureDescriptor {
+                label: Some(&format!(
+                    "Scene {} raw render output texture",
+                    scene.scene_index()
+                )),
+                size: wgpu::Extent3d {
+                    width: self.width,
+                    height: self.height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: self.format,
+                usage: TextureUsages::RENDER_ATTACHMENT
+                    | TextureUsages::TEXTURE_BINDING
+                    | TextureUsages::COPY_DST,
+                view_formats: &[],
+            })
+        };
 
-        let view = output
-            .texture
-            .create_view(&wgpu::TextureViewDescriptor::default());
+        let view = raw_render_tex.create_view(&wgpu::TextureViewDescriptor::default());
 
         let mut encoder = self
             .device
@@ -167,11 +190,13 @@ impl<'a> RenderingManager {
             let components_sorted_by_material = scene.get_components_per_material();
 
             for (pipeline_id, pipeline) in pipelines {
+                if pipeline_id.is_screen_space {
+                    continue;
+                }
                 render_pass.set_pipeline(pipeline);
                 let materials_for_pipeline = scene.get_pipeline_materials(pipeline_id);
                 for material in materials_for_pipeline {
                     let material_bind_groups = material.bind_groups();
-                    let mut bind_group_count_accumulated = 0;
 
                     if material.uses_camera() {
                         render_pass.set_bind_group(
@@ -183,13 +208,8 @@ impl<'a> RenderingManager {
                         );
                     }
 
-                    let material_attachments = material.attachments();
                     for (i, bind_group) in material_bind_groups.iter().enumerate() {
-                        render_pass.set_bind_group(bind_group_count_accumulated, bind_group, &[]);
-                        bind_group_count_accumulated += match material_attachments[i] {
-                            crate::ecs::material::MaterialAttachment::Texture(_) => 2,
-                            crate::ecs::material::MaterialAttachment::Buffer(_) => 1,
-                        };
+                        render_pass.set_bind_group(i as u32, bind_group, &[]);
                     }
                     let material_id = material.id();
                     for component in &components_sorted_by_material[&material_id] {
@@ -200,6 +220,116 @@ impl<'a> RenderingManager {
         }
 
         smaa_frame.resolve();
+
+        if !screen_space_materials.is_empty() {
+            let screen_space_output = self.device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("Screen space effect output texture"),
+                size: wgpu::Extent3d {
+                    width: self.width,
+                    height: self.height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: self.format,
+                usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::COPY_SRC,
+                view_formats: &[],
+            });
+            let screen_space_input_sampler = self.device.create_sampler(&wgpu::SamplerDescriptor {
+                label: Some("Screen space render output sampler"),
+                address_mode_u: wgpu::AddressMode::ClampToEdge,
+                address_mode_v: wgpu::AddressMode::ClampToEdge,
+                address_mode_w: wgpu::AddressMode::ClampToEdge,
+                mag_filter: wgpu::FilterMode::Linear,
+                min_filter: wgpu::FilterMode::Linear,
+                mipmap_filter: wgpu::FilterMode::Nearest,
+                lod_min_clamp: 0.0,
+                lod_max_clamp: 100.0,
+                ..Default::default()
+            });
+
+            let screen_space_output_view =
+                screen_space_output.create_view(&wgpu::TextureViewDescriptor::default());
+
+            let screen_space_input_bind_group_layout =
+                self.device
+                    .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                        label: Some("Screen space render output sampler"),
+                        entries: &[wgpu::BindGroupLayoutEntry {
+                            binding: 0,
+                            visibility: wgpu::ShaderStages::FRAGMENT,
+                            ty: wgpu::BindingType::Texture {
+                                sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                                view_dimension: wgpu::TextureViewDimension::D2,
+                                multisampled: false,
+                            },
+                            count: None,
+                        }],
+                    });
+
+            let screen_space_input_bind_group =
+                self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("Screen space render output sampler"),
+                    layout: &screen_space_input_bind_group_layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: wgpu::BindingResource::TextureView(&view),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: wgpu::BindingResource::Sampler(&screen_space_input_sampler),
+                        },
+                    ],
+                });
+
+            let screen_triangle: [[f32; 5]; 3] = [
+                [-0.5, 1.5, 0.0, 0.0, 2.0],
+                [-0.5, -0.5, 0.0, 0.0, 0.0],
+                [0.5, 1.5, 0.0, 2.0, 0.0],
+            ];
+            let screen_triangle_buffer =
+                self.device
+                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("Screen triangle vertex buffer"),
+                        contents: bytemuck::cast_slice(&[screen_triangle]),
+                        usage: wgpu::BufferUsages::VERTEX,
+                    });
+
+            for material_id in scene.screen_space_materials() {
+                let material = scene
+                    .get_material(*material_id)
+                    .expect("Invalid material ID");
+                if let Some(pipeline) = pipelines.get(material.pipeline_id()) {
+                    let mut effect_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: Some("Effect render pass"),
+                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                            view: &screen_space_output_view,
+                            resolve_target: None,
+                            ops: wgpu::Operations {
+                                load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                                store: wgpu::StoreOp::Store,
+                            },
+                        })],
+                        depth_stencil_attachment: None,
+                        timestamp_writes: None,
+                        occlusion_query_set: None,
+                    });
+
+                    effect_pass.set_pipeline(pipeline);
+
+                    effect_pass.set_bind_group(0, &screen_space_input_bind_group, &[]);
+
+                    for (i, bind_group) in material.bind_groups().iter().enumerate() {
+                        effect_pass.set_bind_group(i as u32 + 1, bind_group, &[]);
+                    }
+
+                    effect_pass.set_vertex_buffer(0, screen_triangle_buffer.slice(..));
+                    effect_pass.draw(0..3, 0..1);
+                }
+            }
+        }
 
         let enabled_components = scene.enabled_ui_components();
         let text_areas = font_state

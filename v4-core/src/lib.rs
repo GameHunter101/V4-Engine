@@ -6,7 +6,9 @@ use ecs::{
     scene::{Scene, WorkloadOutput, WorkloadPacket},
 };
 use engine_management::{
-    engine_action::{EngineAction, V4Mutable}, font_management::FontState, rendering_management::RenderingManager
+    engine_action::{EngineAction, V4Mutable},
+    font_management::FontState,
+    rendering_management::RenderingManager,
 };
 use glyphon::{FontSystem, SwashCache, TextAtlas, TextRenderer};
 use std::{
@@ -26,8 +28,8 @@ use winit_input_helper::WinitInputHelper;
 
 pub mod engine_management {
     pub mod engine_action;
-    pub mod rendering_management;
     pub mod font_management;
+    pub mod rendering_management;
 }
 
 pub mod engine_support {
@@ -79,7 +81,6 @@ impl Default for EngineDetails {
         }
     }
 }
-
 
 impl V4 {
     pub fn builder() -> V4Builder {
@@ -186,7 +187,11 @@ impl V4 {
                             &mut self.pipelines,
                         );
 
-                        self.rendering_manager.render(scene, &self.pipelines, &mut self.font_state);
+                        self.rendering_manager.render(
+                            scene,
+                            &self.pipelines,
+                            &mut self.font_state,
+                        );
 
                         self.details.frames_elapsed += 1;
                         self.details.last_frame_instant = Instant::now();

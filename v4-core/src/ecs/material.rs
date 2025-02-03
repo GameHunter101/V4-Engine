@@ -162,4 +162,8 @@ impl Material {
     pub fn uses_camera(&self) -> bool {
         self.pipeline_id.uses_camera
     }
+
+    pub fn pipeline_id(&self) -> &PipelineId {
+        &self.pipeline_id
+    }
 }
