@@ -26,8 +26,15 @@ pub async fn main() {
         .await;
 
     scene! {
-        scene: hello_scene
-        active_camera: "cam"
+        scene: hello_scene,
+        active_camera: "cam",
+        screen_space_materials: [
+            {
+                pipeline: {
+                    fragment_shader_path: "shaders/hello_world/screen_space.wgsl",
+                }
+            }
+        ],
         _ = {
             material: {
                 pipeline: {

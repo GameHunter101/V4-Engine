@@ -79,12 +79,45 @@ pub fn create_render_pipeline(
         None
     };
 
+    let screen_space_layout = if id.is_screen_space {
+        Some(
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some(&format!("{id:?} Pipeline Screen Space Bind Group Layout")),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                ],
+            }),
+        )
+    } else {
+        None
+    };
+
     let bind_group_layouts: Vec<&wgpu::BindGroupLayout> =
         if let Some(camera_layout) = &camera_layout {
             vec![camera_layout]
                 .into_iter()
                 .chain(bind_group_layouts.iter())
-                .collect::<Vec<_>>()
+                .collect()
+        } else if let Some(screen_space_layout) = &screen_space_layout {
+            vec![screen_space_layout]
+                .into_iter()
+                .chain(bind_group_layouts.iter())
+                .collect()
         } else {
             bind_group_layouts.iter().collect()
         };
@@ -131,13 +164,17 @@ pub fn create_render_pipeline(
             polygon_mode: id.geometry_details.polygon_mode,
             conservative: false,
         },
-        depth_stencil: Some(wgpu::DepthStencilState {
-            format: Texture::DEPTH_FORMAT,
-            depth_write_enabled: true,
-            depth_compare: wgpu::CompareFunction::Less,
-            stencil: wgpu::StencilState::default(),
-            bias: wgpu::DepthBiasState::default(),
-        }),
+        depth_stencil: if id.is_screen_space {
+            None
+        } else {
+            Some(wgpu::DepthStencilState {
+                format: Texture::DEPTH_FORMAT,
+                depth_write_enabled: true,
+                depth_compare: wgpu::CompareFunction::Less,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            })
+        },
         multisample: wgpu::MultisampleState {
             count: 1,
             mask: !0,

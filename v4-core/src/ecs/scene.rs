@@ -18,7 +18,7 @@ use super::{
     component::{Component, ComponentId},
     entity::{Entity, EntityId},
     material::{Material, MaterialAttachment, MaterialId},
-    pipeline::PipelineId,
+    pipeline::{PipelineId, PipelineShader},
 };
 
 static mut SCENE_COUNT: usize = 0;
@@ -159,10 +159,10 @@ impl Scene {
                 let mut entity_component_groupings = self.entity_component_groupings.clone();
                 for grouping in entity_component_groupings.values_mut() {
                     if grouping.start > i {
-                        grouping.start -=1;
+                        grouping.start -= 1;
                     }
                     if grouping.end > i {
-                        grouping.end -=1;
+                        grouping.end -= 1;
                     }
                 }
 
@@ -225,10 +225,45 @@ impl Scene {
 
     pub fn create_material(
         &mut self,
-        pipeline_id: PipelineId,
+        mut pipeline_id: PipelineId,
         attachments: Vec<MaterialAttachment>,
     ) -> MaterialId {
+        if pipeline_id.is_screen_space {
+            const ATTRIBUTES: &[wgpu::VertexAttribute] =
+                &wgpu::vertex_attr_array![0=>Float32x3, 1=>Float32x2];
+            pipeline_id.vertex_layouts = vec![wgpu::VertexBufferLayout {
+                array_stride: 4 * 5,
+                step_mode: wgpu::VertexStepMode::Vertex,
+                attributes: ATTRIBUTES,
+            }];
+            pipeline_id.vertex_shader = PipelineShader::Raw(std::borrow::Cow::Owned(
+                "
+struct VertexInput {
+    @location(0) position: vec3<f32>,
+    @location(1) tex_coords: vec2<f32>,
+}
+
+struct VertexOutput {
+    @builtin(position) position: vec4<f32>,
+    @location(0) tex_coords: vec2<f32>,
+}
+
+@vertex
+fn main(input: VertexInput) -> VertexOutput {
+    var output: VertexOutput;
+    output.position = vec4f(input.position, 1.0);
+    output.tex_coords = input.tex_coords;
+    return output;
+}
+"
+                .to_string(),
+            ));
+            self.screen_space_materials.push(self.materials.len());
+        }
+
         let new_material = Material::new(self.materials.len(), pipeline_id.clone(), attachments);
+
+        let is_screen_space = pipeline_id.is_screen_space;
 
         if let Some(entry) = self
             .pipeline_to_corresponding_materials
@@ -244,6 +279,10 @@ impl Scene {
         let id = new_material.id();
 
         self.materials.push(new_material);
+
+        if is_screen_space {
+            self.screen_space_materials.push(id);
+        }
 
         id
     }

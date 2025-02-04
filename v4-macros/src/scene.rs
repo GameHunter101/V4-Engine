@@ -18,6 +18,7 @@ pub struct SceneDescriptor {
     idents: HashMap<Lit, Id>,
     relationships: HashMap<EntityId, Vec<EntityId>>,
     materials: Vec<TransformedMaterialDescriptor>,
+    screen_space_materials: Vec<MaterialDescriptor>,
     pipelines: Vec<PipelineIdDescriptor>,
     active_camera: Option<Lit>,
 }
@@ -27,10 +28,12 @@ impl Parse for SceneDescriptor {
         let scene_ident: Option<Ident> = if input.peek(Ident) && input.peek2(Token![:]) {
             let keyword: Ident = input.parse()?;
             if &keyword.to_string() != "scene" {
-                return Err(syn::Error::new(keyword.span(), "Invalid identifier found. If you meant to specify a scene name you can do so using 'scene: {name}'"));
+                return Err(syn::Error::new(keyword.span(), "Invalid specifier found. If you meant to specify a scene name you can do so using 'scene: {name}'"));
             }
             let _: Token![:] = input.parse()?;
-            Some(input.parse()?)
+            let ident: Ident = input.parse()?;
+            let _: Token![,] = input.parse()?;
+            Some(ident)
         } else {
             None
         };
@@ -40,12 +43,32 @@ impl Parse for SceneDescriptor {
             if &ident.to_string() == "active_camera" {
                 let _: Token![:] = input.parse()?;
                 let entity_ident: Lit = input.parse()?;
+                let _: Token![,] = input.parse()?;
                 Ok(Some(entity_ident))
             } else {
-                Err(syn::Error::new(ident.span(), "Invalid specifier. In order to specify the active camera, use the `active_camera` field"))
+                Err(syn::Error::new(ident.span(), "Invalid specifier found. In order to specify the active camera, use the `active_camera` field"))
             }
         } else {
             Ok(None)
+        }?;
+
+        let screen_space_materials: Vec<MaterialDescriptor> = if input.peek(syn::Ident)
+            && input.peek2(Token![:])
+        {
+            let ident: Ident = input.parse()?;
+            if &ident.to_string() == "screen_space_materials" {
+                let _: Token![:] = input.parse()?;
+                let content;
+                bracketed!(content in input);
+                let materials =
+                    content.parse_terminated(MaterialDescriptor::parse_screen_space, Token![,])?;
+                let _: Token![,] = input.parse()?;
+                Ok(materials.into_iter().collect())
+            } else {
+                Err(syn::Error::new(ident.span(), "Invalid specifier found. If you meant to specify screen-space materials, use the `screen_space_materials` field"))
+            }
+        } else {
+            Ok(Vec::new())
         }?;
 
         let entities: Vec<EntityDescriptor> = input
@@ -84,6 +107,7 @@ impl Parse for SceneDescriptor {
 
                         Ok(pipeline_id)
                     },
+                    PipelineIdVariants::ScreenSpace(_) => return Err(input.error("Screen-space materials are not valid here")),
                 }?;
 
                 if let Some(ident) = &material.ident {
@@ -153,6 +177,7 @@ impl Parse for SceneDescriptor {
             idents,
             relationships,
             materials,
+            screen_space_materials,
             pipelines,
             active_camera,
         })
@@ -165,6 +190,28 @@ impl quote::ToTokens for SceneDescriptor {
             Some(ident) => quote! {#ident},
             None => quote! {scene},
         };
+
+        let screen_space_material_initializations: Vec<TokenStream2> = self
+            .screen_space_materials
+            .iter()
+            .map(|mat| {
+                let MaterialDescriptor {
+                    pipeline_id,
+                    attachments,
+                    ..
+                } = mat;
+                let PipelineIdVariants::ScreenSpace(pipeline_id) = pipeline_id else {
+                    panic!("Invalid pipeline ID found for a screen-space material");
+                };
+
+                quote! {
+                    #scene_name.create_material(
+                        #pipeline_id,
+                        vec![#(#attachments),*]
+                    );
+                }
+            })
+            .collect();
 
         let pipeline_id_initializations: Vec<TokenStream2> = self
             .pipelines
@@ -289,6 +336,8 @@ impl quote::ToTokens for SceneDescriptor {
 
         tokens.extend(quote! {
             let mut #scene_name = v4::ecs::scene::Scene::default();
+
+            #(#screen_space_material_initializations)*
 
             #(#material_initializations)*
 
@@ -569,10 +618,6 @@ impl quote::ToTokens for ComponentConstructor {
         let constructor_ident = &self.constructor_ident;
         let parameters = &self.parameters;
         let postfix = &self.postfix;
-        /* panic!("{}",
-        quote! {
-                #constructor_ident(#parameters)#postfix
-            }); */
         tokens.extend(quote! {
             #constructor_ident(#parameters)#postfix
         });
@@ -645,6 +690,45 @@ struct MaterialDescriptor {
     ident: Option<Lit>,
 }
 
+impl MaterialDescriptor {
+    fn parse_screen_space(input: ParseStream) -> syn::Result<Self> {
+        let content;
+        braced!(content in input);
+        let params = content.parse_terminated(MaterialParameters::parse_screen_space, Token![,])?;
+
+        let mut pipeline_id: Option<ScreenSpacePipelineIdDescriptor> = None;
+        let mut attachments: Vec<MaterialAttachmentDescriptor> = Vec::new();
+        let mut ident: Option<Lit> = None;
+
+        for param in params {
+            match param {
+                MaterialParameters::Pipeline(specified_pipeline_id) => {
+                    match specified_pipeline_id {
+                        PipelineIdVariants::ScreenSpace(screen_space_pipeline_id_descriptor) => {
+                            pipeline_id = Some(screen_space_pipeline_id_descriptor)
+                        }
+                        _ => return Err(input.error("Only screen-space pipelines are valid here")),
+                    }
+                }
+                MaterialParameters::Attachments(specified_attachments) => {
+                    attachments = specified_attachments
+                }
+                MaterialParameters::Ident(lit) => ident = Some(lit),
+            }
+        }
+
+        let Some(pipeline_id) = pipeline_id else {
+            return Err(input.error("A pipeline ID must be specified"));
+        };
+
+        Ok(MaterialDescriptor {
+            pipeline_id: PipelineIdVariants::ScreenSpace(pipeline_id),
+            attachments,
+            ident,
+        })
+    }
+}
+
 impl Parse for MaterialDescriptor {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let content;
@@ -690,6 +774,34 @@ enum MaterialParameters {
     Ident(Lit),
 }
 
+impl MaterialParameters {
+    fn parse_screen_space(input: ParseStream) -> syn::Result<Self> {
+        let field_identifier: Ident = input.parse()?;
+        let _: Token![:] = input.parse()?;
+
+        match field_identifier.to_string().as_str() {
+            "pipeline" => Ok(Self::Pipeline(PipelineIdVariants::ScreenSpace(
+                input.parse()?,
+            ))),
+            "attachments" => {
+                let content;
+                bracketed!(content in input);
+                Ok(Self::Attachments(
+                    content
+                        .parse_terminated(MaterialAttachmentDescriptor::parse, Token![,])?
+                        .into_iter()
+                        .collect(),
+                ))
+            }
+            "ident" => Ok(Self::Ident(input.parse()?)),
+            _ => Err(syn::Error::new_spanned(
+                field_identifier,
+                "Invalid argument passed into the material descriptor",
+            )),
+        }
+    }
+}
+
 impl Parse for MaterialParameters {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let field_identifier: Ident = input.parse()?;
@@ -720,6 +832,7 @@ impl Parse for MaterialParameters {
 enum PipelineIdVariants {
     Ident(Lit),
     Specifier(PipelineIdDescriptor),
+    ScreenSpace(ScreenSpacePipelineIdDescriptor),
 }
 
 impl Parse for PipelineIdVariants {
@@ -741,6 +854,109 @@ impl Parse for PipelineIdVariants {
                 ))
             }
         }
+    }
+}
+
+#[derive(Clone)]
+struct ScreenSpacePipelineIdDescriptor {
+    fragment_shader_path: LitStr,
+}
+
+impl Parse for ScreenSpacePipelineIdDescriptor {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let content;
+        braced!(content in input);
+        let fields = content.parse_terminated(SimpleField::parse, Token![,])?;
+        let mut fragment_shader_path: Option<LitStr> = None;
+
+        for field in fields {
+            match field.ident.to_string().as_str() {
+                "vertex_shader_path" => {
+                    return Err(syn::Error::new(
+                        field.ident.span(),
+                        "No vertex shader should be specified for a screen-space effect",
+                    ))
+                }
+                "fragment_shader_path" => {
+                    if let Some(value) = field.value {
+                        match value {
+                            SimpleFieldValue::Expression(expr) => {
+                                return Err(syn::Error::new(
+                                    expr.span(),
+                                    "Only string literals are valid paths",
+                                ))
+                            }
+                            SimpleFieldValue::Literal(lit) => {
+                                if let Lit::Str(str) = lit {
+                                    fragment_shader_path = Some(str)
+                                } else {
+                                    return Err(syn::Error::new(
+                                        lit.span(),
+                                        "Only string literals are valid paths",
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                }
+                "vertex_layouts" => {
+                    return Err(syn::Error::new(
+                        field.ident.span(),
+                        "No vertex layouts should be specified for a screen-space effect",
+                    ))
+                }
+                "uses_camera" => {
+                    return Err(syn::Error::new(
+                        field.ident.span(),
+                        "No camera usage should be specified for a screen-space effect",
+                    ))
+                }
+                "geometry_details" => {
+                    return Err(syn::Error::new(
+                        field.ident.span(),
+                        "No camera usage should be specified for a screen-space effect",
+                    ))
+                }
+                "ident" => {
+                    return Err(syn::Error::new(
+                        field.ident.span(),
+                        "Identifiers are not valid here, as they can not be safely checked",
+                    ))
+                }
+                _ => {
+                    return Err(syn::Error::new_spanned(
+                        field.ident,
+                        "Invalid argument passed into the pipeline descriptor",
+                    ))
+                }
+            }
+        }
+
+        let Some(fragment_shader_path) = fragment_shader_path else {
+            return Err(input.error("A fragment shader path must be specified"));
+        };
+
+        Ok(ScreenSpacePipelineIdDescriptor {
+            fragment_shader_path,
+        })
+    }
+}
+
+impl quote::ToTokens for ScreenSpacePipelineIdDescriptor {
+    fn to_tokens(&self, tokens: &mut TokenStream2) {
+        let ScreenSpacePipelineIdDescriptor {
+            fragment_shader_path,
+        } = self;
+        tokens.extend(quote! {
+            v4::ecs::pipeline::PipelineId {
+                vertex_shader: v4::ecs::pipeline::PipelineShader::Path(""),
+                fragment_shader: v4::ecs::pipeline::PipelineShader::Path(#fragment_shader_path),
+                vertex_layouts: Vec::new(),
+                uses_camera: false,
+                is_screen_space: true,
+                geometry_details: Default::default(),
+            }
+        });
     }
 }
 

@@ -255,22 +255,32 @@ impl<'a> RenderingManager {
             let screen_space_input_bind_group_layout =
                 self.device
                     .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                        label: Some("Screen space render output sampler"),
-                        entries: &[wgpu::BindGroupLayoutEntry {
-                            binding: 0,
-                            visibility: wgpu::ShaderStages::FRAGMENT,
-                            ty: wgpu::BindingType::Texture {
-                                sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                                view_dimension: wgpu::TextureViewDimension::D2,
-                                multisampled: false,
+                        label: Some("Screen space render output bind grouop layout"),
+                        entries: &[
+                            wgpu::BindGroupLayoutEntry {
+                                binding: 0,
+                                visibility: wgpu::ShaderStages::FRAGMENT,
+                                ty: wgpu::BindingType::Texture {
+                                    sample_type: wgpu::TextureSampleType::Float {
+                                        filterable: true,
+                                    },
+                                    view_dimension: wgpu::TextureViewDimension::D2,
+                                    multisampled: false,
+                                },
+                                count: None,
                             },
-                            count: None,
-                        }],
+                            wgpu::BindGroupLayoutEntry {
+                                binding: 1,
+                                visibility: wgpu::ShaderStages::FRAGMENT,
+                                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                                count: None,
+                            },
+                        ],
                     });
 
             let screen_space_input_bind_group =
                 self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("Screen space render output sampler"),
+                    label: Some("Screen space render output bind group"),
                     layout: &screen_space_input_bind_group_layout,
                     entries: &[
                         wgpu::BindGroupEntry {

@@ -187,11 +187,8 @@ impl V4 {
                             &mut self.pipelines,
                         );
 
-                        self.rendering_manager.render(
-                            scene,
-                            &self.pipelines,
-                            &mut self.font_state,
-                        );
+                        self.rendering_manager
+                            .render(scene, &self.pipelines, &mut self.font_state);
 
                         self.details.frames_elapsed += 1;
                         self.details.last_frame_instant = Instant::now();
@@ -270,6 +267,7 @@ impl V4 {
                 if !pipelines.contains_key(pipeline_id) {
                     let bind_group_layouts =
                         active_scene.get_pipeline_materials(pipeline_id)[0].bind_group_layouts();
+
                     pipelines.insert(
                         pipeline_id.clone(),
                         create_render_pipeline(
