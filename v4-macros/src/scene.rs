@@ -337,9 +337,9 @@ impl quote::ToTokens for SceneDescriptor {
         tokens.extend(quote! {
             let mut #scene_name = v4::ecs::scene::Scene::default();
 
-            #(#screen_space_material_initializations)*
-
             #(#material_initializations)*
+
+            #(#screen_space_material_initializations)*
 
             #(#entity_initializations)*
 

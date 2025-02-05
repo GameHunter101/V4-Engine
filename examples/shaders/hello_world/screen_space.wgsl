@@ -12,8 +12,8 @@ var input_sampler: sampler;
 @fragment
 fn main(input: VertexOutput) -> @location(0) vec4<f32> {
     let input_color = textureSample(input_tex, input_sampler, input.tex_coords).xyz;
-    let overlay_alpha = 0.1;
-    let overlay_color = vec3f(0.0, 1.0, 0.0);
+    let overlay_alpha = 0.3;
+    let overlay_color = vec3f(0.0, 1.0, 0.3);
     let overlay = overlay_alpha * overlay_color + (1.0 - overlay_alpha) * input_color;
     return vec4f(overlay, 1.0);
 }

@@ -263,8 +263,6 @@ fn main(input: VertexInput) -> VertexOutput {
 
         let new_material = Material::new(self.materials.len(), pipeline_id.clone(), attachments);
 
-        let is_screen_space = pipeline_id.is_screen_space;
-
         if let Some(entry) = self
             .pipeline_to_corresponding_materials
             .get_mut(&pipeline_id)
@@ -279,10 +277,6 @@ fn main(input: VertexInput) -> VertexOutput {
         let id = new_material.id();
 
         self.materials.push(new_material);
-
-        if is_screen_space {
-            self.screen_space_materials.push(id);
-        }
 
         id
     }
@@ -306,7 +300,10 @@ fn main(input: VertexInput) -> VertexOutput {
     pub fn get_components_per_material(&self) -> HashMap<MaterialId, Vec<&Component>> {
         self.materials
             .iter()
-            .map(|material| {
+            .flat_map(|material| {
+                if material.pipeline_id().is_screen_space {
+                    return None;
+                }
                 let components: Vec<&Component> = self
                     .entities
                     .iter()
@@ -323,7 +320,7 @@ fn main(input: VertexInput) -> VertexOutput {
                     })
                     .flatten()
                     .collect();
-                (material.id(), components)
+                Some((material.id(), components))
             })
             .collect()
     }
