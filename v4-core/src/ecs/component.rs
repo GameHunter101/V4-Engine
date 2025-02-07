@@ -41,7 +41,7 @@ pub trait ComponentSystem:
         Vec::new()
     }
 
-    fn render(&self, device: &Device, queue: &Queue, render_pass: &mut RenderPass) {}
+    fn render(&self, device: &Device, queue: &Queue, render_pass: &mut RenderPass, other_components: &[&Component]) {}
 }
 impl_downcast!(sync ComponentSystem);
 

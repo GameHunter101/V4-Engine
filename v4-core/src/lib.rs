@@ -2,12 +2,12 @@ use async_scoped::TokioScope;
 use crossbeam_channel::{Receiver, Sender};
 use ecs::{
     component::ComponentId,
-    pipeline::{create_render_pipeline, PipelineId},
     scene::{Scene, WorkloadOutput, WorkloadPacket},
 };
 use engine_management::{
     engine_action::{EngineAction, V4Mutable},
     font_management::FontState,
+    pipeline::{create_render_pipeline, PipelineId},
     rendering_management::RenderingManager,
 };
 use glyphon::{FontSystem, SwashCache, TextAtlas, TextRenderer};
@@ -29,6 +29,7 @@ use winit_input_helper::WinitInputHelper;
 pub mod engine_management {
     pub mod engine_action;
     pub mod font_management;
+    pub mod pipeline;
     pub mod rendering_management;
 }
 
@@ -41,7 +42,6 @@ pub mod ecs {
     pub mod component;
     pub mod entity;
     pub mod material;
-    pub mod pipeline;
     pub mod scene;
 }
 

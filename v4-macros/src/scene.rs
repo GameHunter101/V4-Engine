@@ -10,7 +10,7 @@ use syn::{
     spanned::Spanned,
     AngleBracketedGenericArguments, Expr, ExprCall, ExprPath, Ident, Lit, LitBool, LitStr, Token,
 };
-use v4_core::ecs::{component::ComponentId, entity::EntityId, material::MaterialId};
+use v4_core::ecs::{component::ComponentId, entity::EntityId};
 
 pub struct SceneDescriptor {
     scene_ident: Option<Ident>,
@@ -111,14 +111,14 @@ impl Parse for SceneDescriptor {
                 }?;
 
                 if let Some(ident) = &material.ident {
-                    idents.insert(ident.clone(), Id::Material(materials.len()));
+                    idents.insert(ident.clone(), Id::Material(materials.len() as u32));
                 }
 
                 materials.push(TransformedMaterialDescriptor {
                     pipeline_id,
                     attachments: material.attachments,
                 });
-                Some(materials.len() - 1)
+                Some(materials.len() as u32 - 1)
             } else {
                 None
             };
@@ -350,7 +350,7 @@ impl quote::ToTokens for SceneDescriptor {
 
 struct TransformedEntityDescriptor {
     components: Vec<ComponentDescriptor>,
-    material_id: Option<MaterialId>,
+    material_id: Option<ComponentId>,
     parent: Option<EntityId>,
     id: EntityId,
     is_enabled: bool,
@@ -359,7 +359,7 @@ struct TransformedEntityDescriptor {
 pub enum Id {
     Entity(EntityId),
     Component(ComponentId),
-    Material(MaterialId),
+    Material(ComponentId),
     Pipeline(usize),
 }
 
@@ -948,9 +948,9 @@ impl quote::ToTokens for ScreenSpacePipelineIdDescriptor {
             fragment_shader_path,
         } = self;
         tokens.extend(quote! {
-            v4::ecs::pipeline::PipelineId {
-                vertex_shader: v4::ecs::pipeline::PipelineShader::Path(""),
-                fragment_shader: v4::ecs::pipeline::PipelineShader::Path(#fragment_shader_path),
+            v4::engine_management::pipeline::PipelineId {
+                vertex_shader: v4::engine_management::pipeline::PipelineShader::Path(""),
+                fragment_shader: v4::engine_management::pipeline::PipelineShader::Path(#fragment_shader_path),
                 vertex_layouts: Vec::new(),
                 uses_camera: false,
                 is_screen_space: true,
@@ -1098,12 +1098,12 @@ impl quote::ToTokens for PipelineIdDescriptor {
         } = self;
         let geometry_details = match geometry_details {
             Some(geo) => quote! {#geo},
-            None => quote! {v4::ecs::pipeline::GeometryDetails::default()},
+            None => quote! {v4::engine_management::pipeline::GeometryDetails::default()},
         };
         tokens.extend(quote! {
-            v4::ecs::pipeline::PipelineId {
-                vertex_shader: v4::ecs::pipeline::PipelineShader::Path(#vertex_shader_path),
-                fragment_shader: v4::ecs::pipeline::PipelineShader::Path(#fragment_shader_path),
+            v4::engine_management::pipeline::PipelineId {
+                vertex_shader: v4::engine_management::pipeline::PipelineShader::Path(#vertex_shader_path),
+                fragment_shader: v4::engine_management::pipeline::PipelineShader::Path(#fragment_shader_path),
                 vertex_layouts: vec![#(#vertex_layouts),*],
                 uses_camera: #uses_camera,
                 is_screen_space: false,
@@ -1206,7 +1206,7 @@ impl quote::ToTokens for GeometryDetailsDescriptor {
         };
 
         tokens.extend(quote! {
-            v4::ecs::pipeline::GeometryDetails {
+            v4::engine_management::pipeline::GeometryDetails {
             #topology,
             #strip_index_format,
             #front_face,

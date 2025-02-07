@@ -11,14 +11,19 @@ use crossbeam_channel::{Receiver, Sender};
 use wgpu::{BindGroup, Buffer, Device, Queue};
 use winit_input_helper::WinitInputHelper;
 
-use crate::{engine_management::engine_action::EngineAction, EngineDetails};
+use crate::{
+    engine_management::{
+        engine_action::EngineAction,
+        pipeline::{PipelineId, PipelineShader},
+    },
+    EngineDetails,
+};
 
 use super::{
     actions::ActionQueue,
-    component::{Component, ComponentId},
+    component::{Component, ComponentDetails, ComponentId, ComponentSystem},
     entity::{Entity, EntityId},
-    material::{Material, MaterialAttachment, MaterialId},
-    pipeline::{PipelineId, PipelineShader},
+    material::{Material, MaterialAttachment},
 };
 
 static mut SCENE_COUNT: usize = 0;
@@ -30,8 +35,8 @@ pub struct Scene {
     entity_component_groupings: HashMap<EntityId, Range<usize>>,
     ui_components: Vec<ComponentId>,
     materials: Vec<Material>,
-    screen_space_materials: Vec<MaterialId>,
-    pipeline_to_corresponding_materials: HashMap<PipelineId, Vec<MaterialId>>,
+    screen_space_materials: Vec<ComponentId>,
+    pipeline_to_corresponding_materials: HashMap<PipelineId, Vec<ComponentId>>,
     total_entities_created: u32,
     workload_sender: Option<Sender<WorkloadPacket>>,
     workload_output_receiver: Option<Receiver<(ComponentId, WorkloadOutput)>>,
@@ -227,7 +232,10 @@ impl Scene {
         &mut self,
         mut pipeline_id: PipelineId,
         attachments: Vec<MaterialAttachment>,
-    ) -> MaterialId {
+        entities_attached: Vec<EntityId>,
+    ) -> ComponentId {
+        let id = self.materials.len() as u32;
+
         if pipeline_id.is_screen_space {
             const ATTRIBUTES: &[wgpu::VertexAttribute] =
                 &wgpu::vertex_attr_array![0=>Float32x3, 1=>Float32x2];
@@ -258,10 +266,10 @@ fn main(input: VertexInput) -> VertexOutput {
 "
                 .to_string(),
             ));
-            self.screen_space_materials.push(self.materials.len());
+            self.screen_space_materials.push(id);
         }
 
-        let new_material = Material::new(self.materials.len(), pipeline_id.clone(), attachments);
+        let new_material = Material::new(id, pipeline_id.clone(), attachments, entities_attached);
 
         if let Some(entry) = self
             .pipeline_to_corresponding_materials
@@ -274,7 +282,6 @@ fn main(input: VertexInput) -> VertexOutput {
             self.new_pipelines_needed = true;
         }
 
-        let id = new_material.id();
 
         self.materials.push(new_material);
 
@@ -297,7 +304,7 @@ fn main(input: VertexInput) -> VertexOutput {
         }
     }
 
-    pub fn get_components_per_material(&self) -> HashMap<MaterialId, Vec<&Component>> {
+    pub fn get_components_per_material(&self) -> HashMap<ComponentId, Vec<&Component>> {
         self.materials
             .iter()
             .flat_map(|material| {
@@ -329,7 +336,7 @@ fn main(input: VertexInput) -> VertexOutput {
         &mut self,
         parent: Option<EntityId>,
         mut components: Vec<Component>,
-        material: Option<MaterialId>,
+        material: Option<ComponentId>,
         is_enabled: bool,
     ) -> EntityId {
         let entity = Entity::new(
@@ -381,8 +388,8 @@ fn main(input: VertexInput) -> VertexOutput {
             .find(|comp| comp.id() == component_id)
     }
 
-    pub fn get_material(&self, material_id: MaterialId) -> Option<&Material> {
-        self.materials.get(material_id)
+    pub fn get_material(&self, material_id: ComponentId) -> Option<&Material> {
+        self.materials.get(material_id as usize)
     }
 
     pub fn enabled_ui_components(&self) -> HashSet<ComponentId> {
@@ -449,7 +456,11 @@ fn main(input: VertexInput) -> VertexOutput {
         self.scene_index
     }
 
-    pub fn screen_space_materials(&self) -> &[usize] {
+    pub fn screen_space_materials(&self) -> &[ComponentId] {
         &self.screen_space_materials
+    }
+
+    pub fn all_components(&self) -> Vec<&Component> {
+        self.components.iter().collect::<Vec<_>>()
     }
 }

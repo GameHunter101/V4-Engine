@@ -8,10 +8,8 @@ use wgpu::{
 };
 
 use crate::{
-    ecs::{
-        pipeline::{create_render_pipeline, PipelineId},
-        scene::Scene,
-    },
+    ecs::{component::ComponentSystem, scene::Scene},
+    engine_management::pipeline::{create_render_pipeline, PipelineId},
     engine_support::texture_support,
 };
 
@@ -186,8 +184,9 @@ impl<'a> RenderingManager {
             &wgpu::vertex_attr_array![0=>Float32x3, 1=>Float32x2];
 
         let screen_space_output_pipeline_id = PipelineId {
-            vertex_shader: crate::ecs::pipeline::PipelineShader::Raw(std::borrow::Cow::Borrowed(
-                "
+            vertex_shader: crate::engine_management::pipeline::PipelineShader::Raw(
+                std::borrow::Cow::Borrowed(
+                    "
 struct VertexInput {
     @location(0) position: vec3<f32>,
     @location(1) tex_coords: vec2<f32>,
@@ -206,9 +205,11 @@ fn main(input: VertexInput) -> VertexOutput {
     return output;
 }
 ",
-            )),
-            fragment_shader: crate::ecs::pipeline::PipelineShader::Raw(std::borrow::Cow::Borrowed(
-                "
+                ),
+            ),
+            fragment_shader: crate::engine_management::pipeline::PipelineShader::Raw(
+                std::borrow::Cow::Borrowed(
+                    "
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,
     @location(0) tex_coords: vec2<f32>,
@@ -225,7 +226,8 @@ fn main(input: VertexOutput) -> @location(0) vec4<f32> {
     return textureSample(input_tex, input_sampler, input.tex_coords);
 }
 ",
-            )),
+                ),
+            ),
             vertex_layouts: vec![wgpu::VertexBufferLayout {
                 array_stride: 4 * 5,
                 step_mode: wgpu::VertexStepMode::Vertex,
@@ -335,7 +337,7 @@ fn main(input: VertexOutput) -> @location(0) vec4<f32> {
                 occlusion_query_set: None,
             });
 
-            let components_sorted_by_material = scene.get_components_per_material();
+            let all_components = scene.all_components();
 
             for (pipeline_id, pipeline) in pipelines {
                 if pipeline_id.is_screen_space {
@@ -344,7 +346,9 @@ fn main(input: VertexOutput) -> @location(0) vec4<f32> {
                 render_pass.set_pipeline(pipeline);
                 let materials_for_pipeline = scene.get_pipeline_materials(pipeline_id);
                 for material in materials_for_pipeline {
-                    let material_bind_groups = material.bind_groups();
+                    material.render(&self.device, &self.queue, &mut render_pass, &all_components);
+
+                    /* let material_bind_groups = material.bind_groups();
 
                     if material.uses_camera() {
                         render_pass.set_bind_group(
@@ -361,8 +365,13 @@ fn main(input: VertexOutput) -> @location(0) vec4<f32> {
                     }
                     let material_id = material.id();
                     for component in &components_sorted_by_material[&material_id] {
-                        component.render(&self.device, &self.queue, &mut render_pass);
-                    }
+                        component.render(
+                            &self.device,
+                            &self.queue,
+                            &mut render_pass,
+                            &all_components,
+                        );
+                    } */
                 }
             }
         }
@@ -524,7 +533,7 @@ fn main(input: VertexOutput) -> @location(0) vec4<f32> {
                 .expect("Failed to render text.");
         }
 
-        self.queue.submit(std::iter::once(encoder.finish()));
+        self.queue.submit(Some(encoder.finish()));
         output.present();
     }
 

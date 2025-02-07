@@ -1,4 +1,4 @@
-use super::material::MaterialId;
+use super::component::ComponentId;
 
 pub type EntityId = u32;
 
@@ -9,7 +9,7 @@ pub struct Entity {
     /// If this is set to 0 the entity is top-level and does not have a parent
     parent_entity_id: EntityId,
     is_enabled: bool,
-    active_material: Option<MaterialId>,
+    active_material: Option<ComponentId>,
 }
 
 impl Entity {
@@ -18,7 +18,7 @@ impl Entity {
         children_ids: Vec<EntityId>,
         parent_entity_id: EntityId,
         is_enabled: bool,
-        active_material: Option<MaterialId>,
+        active_material: Option<ComponentId>,
     ) -> Self {
         Self {
             id,
@@ -29,11 +29,11 @@ impl Entity {
         }
     }
 
-    pub fn active_material(&self) -> Option<MaterialId> {
+    pub fn active_material(&self) -> Option<ComponentId> {
         self.active_material
     }
 
-    pub fn set_active_material(&mut self, active_material: MaterialId) {
+    pub fn set_active_material(&mut self, active_material: ComponentId) {
         self.active_material = Some(active_material);
     }
 

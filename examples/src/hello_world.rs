@@ -1,5 +1,3 @@
-use core::f32;
-
 use algoe::bivector::Bivector;
 use nalgebra::Vector3;
 use v4::{

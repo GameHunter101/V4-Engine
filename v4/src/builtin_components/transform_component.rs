@@ -2,7 +2,7 @@ use crate::v4;
 use algoe::rotor::Rotor3;
 use bytemuck::{cast_slice, Pod, Zeroable};
 use nalgebra::{Matrix3, Matrix4, Translation3, Vector3};
-use v4_core::ecs::component::ComponentSystem;
+use v4_core::ecs::component::{Component, ComponentSystem};
 use v4_macros::component;
 use wgpu::{util::DeviceExt, BufferUsages, VertexAttribute, VertexBufferLayout};
 
@@ -76,6 +76,7 @@ impl ComponentSystem for TransformComponent {
         device: &wgpu::Device,
         _queue: &wgpu::Queue,
         render_pass: &mut wgpu::RenderPass,
+        _other_components: &[&Component],
     ) {
         if self.uses_buffer {
             let raw_data = RawTransformData::from_component(self);

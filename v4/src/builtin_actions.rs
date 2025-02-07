@@ -5,7 +5,6 @@ use v4_core::{
         actions::Action,
         component::{Component, ComponentId},
         entity::EntityId,
-        material::MaterialId,
         scene::{Scene, Workload},
     },
     engine_management::{
@@ -121,7 +120,7 @@ impl Action for UpdateTextComponentAction {
 }
 
 #[derive(Debug)]
-pub struct SetEntityActiveMaterialAction(pub EntityId, pub MaterialId);
+pub struct SetEntityActiveMaterialAction(pub EntityId, pub ComponentId);
 
 impl Action for SetEntityActiveMaterialAction {
     fn execute(self: Box<Self>, scene: &mut Scene, _device: &Device, _queue: &Queue) {
@@ -135,7 +134,7 @@ impl Action for SetEntityActiveMaterialAction {
 pub struct CreateEntityAction {
     pub entity_parent_id: Option<EntityId>,
     pub components: Vec<Component>,
-    pub active_material: Option<MaterialId>,
+    pub active_material: Option<ComponentId>,
     pub is_enabled: bool,
 }
 

@@ -2,7 +2,7 @@ use std::fmt::Debug;
 
 use crate::v4;
 use bytemuck::{Pod, Zeroable};
-use v4_core::ecs::component::{ComponentDetails, ComponentId, ComponentSystem};
+use v4_core::ecs::component::{Component, ComponentDetails, ComponentId, ComponentSystem};
 use v4_macros::component;
 use wgpu::{util::DeviceExt, Buffer, Device, Queue, RenderPass, VertexAttribute};
 
@@ -123,7 +123,13 @@ impl<V: VertexDescriptor + Send + Sync> ComponentSystem for MeshComponent<V> {
         Vec::new()
     }
 
-    fn render(&self, _device: &Device, _queue: &Queue, render_pass: &mut RenderPass) {
+    fn render(
+        &self,
+        _device: &Device,
+        _queue: &Queue,
+        render_pass: &mut RenderPass,
+        _other_components: &[&Component],
+    ) {
         for index in &self.enabled_models {
             render_pass.set_vertex_buffer(
                 0,
