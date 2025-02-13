@@ -117,7 +117,9 @@ impl Parse for SceneDescriptor {
                 materials.push(TransformedMaterialDescriptor {
                     pipeline_id,
                     attachments: material.attachments,
+                    entities_attached: vec![current_ident],
                 });
+
                 Some(materials.len() as u32 - 1)
             } else {
                 None
@@ -207,7 +209,8 @@ impl quote::ToTokens for SceneDescriptor {
                 quote! {
                     #scene_name.create_material(
                         #pipeline_id,
-                        vec![#(#attachments),*]
+                        vec![#(#attachments),*],
+                        Vec::new(),
                     );
                 }
             })
@@ -225,10 +228,12 @@ impl quote::ToTokens for SceneDescriptor {
             let pipeline_id_index = mat.pipeline_id;
             let pipeline_id = &pipeline_id_initializations[pipeline_id_index];
             let attachments = &mat.attachments;
+            let entities_attached = &mat.entities_attached;
             quote! {
                 #scene_name.create_material(
                     #pipeline_id,
-                    vec![#(#attachments),*]
+                    vec![#(#attachments),*],
+                    vec![#(#entities_attached),*]
                 );
             }
         });
@@ -766,6 +771,7 @@ impl Parse for MaterialDescriptor {
 struct TransformedMaterialDescriptor {
     pipeline_id: usize,
     attachments: Vec<MaterialAttachmentDescriptor>,
+    entities_attached: Vec<EntityId>,
 }
 
 enum MaterialParameters {

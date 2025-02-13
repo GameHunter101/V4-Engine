@@ -177,6 +177,14 @@ impl V4 {
                                 scene
                                     .update(device, queue, &self.input_manager, &self.details)
                                     .await;
+                                scene
+                                    .update_materials(
+                                        device,
+                                        queue,
+                                        &self.input_manager,
+                                        &self.details,
+                                    )
+                                    .await;
                             });
                         });
 

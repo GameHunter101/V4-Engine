@@ -4,10 +4,7 @@ use crate::{builtin_actions::UpdateCameraBufferAction, v4};
 use nalgebra::Matrix4;
 use v4_core::{
     ecs::{
-        actions::ActionQueue,
-        component::{Component, ComponentDetails, ComponentId, ComponentSystem},
-        entity::{Entity, EntityId},
-        scene::WorkloadOutput,
+        actions::ActionQueue, component::{Component, ComponentDetails, ComponentId, ComponentSystem}, entity::{Entity, EntityId}, material::Material, scene::WorkloadOutput
     },
     EngineDetails,
 };
@@ -33,6 +30,7 @@ impl ComponentSystem for CameraComponent {
         _queue: &Queue,
         _input_manager: &WinitInputHelper,
         other_components: &[&mut Component],
+        _materials: &[&mut Material],
         _engine_details: &EngineDetails,
         _workload_outputs: &HashMap<ComponentId, Vec<WorkloadOutput>>,
         _entities: &HashMap<EntityId, Entity>,

@@ -346,10 +346,6 @@ fn main(input: VertexOutput) -> @location(0) vec4<f32> {
                 render_pass.set_pipeline(pipeline);
                 let materials_for_pipeline = scene.get_pipeline_materials(pipeline_id);
                 for material in materials_for_pipeline {
-                    material.render(&self.device, &self.queue, &mut render_pass, &all_components);
-
-                    /* let material_bind_groups = material.bind_groups();
-
                     if material.uses_camera() {
                         render_pass.set_bind_group(
                             0,
@@ -360,18 +356,7 @@ fn main(input: VertexOutput) -> @location(0) vec4<f32> {
                         );
                     }
 
-                    for (i, bind_group) in material_bind_groups.iter().enumerate() {
-                        render_pass.set_bind_group(i as u32, bind_group, &[]);
-                    }
-                    let material_id = material.id();
-                    for component in &components_sorted_by_material[&material_id] {
-                        component.render(
-                            &self.device,
-                            &self.queue,
-                            &mut render_pass,
-                            &all_components,
-                        );
-                    } */
+                    material.render(&self.device, &self.queue, &mut render_pass, &all_components);
                 }
             }
         }

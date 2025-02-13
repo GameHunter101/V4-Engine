@@ -144,6 +144,7 @@ impl Scene {
         let active_camera = self.active_camera();
         let entities = &self.entities;
         let all_components: &mut Vec<Component> = &mut self.components;
+        let all_materials: Vec<&mut Material> = self.materials.iter_mut().collect();
 
         let actions: Vec<_> = (0..all_components.len())
             .map(|i| {
@@ -170,9 +171,9 @@ impl Scene {
                         grouping.end -= 1;
                     }
                 }
+                let workload_outputs = &self.workload_outputs;
 
                 let (_, outputs) = async_scoped::TokioScope::scope_and_block(|scope| {
-                    let workload_outputs = &self.workload_outputs;
                     scope.spawn(async {
                         current_component
                             .update(
@@ -180,6 +181,7 @@ impl Scene {
                                 queue,
                                 input_manager,
                                 &other_components,
+                                &all_materials,
                                 engine_details,
                                 workload_outputs,
                                 entities,
@@ -200,6 +202,52 @@ impl Scene {
             .collect();
 
         self.execute_action_queue(action_queue, device, queue).await;
+    }
+
+    pub async fn update_materials(
+        &mut self,
+        device: &Device,
+        queue: &Queue,
+        input_manager: &WinitInputHelper,
+        engine_details: &EngineDetails,
+    ) {
+        let active_camera = self.active_camera();
+        let entities = &self.entities;
+        let all_components: Vec<&mut Component> = self.components.iter_mut().collect();
+        let all_materials: &mut Vec<Material> = &mut self.materials;
+
+        let workload_outputs = &self.workload_outputs;
+
+        for i in 0..all_materials.len() {
+            let (previous_materials, all_other_materials) = all_materials.split_at_mut(i);
+            let (current_material, later_materials) =
+                all_other_materials.split_first_mut().unwrap();
+
+            let other_materials: Vec<&mut Material> = previous_materials
+                .iter_mut()
+                .chain(later_materials.iter_mut())
+                .collect();
+
+            let _ = async_scoped::TokioScope::scope_and_block(|scope| {
+                let entity_component_groupings = self.entity_component_groupings.clone();
+                scope.spawn(async {
+                    current_material
+                        .update(
+                            device,
+                            queue,
+                            input_manager,
+                            &all_components,
+                            &other_materials,
+                            engine_details,
+                            workload_outputs,
+                            entities,
+                            entity_component_groupings,
+                            active_camera,
+                        )
+                        .await
+                });
+            });
+        }
     }
 
     pub async fn attach_workload(&mut self, component_id: ComponentId, workload: Workload) {
@@ -281,7 +329,6 @@ fn main(input: VertexInput) -> VertexOutput {
                 .insert(pipeline_id, vec![new_material.id()]);
             self.new_pipelines_needed = true;
         }
-
 
         self.materials.push(new_material);
 

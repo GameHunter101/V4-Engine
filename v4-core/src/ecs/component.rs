@@ -6,9 +6,7 @@ use winit_input_helper::WinitInputHelper;
 use crate::EngineDetails;
 
 use super::{
-    actions::ActionQueue,
-    entity::{Entity, EntityId},
-    scene::WorkloadOutput,
+    actions::ActionQueue, entity::{Entity, EntityId}, material::Material, scene::WorkloadOutput
 };
 
 pub type ComponentId = u32;
@@ -17,9 +15,7 @@ pub type Component = Box<dyn ComponentSystem>;
 
 #[allow(unused)]
 #[async_trait::async_trait]
-pub trait ComponentSystem:
-    ComponentDetails + Debug + DowncastSync + Send + Sync
-{
+pub trait ComponentSystem: ComponentDetails + Debug + DowncastSync + Send + Sync {
     fn initialize(&mut self, device: &Device) -> ActionQueue {
         self.set_initialized();
         Vec::new()
@@ -32,6 +28,7 @@ pub trait ComponentSystem:
         queue: &Queue,
         input_manager: &WinitInputHelper,
         other_components: &[&mut Component],
+        materials: &[&mut Material],
         engine_details: &EngineDetails,
         workload_outputs: &HashMap<ComponentId, Vec<WorkloadOutput>>,
         entities: &HashMap<EntityId, Entity>,
@@ -41,7 +38,14 @@ pub trait ComponentSystem:
         Vec::new()
     }
 
-    fn render(&self, device: &Device, queue: &Queue, render_pass: &mut RenderPass, other_components: &[&Component]) {}
+    fn render(
+        &self,
+        device: &Device,
+        queue: &Queue,
+        render_pass: &mut RenderPass,
+        other_components: &[&Component],
+    ) {
+    }
 }
 impl_downcast!(sync ComponentSystem);
 
