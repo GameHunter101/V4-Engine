@@ -20,10 +20,7 @@ use crate::{
 };
 
 use super::{
-    actions::ActionQueue,
-    component::{Component, ComponentDetails, ComponentId, ComponentSystem},
-    entity::{Entity, EntityId},
-    material::{Material, MaterialAttachment},
+    actions::ActionQueue, component::{Component, ComponentDetails, ComponentId, ComponentSystem}, compute::Compute, entity::{Entity, EntityId}, material::{Material, ShaderAttachment}
 };
 
 static mut SCENE_COUNT: usize = 0;
@@ -46,6 +43,7 @@ pub struct Scene {
     active_camera: Option<ComponentId>,
     active_camera_buffer: Option<Buffer>,
     active_camera_bind_group: Option<BindGroup>,
+    computes: Vec<Compute>,
 }
 
 impl Debug for Scene {
@@ -91,6 +89,7 @@ impl Default for Scene {
             active_camera: None,
             active_camera_buffer: None,
             active_camera_bind_group: None,
+            computes: Vec::new(),
         }
     }
 }
@@ -250,6 +249,10 @@ impl Scene {
         }
     }
 
+    pub async fn update_computes(&mut self, device: &Device, queue: &Queue) {
+
+    }
+
     pub async fn attach_workload(&mut self, component_id: ComponentId, workload: Workload) {
         if let Some(sender) = &self.workload_sender {
             sender
@@ -279,7 +282,7 @@ impl Scene {
     pub fn create_material(
         &mut self,
         mut pipeline_id: PipelineId,
-        attachments: Vec<MaterialAttachment>,
+        attachments: Vec<ShaderAttachment>,
         entities_attached: Vec<EntityId>,
     ) -> ComponentId {
         let id = self.materials.len() as u32;

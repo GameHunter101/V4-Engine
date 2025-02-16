@@ -8,6 +8,31 @@ pub struct Texture {
     sampler: Sampler,
 }
 
+#[derive(Debug)]
+pub struct StorageTexture {
+    format: TextureFormat,
+    texture: WgpuTexture,
+    view: TextureView,
+}
+
+impl StorageTexture {
+    pub fn texture_ref(&self) -> &WgpuTexture {
+        &self.texture
+    }
+
+    pub fn texture(self) -> WgpuTexture {
+        self.texture
+    }
+
+    pub fn view_ref(&self) -> &TextureView {
+        &self.view
+    }
+
+    pub fn view(self) -> TextureView {
+        self.view
+    }
+}
+
 impl Texture {
     pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 

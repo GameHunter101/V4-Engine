@@ -43,6 +43,7 @@ pub mod ecs {
     pub mod entity;
     pub mod material;
     pub mod scene;
+    pub mod compute;
 }
 
 /// The main engine struct. Contains the state for the whole engine.

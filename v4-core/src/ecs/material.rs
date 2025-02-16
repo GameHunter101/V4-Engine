@@ -2,7 +2,10 @@ use std::{collections::HashMap, ops::Range};
 
 use wgpu::{BindGroup, BindGroupLayout, Buffer, Device, Queue, ShaderStages};
 
-use crate::{engine_management::pipeline::PipelineId, engine_support::texture_support::Texture};
+use crate::{
+    engine_management::pipeline::PipelineId,
+    engine_support::texture_support::{StorageTexture, Texture},
+};
 
 use super::{
     actions::ActionQueue,
@@ -11,21 +14,43 @@ use super::{
 };
 
 #[derive(Debug)]
-pub struct MaterialTextureAttachment {
-    pub texture: Texture,
+pub struct ShaderTextureAttachment {
+    pub texture: GeneralTexture,
     pub visibility: ShaderStages,
 }
 
 #[derive(Debug)]
-pub struct MaterialBufferAttachment {
+pub enum GeneralTexture {
+    Regular(Texture),
+    Storage(StorageTexture),
+}
+
+impl GeneralTexture {
+    pub fn view_ref(&self) -> &wgpu::TextureView {
+        match self {
+            GeneralTexture::Regular(texture) => texture.view_ref(),
+            GeneralTexture::Storage(storage_texture) => storage_texture.view_ref(),
+        }
+    }
+
+    pub fn sampler_ref(&self) -> Option<&wgpu::Sampler> {
+        match self {
+            GeneralTexture::Regular(texture) => Some(texture.sampler_ref()),
+            GeneralTexture::Storage(_storage_texture) => None,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct ShaderBufferAttachment {
     pub buffer: Buffer,
     pub visibility: ShaderStages,
 }
 
 #[derive(Debug)]
-pub enum MaterialAttachment {
-    Texture(MaterialTextureAttachment),
-    Buffer(MaterialBufferAttachment),
+pub enum ShaderAttachment {
+    Texture(ShaderTextureAttachment),
+    Buffer(ShaderBufferAttachment),
 }
 
 #[derive(Debug)]
@@ -34,7 +59,7 @@ pub struct Material {
     pipeline_id: PipelineId,
     entities_attached: Vec<EntityId>,
     component_ranges: Vec<Range<usize>>,
-    attachments: Vec<MaterialAttachment>,
+    attachments: Vec<ShaderAttachment>,
     bind_group_layouts: Vec<BindGroupLayout>,
     bind_groups: Vec<BindGroup>,
     is_initialized: bool,
@@ -44,7 +69,7 @@ impl Material {
     pub fn new(
         id: ComponentId,
         pipeline_id: PipelineId,
-        attachments: Vec<MaterialAttachment>,
+        attachments: Vec<ShaderAttachment>,
         entities_attached: Vec<EntityId>,
     ) -> Self {
         Self {
@@ -62,14 +87,14 @@ impl Material {
     pub fn create_attachment_bind_group_layout(
         device: &Device,
         material_id: ComponentId,
-        attachment: &MaterialAttachment,
+        attachment: &ShaderAttachment,
     ) -> BindGroupLayout {
         device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some(&format!(
                 "Material {material_id} | attachment {attachment:?} Bind Group Layout"
             )),
             entries: &match attachment {
-                MaterialAttachment::Texture(tex) => vec![
+                ShaderAttachment::Texture(tex) => vec![
                     wgpu::BindGroupLayoutEntry {
                         binding: 0,
                         visibility: tex.visibility,
@@ -87,7 +112,7 @@ impl Material {
                         count: None,
                     },
                 ],
-                MaterialAttachment::Buffer(buf) => vec![wgpu::BindGroupLayoutEntry {
+                ShaderAttachment::Buffer(buf) => vec![wgpu::BindGroupLayoutEntry {
                     binding: 0,
                     visibility: buf.visibility,
                     ty: wgpu::BindingType::Buffer {
@@ -104,7 +129,7 @@ impl Material {
     fn create_attachment_bind_group(
         device: &Device,
         material_id: ComponentId,
-        attachment: &MaterialAttachment,
+        attachment: &ShaderAttachment,
         bind_group_layout: &BindGroupLayout,
     ) -> BindGroup {
         device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -113,17 +138,28 @@ impl Material {
             )),
             layout: bind_group_layout,
             entries: &match attachment {
-                MaterialAttachment::Texture(tex) => vec![
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::TextureView(tex.texture.view_ref()),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Sampler(tex.texture.sampler_ref()),
-                    },
-                ],
-                MaterialAttachment::Buffer(buf) => {
+                ShaderAttachment::Texture(tex) => {
+                    if let Some(sampler) = tex.texture.sampler_ref() {
+                        vec![
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: wgpu::BindingResource::TextureView(
+                                    tex.texture.view_ref(),
+                                ),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: wgpu::BindingResource::Sampler(sampler),
+                            },
+                        ]
+                    } else {
+                        vec![wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: wgpu::BindingResource::TextureView(tex.texture.view_ref()),
+                        }]
+                    }
+                }
+                ShaderAttachment::Buffer(buf) => {
                     vec![wgpu::BindGroupEntry {
                         binding: 0,
                         resource: buf.buffer.as_entire_binding(),
@@ -141,7 +177,7 @@ impl Material {
         self.bind_groups.as_ref()
     }
 
-    pub fn attachments(&self) -> &[MaterialAttachment] {
+    pub fn attachments(&self) -> &[ShaderAttachment] {
         self.attachments.as_ref()
     }
 

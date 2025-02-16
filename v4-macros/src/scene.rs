@@ -691,7 +691,7 @@ impl quote::ToTokens for SimpleFieldValue {
 
 struct MaterialDescriptor {
     pipeline_id: PipelineIdVariants,
-    attachments: Vec<MaterialAttachmentDescriptor>,
+    attachments: Vec<ShaderAttachmentDescriptor>,
     ident: Option<Lit>,
 }
 
@@ -702,7 +702,7 @@ impl MaterialDescriptor {
         let params = content.parse_terminated(MaterialParameters::parse_screen_space, Token![,])?;
 
         let mut pipeline_id: Option<ScreenSpacePipelineIdDescriptor> = None;
-        let mut attachments: Vec<MaterialAttachmentDescriptor> = Vec::new();
+        let mut attachments: Vec<ShaderAttachmentDescriptor> = Vec::new();
         let mut ident: Option<Lit> = None;
 
         for param in params {
@@ -741,7 +741,7 @@ impl Parse for MaterialDescriptor {
         let params = content.parse_terminated(MaterialParameters::parse, Token![,])?;
 
         let mut pipeline_id: Option<PipelineIdVariants> = None;
-        let mut attachments: Vec<MaterialAttachmentDescriptor> = Vec::new();
+        let mut attachments: Vec<ShaderAttachmentDescriptor> = Vec::new();
         let mut ident: Option<Lit> = None;
 
         for param in params {
@@ -770,13 +770,13 @@ impl Parse for MaterialDescriptor {
 
 struct TransformedMaterialDescriptor {
     pipeline_id: usize,
-    attachments: Vec<MaterialAttachmentDescriptor>,
+    attachments: Vec<ShaderAttachmentDescriptor>,
     entities_attached: Vec<EntityId>,
 }
 
 enum MaterialParameters {
     Pipeline(PipelineIdVariants),
-    Attachments(Vec<MaterialAttachmentDescriptor>),
+    Attachments(Vec<ShaderAttachmentDescriptor>),
     Ident(Lit),
 }
 
@@ -794,7 +794,7 @@ impl MaterialParameters {
                 bracketed!(content in input);
                 Ok(Self::Attachments(
                     content
-                        .parse_terminated(MaterialAttachmentDescriptor::parse, Token![,])?
+                        .parse_terminated(ShaderAttachmentDescriptor::parse, Token![,])?
                         .into_iter()
                         .collect(),
                 ))
@@ -820,7 +820,7 @@ impl Parse for MaterialParameters {
                 bracketed!(content in input);
                 Ok(Self::Attachments(
                     content
-                        .parse_terminated(MaterialAttachmentDescriptor::parse, Token![,])?
+                        .parse_terminated(ShaderAttachmentDescriptor::parse, Token![,])?
                         .into_iter()
                         .collect(),
                 ))
@@ -1223,26 +1223,26 @@ impl quote::ToTokens for GeometryDetailsDescriptor {
     }
 }
 
-enum MaterialAttachmentDescriptor {
-    Texture(MaterialTextureAttachmentDescriptor),
-    Buffer(MaterialBufferAttachmentDescriptor),
+enum ShaderAttachmentDescriptor {
+    Texture(ShaderTextureAttachmentDescriptor),
+    Buffer(ShaderBufferAttachmentDescriptor),
 }
 
-impl Parse for MaterialAttachmentDescriptor {
+impl Parse for ShaderAttachmentDescriptor {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let ident: Ident = input.parse()?;
         match input.to_string().as_str() {
-            "Texture" => Ok(MaterialAttachmentDescriptor::Texture(input.parse()?)),
-            "Buffer" => Ok(MaterialAttachmentDescriptor::Buffer(input.parse()?)),
+            "Texture" => Ok(ShaderAttachmentDescriptor::Texture(input.parse()?)),
+            "Buffer" => Ok(ShaderAttachmentDescriptor::Buffer(input.parse()?)),
             _ => Err(syn::Error::new(ident.span(), "Invalid Material Attachment")),
         }
     }
 }
 
-impl quote::ToTokens for MaterialAttachmentDescriptor {
+impl quote::ToTokens for ShaderAttachmentDescriptor {
     fn to_tokens(&self, tokens: &mut TokenStream2) {
         match self {
-            MaterialAttachmentDescriptor::Texture(material_texture_attachment_descriptor) => {
+            ShaderAttachmentDescriptor::Texture(material_texture_attachment_descriptor) => {
                 let texture = match &material_texture_attachment_descriptor.texture {
                     Some(tex) => quote! {texture: #tex},
                     None => quote! {texture,},
@@ -1252,24 +1252,24 @@ impl quote::ToTokens for MaterialAttachmentDescriptor {
                     None => quote! {visibility,},
                 };
                 tokens.extend(quote! {
-                    v4::ecs::material::MaterialTextureAttachment {
+                    v4::ecs::material::ShaderTextureAttachment {
                         #texture,
                         #visibility,
                     }
                 })
             }
-            MaterialAttachmentDescriptor::Buffer(material_buffer_attachment_descriptor) => {
-                let texture = match &material_buffer_attachment_descriptor.buffer {
-                    Some(tex) => quote! {texture: #tex},
-                    None => quote! {texture,},
+            ShaderAttachmentDescriptor::Buffer(material_buffer_attachment_descriptor) => {
+                let buffer = match &material_buffer_attachment_descriptor.buffer {
+                    Some(buf) => quote! {buffer: #buf},
+                    None => quote! {buffer,},
                 };
                 let visibility = match &material_buffer_attachment_descriptor.visibility {
                     Some(vis) => quote! {visibility: #vis},
                     None => quote! {visibility,},
                 };
                 tokens.extend(quote! {
-                    v4::ecs::material::MaterialTextureAttachment {
-                        #texture,
+                    v4::ecs::material::ShaderBufferAttachment {
+                        #buffer,
                         #visibility,
                     }
                 })
@@ -1278,12 +1278,12 @@ impl quote::ToTokens for MaterialAttachmentDescriptor {
     }
 }
 
-struct MaterialTextureAttachmentDescriptor {
+struct ShaderTextureAttachmentDescriptor {
     texture: Option<Expr>,
     visibility: Option<ExprPath>,
 }
 
-impl Parse for MaterialTextureAttachmentDescriptor {
+impl Parse for ShaderTextureAttachmentDescriptor {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let content;
         parenthesized!(content in input);
@@ -1327,19 +1327,19 @@ impl Parse for MaterialTextureAttachmentDescriptor {
                 _ => {}
             }
         }
-        Ok(MaterialTextureAttachmentDescriptor {
+        Ok(ShaderTextureAttachmentDescriptor {
             texture,
             visibility,
         })
     }
 }
 
-struct MaterialBufferAttachmentDescriptor {
+struct ShaderBufferAttachmentDescriptor {
     buffer: Option<Expr>,
     visibility: Option<ExprPath>,
 }
 
-impl Parse for MaterialBufferAttachmentDescriptor {
+impl Parse for ShaderBufferAttachmentDescriptor {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let content;
         parenthesized!(content in input);
@@ -1383,6 +1383,6 @@ impl Parse for MaterialBufferAttachmentDescriptor {
                 _ => {}
             }
         }
-        Ok(MaterialBufferAttachmentDescriptor { buffer, visibility })
+        Ok(ShaderBufferAttachmentDescriptor { buffer, visibility })
     }
 }
