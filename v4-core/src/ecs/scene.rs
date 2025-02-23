@@ -121,6 +121,10 @@ impl Scene {
         for material in &mut self.materials {
             material.initialize(device);
         }
+
+        for compute in &mut self.computes {
+            compute.initialize(device);
+        }
     }
 
     pub async fn update(
@@ -252,8 +256,6 @@ impl Scene {
             });
         }
     }
-
-    pub async fn update_computes(&mut self, device: &Device, queue: &Queue) {}
 
     pub async fn attach_workload(&mut self, component_id: ComponentId, workload: Workload) {
         if let Some(sender) = &self.workload_sender {
@@ -515,5 +517,9 @@ fn main(input: VertexInput) -> VertexOutput {
 
     pub fn all_components(&self) -> Vec<&Component> {
         self.components.iter().collect::<Vec<_>>()
+    }
+
+    pub fn computes(&self) -> &[Compute] {
+        &self.computes
     }
 }

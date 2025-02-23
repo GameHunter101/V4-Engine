@@ -1,5 +1,5 @@
 use wgpu::{
-    BindGroup, BindGroupLayout, ComputePipeline, Device, ShaderStages,
+    BindGroup, BindGroupLayout, ComputePass, ComputePipeline, Device, ShaderStages
 };
 
 use crate::engine_management::pipeline::{load_shader_module_descriptor, PipelineShader};
@@ -16,6 +16,7 @@ pub struct Compute {
     output: ShaderAttachment,
     shader_path: &'static str,
     is_spirv: bool,
+    workgroup_counts: (u32, u32, u32),
     bind_group_layouts: Vec<BindGroupLayout>,
     bind_groups: Vec<BindGroup>,
     pipeline: ComputePipeline,
@@ -147,6 +148,14 @@ impl Compute {
             compilation_options: Default::default(),
             cache: None,
         })
+    }
+
+    pub fn calculate(&self, compute_pass: &mut ComputePass) {
+        for (i, bind_group) in self.bind_groups.iter().enumerate() {
+            compute_pass.set_pipeline(&self.pipeline);
+            compute_pass.set_bind_group(i as u32, bind_group, &[]);
+            compute_pass.dispatch_workgroups(self.workgroup_counts.0, self.workgroup_counts.1, self.workgroup_counts.2);
+        }
     }
 }
 

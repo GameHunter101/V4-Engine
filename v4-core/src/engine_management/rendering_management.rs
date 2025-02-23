@@ -278,7 +278,7 @@ fn main(input: VertexOutput) -> @location(0) vec4<f32> {
         }
     }
 
-    pub fn render(
+    pub async fn render(
         &mut self,
         scene: &mut Scene,
         pipelines: &HashMap<PipelineId, RenderPipeline>,
@@ -317,6 +317,16 @@ fn main(input: VertexOutput) -> @location(0) vec4<f32> {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("Render encoder"),
             });
+
+        if !scene.computes().is_empty() {
+            let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("Compute pass"),
+                timestamp_writes: None,
+            });
+            for compute in scene.computes() {
+                compute.calculate(&mut compute_pass);
+            }
+        }
 
         let smaa_frame = self
             .smaa_target

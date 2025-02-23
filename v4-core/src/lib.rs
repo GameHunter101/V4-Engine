@@ -40,10 +40,10 @@ pub mod engine_support {
 pub mod ecs {
     pub mod actions;
     pub mod component;
+    pub mod compute;
     pub mod entity;
     pub mod material;
     pub mod scene;
-    pub mod compute;
 }
 
 /// The main engine struct. Contains the state for the whole engine.
@@ -196,8 +196,13 @@ impl V4 {
                             &mut self.pipelines,
                         );
 
-                        self.rendering_manager
-                            .render(scene, &self.pipelines, &mut self.font_state);
+                        async_scoped::TokioScope::scope_and_block(|scope| {
+                            scope.spawn(self.rendering_manager.render(
+                                scene,
+                                &self.pipelines,
+                                &mut self.font_state,
+                            ))
+                        });
 
                         self.details.frames_elapsed += 1;
                         self.details.last_frame_instant = Instant::now();
