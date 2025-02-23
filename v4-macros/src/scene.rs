@@ -956,7 +956,9 @@ impl quote::ToTokens for ScreenSpacePipelineIdDescriptor {
         tokens.extend(quote! {
             v4::engine_management::pipeline::PipelineId {
                 vertex_shader: v4::engine_management::pipeline::PipelineShader::Path(""),
+                spirv_vertex_shader: false,
                 fragment_shader: v4::engine_management::pipeline::PipelineShader::Path(#fragment_shader_path),
+                spirv_fragment_shader: false,
                 vertex_layouts: Vec::new(),
                 uses_camera: false,
                 is_screen_space: true,
@@ -969,7 +971,9 @@ impl quote::ToTokens for ScreenSpacePipelineIdDescriptor {
 #[derive(Clone)]
 struct PipelineIdDescriptor {
     vertex_shader_path: LitStr,
+    spirv_vertex_shader: Option<LitBool>,
     fragment_shader_path: LitStr,
+    spirv_fragment_shader: Option<LitBool>,
     vertex_layouts: Vec<ExprCall>,
     uses_camera: LitBool,
     geometry_details: Option<GeometryDetailsDescriptor>,
@@ -982,7 +986,9 @@ impl Parse for PipelineIdDescriptor {
         braced!(content in input);
         let fields = content.parse_terminated(SimpleField::parse, Token![,])?;
         let mut vertex_shader_path: Option<LitStr> = None;
+        let mut spirv_vertex_shader: Option<LitBool> = None;
         let mut fragment_shader_path: Option<LitStr> = None;
+        let mut spirv_fragment_shader: Option<LitBool> = None;
         let mut vertex_layouts: Vec<ExprCall> = Vec::new();
         let mut uses_camera: Option<LitBool> = None;
         let mut geometry_details: Option<GeometryDetailsDescriptor> = None;
@@ -1012,6 +1018,28 @@ impl Parse for PipelineIdDescriptor {
                         }
                     }
                 }
+                "spirv_vertex_shader" => {
+                    if let Some(value) = field.value {
+                        match value {
+                            SimpleFieldValue::Expression(expr) => {
+                                return Err(syn::Error::new(
+                                    expr.span(),
+                                    "Only boolean literals are valid here",
+                                ));
+                            }
+                            SimpleFieldValue::Literal(lit) => {
+                                if let Lit::Bool(bool) = lit {
+                                    spirv_vertex_shader = Some(bool);
+                                } else {
+                                    return Err(syn::Error::new(
+                                        lit.span(),
+                                        "Only boolean literals are valid here",
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                }
                 "fragment_shader_path" => {
                     if let Some(value) = field.value {
                         match value {
@@ -1019,7 +1047,7 @@ impl Parse for PipelineIdDescriptor {
                                 return Err(syn::Error::new(
                                     expr.span(),
                                     "Only string literals are valid paths",
-                                ))
+                                ));
                             }
                             SimpleFieldValue::Literal(lit) => {
                                 if let Lit::Str(str) = lit {
@@ -1028,6 +1056,28 @@ impl Parse for PipelineIdDescriptor {
                                     return Err(syn::Error::new(
                                         lit.span(),
                                         "Only string literals are valid paths",
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                }
+                "spirv_fragment_shader" => {
+                    if let Some(value) = field.value {
+                        match value {
+                            SimpleFieldValue::Expression(expr) => {
+                                return Err(syn::Error::new(
+                                    expr.span(),
+                                    "Only boolean literals are valid here",
+                                ));
+                            }
+                            SimpleFieldValue::Literal(lit) => {
+                                if let Lit::Bool(bool) = lit {
+                                    spirv_fragment_shader = Some(bool);
+                                } else {
+                                    return Err(syn::Error::new(
+                                        lit.span(),
+                                        "Only boolean literals are valid here",
                                     ));
                                 }
                             }
@@ -1083,7 +1133,9 @@ impl Parse for PipelineIdDescriptor {
 
         Ok(PipelineIdDescriptor {
             vertex_shader_path,
+            spirv_vertex_shader,
             fragment_shader_path,
+            spirv_fragment_shader,
             vertex_layouts,
             uses_camera,
             geometry_details,
@@ -1096,7 +1148,9 @@ impl quote::ToTokens for PipelineIdDescriptor {
     fn to_tokens(&self, tokens: &mut TokenStream2) {
         let PipelineIdDescriptor {
             vertex_shader_path,
+            spirv_vertex_shader,
             fragment_shader_path,
+            spirv_fragment_shader,
             vertex_layouts,
             uses_camera,
             geometry_details,
@@ -1106,10 +1160,23 @@ impl quote::ToTokens for PipelineIdDescriptor {
             Some(geo) => quote! {#geo},
             None => quote! {v4::engine_management::pipeline::GeometryDetails::default()},
         };
+        let spirv_vertex_shader = if let Some(is_spirv) = spirv_vertex_shader {
+            quote!{#is_spirv}
+        } else {
+            quote!{false}
+        };
+        let spirv_fragment_shader = if let Some(is_spirv) = spirv_fragment_shader {
+            quote!{#is_spirv}
+        } else {
+            quote!{false}
+        };
+
         tokens.extend(quote! {
             v4::engine_management::pipeline::PipelineId {
                 vertex_shader: v4::engine_management::pipeline::PipelineShader::Path(#vertex_shader_path),
+                spirv_vertex_shader: #spirv_vertex_shader,
                 fragment_shader: v4::engine_management::pipeline::PipelineShader::Path(#fragment_shader_path),
+                spirv_fragment_shader: #spirv_fragment_shader,
                 vertex_layouts: vec![#(#vertex_layouts),*],
                 uses_camera: #uses_camera,
                 is_screen_space: false,

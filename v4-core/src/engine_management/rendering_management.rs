@@ -38,7 +38,7 @@ impl<'a> RenderingManager {
         antialiasing_enabled: bool,
         clear_color: wgpu::Color,
     ) -> Self {
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
             backends: wgpu::Backends::all(),
             ..Default::default()
         });
@@ -207,6 +207,7 @@ fn main(input: VertexInput) -> VertexOutput {
 ",
                 ),
             ),
+            spirv_vertex_shader: false,
             fragment_shader: crate::engine_management::pipeline::PipelineShader::Raw(
                 std::borrow::Cow::Borrowed(
                     "
@@ -228,6 +229,7 @@ fn main(input: VertexOutput) -> @location(0) vec4<f32> {
 ",
                 ),
             ),
+            spirv_fragment_shader: false,
             vertex_layouts: vec![wgpu::VertexBufferLayout {
                 array_stride: 4 * 5,
                 step_mode: wgpu::VertexStepMode::Vertex,
@@ -238,8 +240,14 @@ fn main(input: VertexOutput) -> @location(0) vec4<f32> {
             geometry_details: Default::default(),
         };
 
-        let screen_space_output_pipeline =
-            create_render_pipeline(&device, &screen_space_output_pipeline_id, &[], format);
+        let screen_space_output_pipeline = create_render_pipeline(
+            &device,
+            &screen_space_output_pipeline_id,
+            &[],
+            format,
+            false,
+            false,
+        );
 
         let screen_triangle: [[f32; 5]; 3] = [
             [-1.0, 3.0, 0.0, 0.0, 2.0],

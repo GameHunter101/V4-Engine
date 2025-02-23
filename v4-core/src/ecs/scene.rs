@@ -20,7 +20,11 @@ use crate::{
 };
 
 use super::{
-    actions::ActionQueue, component::{Component, ComponentDetails, ComponentId, ComponentSystem}, compute::Compute, entity::{Entity, EntityId}, material::{Material, ShaderAttachment}
+    actions::ActionQueue,
+    component::{Component, ComponentDetails, ComponentId, ComponentSystem},
+    compute::Compute,
+    entity::{Entity, EntityId},
+    material::{Material, ShaderAttachment},
 };
 
 static mut SCENE_COUNT: usize = 0;
@@ -249,9 +253,7 @@ impl Scene {
         }
     }
 
-    pub async fn update_computes(&mut self, device: &Device, queue: &Queue) {
-
-    }
+    pub async fn update_computes(&mut self, device: &Device, queue: &Queue) {}
 
     pub async fn attach_workload(&mut self, component_id: ComponentId, workload: Workload) {
         if let Some(sender) = &self.workload_sender {
@@ -317,6 +319,7 @@ fn main(input: VertexInput) -> VertexOutput {
 "
                 .to_string(),
             ));
+            pipeline_id.spirv_vertex_shader = false;
             self.screen_space_materials.push(id);
         }
 

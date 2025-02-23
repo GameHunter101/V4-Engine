@@ -45,6 +45,7 @@ impl GeneralTexture {
 pub struct ShaderBufferAttachment {
     pub buffer: Buffer,
     pub visibility: ShaderStages,
+    pub buffer_type: wgpu::BufferBindingType,
 }
 
 #[derive(Debug)]

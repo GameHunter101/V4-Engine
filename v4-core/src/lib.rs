@@ -284,6 +284,8 @@ impl V4 {
                             pipeline_id,
                             bind_group_layouts,
                             render_format,
+                            pipeline_id.spirv_vertex_shader,
+                            pipeline_id.spirv_fragment_shader,
                         ),
                     );
                 }

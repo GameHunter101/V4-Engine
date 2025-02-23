@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 
-use wgpu::{BindGroupLayout, Device, RenderPipeline, TextureFormat, VertexBufferLayout};
+use wgpu::{util::make_spirv, BindGroupLayout, Device, RenderPipeline, TextureFormat, VertexBufferLayout};
 
 use crate::engine_support::texture_support::Texture;
 
@@ -9,7 +9,9 @@ use crate::engine_support::texture_support::Texture;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PipelineId {
     pub vertex_shader: PipelineShader,
+    pub spirv_vertex_shader: bool,
     pub fragment_shader: PipelineShader,
+    pub spirv_fragment_shader: bool,
     pub vertex_layouts: Vec<wgpu::VertexBufferLayout<'static>>,
     pub uses_camera: bool,
     pub is_screen_space: bool,
@@ -58,6 +60,8 @@ pub fn create_render_pipeline(
     id: &PipelineId,
     bind_group_layouts: &[BindGroupLayout],
     render_format: TextureFormat,
+    is_vert_spirv: bool,
+    is_frag_spirv: bool,
 ) -> RenderPipeline {
     let camera_layout = if id.uses_camera {
         Some(
@@ -128,7 +132,7 @@ pub fn create_render_pipeline(
         push_constant_ranges: &[],
     });
 
-    let vertex_shader_module = load_shader_module_descriptor(device, &id.vertex_shader);
+    let vertex_shader_module = load_shader_module_descriptor(device, &id.vertex_shader, is_vert_spirv);
     if let Err(error) = vertex_shader_module {
         panic!(
             "Vertex shader error for shader {:?}: {error}",
@@ -137,7 +141,7 @@ pub fn create_render_pipeline(
     }
     let vertex_shader_module = vertex_shader_module.unwrap();
 
-    let fragment_shader_module = load_shader_module_descriptor(device, &id.fragment_shader);
+    let fragment_shader_module = load_shader_module_descriptor(device, &id.fragment_shader, is_frag_spirv);
     if let Err(error) = fragment_shader_module {
         panic!(
             "Fragment shader error for shader {:?}: {error}",
@@ -151,7 +155,7 @@ pub fn create_render_pipeline(
         layout: Some(&pipeline_layout),
         vertex: wgpu::VertexState {
             module: &vertex_shader_module,
-            entry_point: "main",
+            entry_point: Some("main"),
             compilation_options: Default::default(),
             buffers: &id.vertex_layouts,
         },
@@ -182,7 +186,7 @@ pub fn create_render_pipeline(
         },
         fragment: Some(wgpu::FragmentState {
             module: &fragment_shader_module,
-            entry_point: "main",
+            entry_point: Some("main"),
             compilation_options: Default::default(),
             targets: &[Some(wgpu::ColorTargetState {
                 format: render_format,
@@ -198,20 +202,32 @@ pub fn create_render_pipeline(
 pub fn load_shader_module_descriptor(
     device: &Device,
     shader: &PipelineShader,
+    spirv: bool,
 ) -> Result<wgpu::ShaderModule, std::io::Error> {
+    /* if spirv {
+        dbg!(shader);
+    } */
     match shader {
         PipelineShader::Path(shader_path) => {
             let shader_contents_bytes = std::fs::read(shader_path)?;
-            let contents = String::from_utf8_lossy(&shader_contents_bytes);
             Ok(device.create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: None,
-                source: wgpu::ShaderSource::Wgsl(contents),
+                source: if spirv {
+                    make_spirv(&shader_contents_bytes)
+                } else {
+                    let contents = String::from_utf8_lossy(&shader_contents_bytes);
+                    wgpu::ShaderSource::Wgsl(contents)
+                },
             }))
         }
         PipelineShader::Raw(contents) => {
             Ok(device.create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: None,
-                source: wgpu::ShaderSource::Wgsl(contents.clone()),
+                source: if spirv {
+                    make_spirv(contents.as_bytes())
+                } else {
+                    wgpu::ShaderSource::Wgsl(contents.clone())
+                },
             }))
         }
     }

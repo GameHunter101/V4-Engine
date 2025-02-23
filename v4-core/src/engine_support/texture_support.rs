@@ -13,6 +13,7 @@ pub struct StorageTexture {
     format: TextureFormat,
     texture: WgpuTexture,
     view: TextureView,
+    access: wgpu::StorageTextureAccess,
 }
 
 impl StorageTexture {
@@ -30,6 +31,14 @@ impl StorageTexture {
 
     pub fn view(self) -> TextureView {
         self.view
+    }
+
+    pub fn access(&self) -> wgpu::StorageTextureAccess {
+        self.access
+    }
+
+    pub fn format(&self) -> TextureFormat {
+        self.format
     }
 }
 
