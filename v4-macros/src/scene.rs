@@ -16,7 +16,7 @@ pub struct SceneDescriptor {
     scene_ident: Option<Ident>,
     entities: Vec<TransformedEntityDescriptor>,
     idents: HashMap<Lit, Id>,
-    relationships: HashMap<EntityId, Vec<EntityId>>,
+    // relationships: HashMap<EntityId, Vec<EntityId>>,
     materials: Vec<TransformedMaterialDescriptor>,
     screen_space_materials: Vec<MaterialDescriptor>,
     pipelines: Vec<PipelineIdDescriptor>,
@@ -125,19 +125,7 @@ impl Parse for SceneDescriptor {
                 None
             };
 
-            let transformed_entity = TransformedEntityDescriptor {
-                components: entity.components,
-                material_id,
-                parent: None,
-                id: current_ident,
-                is_enabled: entity.is_enabled,
-                ident: entity.ident,
-            };
-
-            if let Some(ident) = &transformed_entity.ident {
-                idents.insert(ident.clone(), Id::Entity(current_ident));
-                current_ident += 1;
-            }
+            let mut parent: Option<EntityId> = None;
 
             if let Some(parent_ident) = &entity.parent {
                 if let Some(parent_id) = idents.get(parent_ident) {
@@ -148,14 +136,30 @@ impl Parse for SceneDescriptor {
                         ));
                     };
                     if let Some(children) = relationships.get_mut(parent_id) {
-                        children.push(transformed_entity.id);
+                        children.push(current_ident);
                     } else {
-                        relationships.insert(*parent_id, vec![transformed_entity.id]);
+                        relationships.insert(*parent_id, vec![current_ident]);
                     }
+                    parent = Some(*parent_id);
                 } else {
                     return Err(syn::Error::new_spanned(parent_ident, format!("The parent entity \"{parent_ident:?}\" could not be found. If you declared it, make sure it is declared above the current entity")));
                 }
             }
+
+            let transformed_entity = TransformedEntityDescriptor {
+                components: entity.components,
+                material_id,
+                parent,
+                _id: current_ident,
+                is_enabled: entity.is_enabled,
+                ident: entity.ident,
+            };
+
+            if let Some(ident) = &transformed_entity.ident {
+                idents.insert(ident.clone(), Id::Entity(current_ident));
+                current_ident += 1;
+            }
+
 
             for component in &transformed_entity.components {
                 if let Some(ident) = &component.ident {
@@ -177,7 +181,7 @@ impl Parse for SceneDescriptor {
             scene_ident,
             entities: transformed_entities,
             idents,
-            relationships,
+            // relationships,
             materials,
             screen_space_materials,
             pipelines,
@@ -357,7 +361,7 @@ struct TransformedEntityDescriptor {
     components: Vec<ComponentDescriptor>,
     material_id: Option<ComponentId>,
     parent: Option<EntityId>,
-    id: EntityId,
+    _id: EntityId,
     is_enabled: bool,
     ident: Option<Lit>,
 }
@@ -1161,14 +1165,14 @@ impl quote::ToTokens for PipelineIdDescriptor {
             None => quote! {v4::engine_management::pipeline::GeometryDetails::default()},
         };
         let spirv_vertex_shader = if let Some(is_spirv) = spirv_vertex_shader {
-            quote!{#is_spirv}
+            quote! {#is_spirv}
         } else {
-            quote!{false}
+            quote! {false}
         };
         let spirv_fragment_shader = if let Some(is_spirv) = spirv_fragment_shader {
-            quote!{#is_spirv}
+            quote! {#is_spirv}
         } else {
-            quote!{false}
+            quote! {false}
         };
 
         tokens.extend(quote! {

@@ -31,6 +31,11 @@ pub async fn main() {
                 pipeline: {
                     fragment_shader_path: "shaders/hello_world/screen_space.wgsl",
                 }
+            },
+            {
+                pipeline: {
+                    fragment_shader_path: "shaders/hello_world/screen_space_blur.wgsl"
+                }
             }
         ],
         _ = {
