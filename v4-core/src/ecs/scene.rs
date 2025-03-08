@@ -38,7 +38,7 @@ pub struct Scene {
     materials: Vec<Material>,
     screen_space_materials: Vec<ComponentId>,
     pipeline_to_corresponding_materials: HashMap<PipelineId, Vec<ComponentId>>,
-    total_entities_created: u32,
+    total_entities_created: EntityId,
     workload_sender: Option<Sender<WorkloadPacket>>,
     workload_output_receiver: Option<Receiver<(ComponentId, WorkloadOutput)>>,
     workload_outputs: WorkloadOutputCollection,
@@ -289,7 +289,7 @@ impl Scene {
         attachments: Vec<ShaderAttachment>,
         entities_attached: Vec<EntityId>,
     ) -> ComponentId {
-        let id = self.materials.len() as u32;
+        let id = self.materials.len() as ComponentId;
 
         if pipeline_id.is_screen_space {
             const ATTRIBUTES: &[wgpu::VertexAttribute] =
@@ -391,6 +391,7 @@ fn main(input: VertexInput) -> VertexOutput {
         &mut self,
         parent: Option<EntityId>,
         mut components: Vec<Component>,
+        computes: Vec<Compute>,
         material: Option<ComponentId>,
         is_enabled: bool,
     ) -> EntityId {
@@ -419,6 +420,7 @@ fn main(input: VertexInput) -> VertexOutput {
             self.components.len()..(self.components.len() + components.len()),
         );
         self.components.append(&mut components);
+        self.computes.extend(computes);
 
         id
     }
@@ -487,7 +489,7 @@ fn main(input: VertexInput) -> VertexOutput {
         self.active_camera = camera;
     }
 
-    pub fn active_camera(&self) -> Option<u32> {
+    pub fn active_camera(&self) -> Option<ComponentId> {
         self.active_camera
     }
 
@@ -521,5 +523,9 @@ fn main(input: VertexInput) -> VertexOutput {
 
     pub fn computes(&self) -> &[Compute] {
         &self.computes
+    }
+
+    pub fn attach_compute(&mut self, compute: Compute) {
+        self.computes.push(compute);
     }
 }

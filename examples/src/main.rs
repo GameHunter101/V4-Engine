@@ -1,6 +1,7 @@
 mod hello_world;
 mod font_render;
 mod workload_test;
+mod compute;
 
 fn main() {
     match std::env::args().nth(1) {
@@ -14,6 +15,9 @@ fn main() {
                 }
                 "workload_test" => {
                     workload_test::main();
+                },
+                "compute" => {
+                    compute::main();
                 }
                 _ => {println!("Please select a valid example")}
             }

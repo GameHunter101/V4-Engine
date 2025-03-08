@@ -1,6 +1,6 @@
 use std::{collections::HashMap, ops::Range};
 
-use wgpu::{BindGroup, BindGroupLayout, Buffer, Device, Queue, ShaderStages};
+use wgpu::{util::DeviceExt, BindGroup, BindGroupLayout, Buffer, Device, Queue, ShaderStages};
 
 use crate::{
     engine_management::pipeline::PipelineId,
@@ -43,9 +43,43 @@ impl GeneralTexture {
 
 #[derive(Debug)]
 pub struct ShaderBufferAttachment {
-    pub buffer: Buffer,
-    pub visibility: ShaderStages,
-    pub buffer_type: wgpu::BufferBindingType,
+    buffer: Buffer,
+    visibility: ShaderStages,
+    buffer_type: wgpu::BufferBindingType,
+}
+
+impl ShaderBufferAttachment {
+    pub fn new(
+        device: &Device,
+        data: &[u8],
+        buffer_type: wgpu::BufferBindingType,
+        visibility: ShaderStages,
+    ) -> Self {
+        Self {
+            buffer: device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some(&format!("Shader Buffer | {data:?}")),
+                contents: data,
+                usage: match buffer_type {
+                    wgpu::BufferBindingType::Uniform => wgpu::BufferUsages::UNIFORM,
+                    wgpu::BufferBindingType::Storage { .. } => wgpu::BufferUsages::STORAGE,
+                },
+            }),
+            buffer_type,
+            visibility,
+        }
+    }
+
+    pub fn buffer(&self) -> &Buffer {
+        &self.buffer
+    }
+
+    pub fn visibility(&self) -> ShaderStages {
+        self.visibility
+    }
+
+    pub fn buffer_type(&self) -> wgpu::BufferBindingType {
+        self.buffer_type
+    }
 }
 
 #[derive(Debug)]

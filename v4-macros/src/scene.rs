@@ -16,16 +16,15 @@ pub struct SceneDescriptor {
     scene_ident: Option<Ident>,
     entities: Vec<TransformedEntityDescriptor>,
     idents: HashMap<Lit, Id>,
-    // relationships: HashMap<EntityId, Vec<EntityId>>,
     materials: Vec<TransformedMaterialDescriptor>,
     screen_space_materials: Vec<MaterialDescriptor>,
     pipelines: Vec<PipelineIdDescriptor>,
     active_camera: Option<Lit>,
 }
 
-impl Parse for SceneDescriptor {
-    fn parse(input: ParseStream) -> syn::Result<Self> {
-        let scene_ident: Option<Ident> = if input.peek(Ident) && input.peek2(Token![:]) {
+impl SceneDescriptor {
+    fn get_scene_ident(input: ParseStream) -> syn::Result<Option<Ident>> {
+        if input.peek(Ident) && input.peek2(Token![:]) {
             let keyword: Ident = input.parse()?;
             if &keyword.to_string() != "scene" {
                 return Err(syn::Error::new(keyword.span(), "Invalid specifier found. If you meant to specify a scene name you can do so using 'scene: {name}'"));
@@ -33,12 +32,14 @@ impl Parse for SceneDescriptor {
             let _: Token![:] = input.parse()?;
             let ident: Ident = input.parse()?;
             let _: Token![,] = input.parse()?;
-            Some(ident)
+            Ok(Some(ident))
         } else {
-            None
-        };
+            Ok(None)
+        }
+    }
 
-        let active_camera = if input.peek(syn::Ident) {
+    fn get_active_camera(input: ParseStream) -> syn::Result<Option<Lit>> {
+        if input.peek(syn::Ident) {
             let ident: Ident = input.parse()?;
             if &ident.to_string() == "active_camera" {
                 let _: Token![:] = input.parse()?;
@@ -50,11 +51,11 @@ impl Parse for SceneDescriptor {
             }
         } else {
             Ok(None)
-        }?;
+        }
+    }
 
-        let screen_space_materials: Vec<MaterialDescriptor> = if input.peek(syn::Ident)
-            && input.peek2(Token![:])
-        {
+    fn get_screen_space_materials(input: ParseStream) -> syn::Result<Vec<MaterialDescriptor>> {
+        if input.peek(syn::Ident) && input.peek2(Token![:]) {
             let ident: Ident = input.parse()?;
             if &ident.to_string() == "screen_space_materials" {
                 let _: Token![:] = input.parse()?;
@@ -69,58 +70,33 @@ impl Parse for SceneDescriptor {
             }
         } else {
             Ok(Vec::new())
-        }?;
+        }
+    }
+}
+
+impl Parse for SceneDescriptor {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let scene_ident: Option<Ident> = Self::get_scene_ident(input)?;
+
+        let active_camera = Self::get_active_camera(input)?;
+
+        let screen_space_materials: Vec<MaterialDescriptor> =
+            Self::get_screen_space_materials(input)?;
 
         let entities: Vec<EntityDescriptor> = input
             .parse_terminated(EntityDescriptor::parse, Token![,])?
             .into_iter()
             .collect();
+
         let mut idents: HashMap<Lit, Id> = HashMap::new();
         let mut relationships: HashMap<EntityId, Vec<EntityId>> = HashMap::new();
         let mut materials = Vec::new();
         let mut pipelines = Vec::new();
 
-        let mut current_ident = 1;
+        let mut current_entity_id = 1;
         let transformed_entities = entities.into_iter().map(|entity| {
-
             let material_id = if let Some(material) = entity.material {
-                let pipeline_id = match &material.pipeline_id {
-                    PipelineIdVariants::Ident(pipeline_ident) => match idents.get(pipeline_ident) {
-                        Some(id) => {
-                            if let Id::Pipeline(id) = *id {
-                                Ok(id)
-                            } else {
-                                return Err(syn::Error::new(pipeline_ident.span(), format!("Two objects share the same identifier: \"{pipeline_ident:?}\"")));
-                            }
-                        },
-                        None => Err(syn::Error::new(
-                            pipeline_ident.span(),
-                            format!("The pipeline \"{pipeline_ident:?}\" could not be found. If you declared it, make sure it is declared above the current entity")
-                        )),
-                    },
-                    PipelineIdVariants::Specifier(pipeline_id_descriptor) => {
-                        let pipeline_id = pipelines.len();
-                        if let Some(pipeline_ident) = &pipeline_id_descriptor.ident {
-                            idents.insert(pipeline_ident.clone(), Id::Pipeline(pipeline_id));
-                        }
-                        pipelines.push(pipeline_id_descriptor.clone());
-
-                        Ok(pipeline_id)
-                    },
-                    PipelineIdVariants::ScreenSpace(_) => return Err(input.error("Screen-space materials are not valid here")),
-                }?;
-
-                if let Some(ident) = &material.ident {
-                    idents.insert(ident.clone(), Id::Material(materials.len() as u32));
-                }
-
-                materials.push(TransformedMaterialDescriptor {
-                    pipeline_id,
-                    attachments: material.attachments,
-                    entities_attached: vec![current_ident],
-                });
-
-                Some(materials.len() as u32 - 1)
+                Some(material.initialize_and_get_id(current_entity_id, input, &mut idents, &mut pipelines, &mut materials)?)
             } else {
                 None
             };
@@ -136,9 +112,9 @@ impl Parse for SceneDescriptor {
                         ));
                     };
                     if let Some(children) = relationships.get_mut(parent_id) {
-                        children.push(current_ident);
+                        children.push(current_entity_id);
                     } else {
-                        relationships.insert(*parent_id, vec![current_ident]);
+                        relationships.insert(*parent_id, vec![current_entity_id]);
                     }
                     parent = Some(*parent_id);
                 } else {
@@ -148,23 +124,24 @@ impl Parse for SceneDescriptor {
 
             let transformed_entity = TransformedEntityDescriptor {
                 components: entity.components,
+                computes: entity.computes,
                 material_id,
                 parent,
-                _id: current_ident,
+                _id: current_entity_id,
                 is_enabled: entity.is_enabled,
                 ident: entity.ident,
             };
 
             if let Some(ident) = &transformed_entity.ident {
-                idents.insert(ident.clone(), Id::Entity(current_ident));
-                current_ident += 1;
+                idents.insert(ident.clone(), Id::Entity(current_entity_id));
+                current_entity_id += 1;
             }
 
 
             for component in &transformed_entity.components {
                 if let Some(ident) = &component.ident {
-                    idents.insert(ident.clone(), Id::Component(current_ident));
-                    current_ident += 1;
+                    idents.insert(ident.clone(), Id::Component(current_entity_id));
+                    current_entity_id += 1;
                 }
             }
 
@@ -181,7 +158,6 @@ impl Parse for SceneDescriptor {
             scene_ident,
             entities: transformed_entities,
             idents,
-            // relationships,
             materials,
             screen_space_materials,
             pipelines,
@@ -249,45 +225,15 @@ impl quote::ToTokens for SceneDescriptor {
             };
 
             let component_initializations = entity.components.iter().map(|component| {
-                let component_type = &component.component_type;
-                let component_generics =
-                if let Some(generics) = &component.generics {
-                    quote!{::#generics}
-                } else {
-                    quote! {}
-                };
+                let mut token_stream = TokenStream2::new();
+                component.to_tokens(&mut token_stream, &self.idents);
+                quote! {#token_stream}
+            });
 
-                if let Some(constructor) = &component.custom_constructor {
-
-                    quote! {
-                        Box::new(#component_type #component_generics::#constructor)
-                    }
-                } else {
-                    let params = component.params.iter().map(|param| {
-                        let field = &param.ident;
-                        if let Some(value) = &param.value {
-                            if let Some(ident) = value.get_ident() {
-                                let id = self.idents.get(&ident).unwrap();
-                                quote! {.#field(#id)}
-                            } else {
-                                quote! {.#field(#value)}
-                            }
-                        } else {
-                            quote! {.#field(#field)}
-                        }
-                    });
-                    let id_set = if let Some(ident) = &component.ident {
-                        let id = self.idents.get(ident).unwrap();
-                        quote! {.id(#id)}
-                    } else {
-                        quote! {}
-                    };
-
-                    quote! {
-                        Box::new(#component_type #component_generics::builder()#(#params)*#id_set.build())
-                    }
-                }
-
+            let compute_initializations = entity.computes.iter().map(|compute| {
+                let mut token_stream = TokenStream2::new();
+                compute.to_tokens(&mut token_stream, &self.idents);
+                quote! {#token_stream}
             });
 
             let material = if let Some(material_id) = &entity.material_id {
@@ -328,6 +274,7 @@ impl quote::ToTokens for SceneDescriptor {
                 let #entity_ident = #scene_name.create_entity(
                     #parent_id,
                     vec![#(#component_initializations),*],
+                    vec![#(#compute_initializations),*],
                     #material,
                     #is_enabled,
                 );
@@ -359,6 +306,7 @@ impl quote::ToTokens for SceneDescriptor {
 
 struct TransformedEntityDescriptor {
     components: Vec<ComponentDescriptor>,
+    computes: Vec<ComputeDescriptor>,
     material_id: Option<ComponentId>,
     parent: Option<EntityId>,
     _id: EntityId,
@@ -386,6 +334,7 @@ impl quote::ToTokens for Id {
 struct EntityDescriptor {
     ident: Option<Lit>,
     components: Vec<ComponentDescriptor>,
+    computes: Vec<ComputeDescriptor>,
     material: Option<MaterialDescriptor>,
     parent: Option<Lit>,
     is_enabled: bool,
@@ -419,6 +368,7 @@ impl Parse for EntityDescriptor {
         let mut entity_descriptor = EntityDescriptor {
             ident,
             components: Vec::new(),
+            computes: Vec::new(),
             material: None,
             parent: None,
             is_enabled: true,
@@ -430,6 +380,7 @@ impl Parse for EntityDescriptor {
         for param in parameters {
             match param {
                 EntityParameters::Components(vec) => entity_descriptor.components = vec,
+                EntityParameters::Computes(vec) => entity_descriptor.computes = vec,
                 EntityParameters::Material(material_descriptor) => {
                     entity_descriptor.material = Some(material_descriptor)
                 }
@@ -444,6 +395,7 @@ impl Parse for EntityDescriptor {
 
 enum EntityParameters {
     Components(Vec<ComponentDescriptor>),
+    Computes(Vec<ComputeDescriptor>),
     Material(MaterialDescriptor),
     Parent(Lit),
     Enabled(bool),
@@ -461,6 +413,12 @@ impl Parse for EntityParameters {
                 Ok(EntityParameters::Components(
                     components.into_iter().collect(),
                 ))
+            }
+            "computes" => {
+                let content;
+                bracketed!(content in input);
+                let computes = content.parse_terminated(ComputeDescriptor::parse, Token![,])?;
+                Ok(EntityParameters::Computes(computes.into_iter().collect()))
             }
             "material" => Ok(EntityParameters::Material(input.parse()?)),
             "parent" => Ok(EntityParameters::Parent(input.parse()?)),
@@ -486,6 +444,47 @@ struct ComponentDescriptor {
     params: Vec<SimpleField>,
     custom_constructor: Option<ComponentConstructor>,
     ident: Option<Lit>,
+}
+
+impl ComponentDescriptor {
+    fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream, idents: &HashMap<Lit, Id>) {
+        let component_type = &self.component_type;
+        let component_generics = if let Some(generics) = &self.generics {
+            quote! {::#generics}
+        } else {
+            quote! {}
+        };
+
+        if let Some(constructor) = &self.custom_constructor {
+            tokens.extend(quote! {
+                Box::new(#component_type #component_generics::#constructor)
+            });
+        } else {
+            let params = self.params.iter().map(|param| {
+                let field = &param.ident;
+                if let Some(value) = &param.value {
+                    if let Some(ident) = value.get_ident() {
+                        let id = idents.get(&ident).unwrap();
+                        quote! {.#field(#id)}
+                    } else {
+                        quote! {.#field(#value)}
+                    }
+                } else {
+                    quote! {.#field(#field)}
+                }
+            });
+            let id_set = if let Some(ident) = &self.ident {
+                let id = idents.get(ident).unwrap();
+                quote! {.id(#id)}
+            } else {
+                quote! {}
+            };
+
+            tokens.extend(quote! {
+                Box::new(#component_type #component_generics::builder()#(#params)*#id_set.build())
+            });
+        }
+    }
 }
 
 impl Parse for ComponentDescriptor {
@@ -549,6 +548,82 @@ impl Parse for ComponentDescriptor {
                 ident,
             })
         }
+    }
+}
+
+struct ComputeDescriptor {
+    params: Vec<SimpleField>,
+    ident: Option<Lit>,
+}
+
+impl ComputeDescriptor {
+    fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream, idents: &HashMap<Lit, Id>) {
+        let params = self.params.iter().map(|param| {
+            let field = &param.ident;
+            if let Some(value) = &param.value {
+                if let Some(ident) = value.get_ident() {
+                    let id = idents.get(&ident).unwrap();
+                    quote! {.#field(#id)}
+                } else {
+                    quote! {.#field(#value)}
+                }
+            } else {
+                quote! {.#field(#field)}
+            }
+        });
+        let id_set = if let Some(ident) = &self.ident {
+            let id = idents.get(ident).unwrap();
+            quote! {.id(#id)}
+        } else {
+            quote! {}
+        };
+
+        tokens.extend(quote! {
+            Compute::builder()#(#params)*#id_set.build()
+        });
+    }
+}
+
+impl Parse for ComputeDescriptor {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let compute_ident: Ident = input.parse()?;
+        if &compute_ident.to_string() != "Compute" {
+            return Err(syn::Error::new(
+                compute_ident.span(),
+                "Only Compute components are valid in this field.",
+            ));
+        }
+
+        let content;
+        parenthesized!(content in input);
+
+        let mut params: Vec<SimpleField> = content
+            .parse_terminated(SimpleField::parse, Token![,])?
+            .into_iter()
+            .collect();
+
+        let ident = params
+            .iter()
+            .filter(|param| &param.ident.to_string() == "ident" && param.value.is_some())
+            .flat_map(|param| {
+                if let SimpleFieldValue::Literal(ident) = param.value.as_ref().unwrap() {
+                    Some(ident.clone())
+                } else {
+                    None
+                }
+            })
+            .next();
+
+        if let Some(ident) = &ident {
+            params.remove(
+                params
+                    .iter()
+                    .position(|param| param.value == Some(SimpleFieldValue::Literal(ident.clone())))
+                    .unwrap(),
+            );
+        }
+
+        Ok(ComputeDescriptor { params, ident })
     }
 }
 
@@ -736,6 +811,31 @@ impl MaterialDescriptor {
             ident,
         })
     }
+
+    fn initialize_and_get_id(
+        self,
+        entity_ident: EntityId,
+        input: ParseStream,
+        idents: &mut HashMap<Lit, Id>,
+        pipelines: &mut Vec<PipelineIdDescriptor>,
+        materials: &mut Vec<TransformedMaterialDescriptor>,
+    ) -> syn::Result<ComponentId> {
+        let pipeline_id = self
+            .pipeline_id
+            .initialize_and_get_id(input, idents, pipelines)?;
+
+        if let Some(ident) = self.ident {
+            idents.insert(ident, Id::Material(materials.len() as ComponentId));
+        }
+
+        materials.push(TransformedMaterialDescriptor {
+            pipeline_id,
+            attachments: self.attachments,
+            entities_attached: vec![entity_ident],
+        });
+
+        Ok(materials.len() as ComponentId - 1)
+    }
 }
 
 impl Parse for MaterialDescriptor {
@@ -843,6 +943,41 @@ enum PipelineIdVariants {
     Ident(Lit),
     Specifier(PipelineIdDescriptor),
     ScreenSpace(ScreenSpacePipelineIdDescriptor),
+}
+
+impl PipelineIdVariants {
+    fn initialize_and_get_id(
+        self,
+        input: ParseStream,
+        idents: &mut HashMap<Lit, Id>,
+        pipelines: &mut Vec<PipelineIdDescriptor>,
+    ) -> syn::Result<usize> {
+        match self {
+            PipelineIdVariants::Ident(pipeline_ident) => match idents.get(&pipeline_ident) {
+                Some(id) => {
+                    if let Id::Pipeline(id) = *id {
+                        Ok(id)
+                    } else {
+                        Err(syn::Error::new(pipeline_ident.span(), format!("Two objects share the same identifier: \"{pipeline_ident:?}\"")))
+                    }
+                },
+                None => Err(syn::Error::new(
+                    pipeline_ident.span(),
+                    format!("The pipeline \"{pipeline_ident:?}\" could not be found. If you declared it, make sure it is declared above the current entity")
+                )),
+            },
+            PipelineIdVariants::Specifier(pipeline_id_descriptor) => {
+                let pipeline_id = pipelines.len();
+                if let Some(pipeline_ident) = &pipeline_id_descriptor.ident {
+                    idents.insert(pipeline_ident.clone(), Id::Pipeline(pipeline_id));
+                }
+                pipelines.push(pipeline_id_descriptor.clone());
+
+                Ok(pipeline_id)
+            },
+            PipelineIdVariants::ScreenSpace(_) => Err(input.error("Screen-space materials are not valid here")),
+        }
+    }
 }
 
 impl Parse for PipelineIdVariants {

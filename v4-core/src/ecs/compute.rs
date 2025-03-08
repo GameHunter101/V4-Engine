@@ -1,6 +1,6 @@
-use wgpu::{
-    BindGroup, BindGroupLayout, ComputePass, ComputePipeline, Device, ShaderStages
-};
+use std::hash::{DefaultHasher, Hash, Hasher};
+
+use wgpu::{BindGroup, BindGroupLayout, ComputePass, ComputePipeline, Device, ShaderStages};
 
 use crate::engine_management::pipeline::{load_shader_module_descriptor, PipelineShader};
 
@@ -13,13 +13,13 @@ use super::{
 #[derive(Debug)]
 pub struct Compute {
     input: Vec<ShaderAttachment>,
-    output: ShaderAttachment,
+    output: Option<ShaderAttachment>,
     shader_path: &'static str,
     is_spirv: bool,
     workgroup_counts: (u32, u32, u32),
     bind_group_layouts: Vec<BindGroupLayout>,
     bind_groups: Vec<BindGroup>,
-    pipeline: ComputePipeline,
+    pipeline: Option<ComputePipeline>,
     id: ComponentId,
     is_enabled: bool,
     is_initialized: bool,
@@ -27,6 +27,9 @@ pub struct Compute {
 }
 
 impl Compute {
+    pub fn builder() -> ComputeBuilder {
+        ComputeBuilder::default()
+    }
     fn create_bind_group_layout(
         attachment: &ShaderAttachment,
         device: &Device,
@@ -73,7 +76,7 @@ impl Compute {
                     binding: 0,
                     visibility: ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::Buffer {
-                        ty: buf.buffer_type,
+                        ty: buf.buffer_type(),
                         has_dynamic_offset: false,
                         min_binding_size: None,
                     },
@@ -118,7 +121,9 @@ impl Compute {
                 }
                 ShaderAttachment::Buffer(buf) => vec![wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: wgpu::BindingResource::Buffer(buf.buffer.as_entire_buffer_binding()),
+                    resource: wgpu::BindingResource::Buffer(
+                        buf.buffer().as_entire_buffer_binding(),
+                    ),
                 }],
             },
         })
@@ -138,7 +143,8 @@ impl Compute {
         });
 
         let module =
-            load_shader_module_descriptor(device, &PipelineShader::Path(shader_path), is_spirv).unwrap();
+            load_shader_module_descriptor(device, &PipelineShader::Path(shader_path), is_spirv)
+                .unwrap();
 
         device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
             label: Some(&format!("Compute {compute_id} pipeline")),
@@ -151,11 +157,18 @@ impl Compute {
     }
 
     pub fn calculate(&self, compute_pass: &mut ComputePass) {
+        // dbg!(&self.bind_groups);
+        compute_pass.set_pipeline(self.pipeline.as_ref().expect(
+            "The compute pipeline was not created while initializing the compute component",
+        ));
         for (i, bind_group) in self.bind_groups.iter().enumerate() {
-            compute_pass.set_pipeline(&self.pipeline);
             compute_pass.set_bind_group(i as u32, bind_group, &[]);
-            compute_pass.dispatch_workgroups(self.workgroup_counts.0, self.workgroup_counts.1, self.workgroup_counts.2);
         }
+        compute_pass.dispatch_workgroups(
+            self.workgroup_counts.0,
+            self.workgroup_counts.1,
+            self.workgroup_counts.2,
+        );
     }
 }
 
@@ -164,7 +177,7 @@ impl ComponentSystem for Compute {
         let (bind_group_layouts, bind_groups): (Vec<BindGroupLayout>, Vec<BindGroup>) = self
             .input
             .iter()
-            .chain(Some(&self.output))
+            .chain(self.output.as_ref())
             .map(|attachment| {
                 let bind_group_layout = Self::create_bind_group_layout(attachment, device, self.id);
                 let bind_group =
@@ -173,19 +186,19 @@ impl ComponentSystem for Compute {
             })
             .collect();
 
-        self.pipeline = Self::create_compute_pipeline(
+        self.pipeline = Some(Self::create_compute_pipeline(
             device,
             &bind_group_layouts.iter().collect::<Vec<_>>(),
             self.shader_path,
             self.id,
             self.is_spirv,
-        );
+        ));
 
         self.bind_group_layouts = bind_group_layouts;
         self.bind_groups = bind_groups;
 
         self.set_initialized();
-        Vec::new()
+        vec![]
     }
 }
 
@@ -216,5 +229,90 @@ impl ComponentDetails for Compute {
 
     fn set_enabled_state(&mut self, enabled_state: bool) {
         self.is_enabled = enabled_state;
+    }
+}
+
+#[derive(Debug)]
+pub struct ComputeBuilder {
+    input: Vec<ShaderAttachment>,
+    output: Option<ShaderAttachment>,
+    shader_path: &'static str,
+    is_spirv: bool,
+    workgroup_counts: (u32, u32, u32),
+    id: ComponentId,
+    enabled: bool,
+}
+
+impl Default for ComputeBuilder {
+    fn default() -> Self {
+        Self {
+            input: Vec::new(),
+            output: None,
+            shader_path: "",
+            is_spirv: false,
+            workgroup_counts: (0, 0, 0),
+            id: 0,
+            enabled: true,
+        }
+    }
+}
+
+impl ComputeBuilder {
+    pub fn input(mut self, input: Vec<ShaderAttachment>) -> Self {
+        self.input = input;
+        self
+    }
+
+    pub fn output(mut self, output: ShaderAttachment) -> Self {
+        self.output = Some(output);
+        self
+    }
+
+    pub fn shader_path(mut self, shader_path: &'static str) -> Self {
+        self.shader_path = shader_path;
+        self
+    }
+
+    pub fn is_spirv(mut self, is_spirv: bool) -> Self {
+        self.is_spirv = is_spirv;
+        self
+    }
+
+    pub fn workgroup_counts(mut self, workgroup_counts: (u32, u32, u32)) -> Self {
+        self.workgroup_counts = workgroup_counts;
+        self
+    }
+
+    pub fn id(mut self, id: ComponentId) -> Self {
+        self.id = id;
+        self
+    }
+
+    pub fn enabled(mut self, enabled: bool) -> Self {
+        self.enabled = enabled;
+        self
+    }
+
+    pub fn build(self) -> Compute {
+        Compute {
+            input: self.input,
+            output: self.output,
+            shader_path: self.shader_path,
+            is_spirv: self.is_spirv,
+            workgroup_counts: self.workgroup_counts,
+            bind_group_layouts: Vec::new(),
+            bind_groups: Vec::new(),
+            pipeline: None,
+            id: if self.id == 0 {
+                let mut hasher = DefaultHasher::new();
+                std::time::Instant::now().hash(&mut hasher);
+                hasher.finish()
+            } else {
+                self.id
+            },
+            is_enabled: self.enabled,
+            is_initialized: false,
+            parent_entity: 0,
+        }
     }
 }

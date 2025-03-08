@@ -2,10 +2,7 @@ use std::fmt::Debug;
 
 use v4_core::{
     ecs::{
-        actions::Action,
-        component::{Component, ComponentId},
-        entity::EntityId,
-        scene::{Scene, Workload},
+        actions::Action, component::{Component, ComponentId}, compute::Compute, entity::EntityId, scene::{Scene, Workload}
     },
     engine_management::{
         engine_action::{CreateTextBufferEngineAction, UpdateTextBufferEngineAction},
@@ -134,6 +131,7 @@ impl Action for SetEntityActiveMaterialAction {
 pub struct CreateEntityAction {
     pub entity_parent_id: Option<EntityId>,
     pub components: Vec<Component>,
+    pub computes: Vec<Compute>,
     pub active_material: Option<ComponentId>,
     pub is_enabled: bool,
 }
@@ -143,6 +141,7 @@ impl Action for CreateEntityAction {
         scene.create_entity(
             self.entity_parent_id,
             self.components,
+            self.computes,
             self.active_material,
             self.is_enabled,
         );

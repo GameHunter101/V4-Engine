@@ -32,9 +32,9 @@ pub struct RenderingManager {
     screen_triangle_buffer: wgpu::Buffer,
 }
 
-impl<'a> RenderingManager {
+impl RenderingManager {
     pub async fn new(
-        window: &'a winit::window::Window,
+        window: &winit::window::Window,
         antialiasing_enabled: bool,
         clear_color: wgpu::Color,
     ) -> Self {

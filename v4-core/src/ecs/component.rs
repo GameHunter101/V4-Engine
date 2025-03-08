@@ -9,7 +9,7 @@ use super::{
     actions::ActionQueue, entity::{Entity, EntityId}, material::Material, scene::WorkloadOutput
 };
 
-pub type ComponentId = u32;
+pub type ComponentId = u64;
 
 pub type Component = Box<dyn ComponentSystem>;
 

@@ -1,6 +1,6 @@
 use super::component::ComponentId;
 
-pub type EntityId = u32;
+pub type EntityId = u64;
 
 #[derive(Debug)]
 pub struct Entity {

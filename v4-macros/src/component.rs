@@ -8,21 +8,24 @@ use syn::{
 
 pub fn component_impl(args: TokenStream, item: TokenStream) -> TokenStream {
     let args = parse_macro_input!(args with Punctuated::<Meta, Token![,]>::parse_terminated);
-    let rendering_order_expr: Option<Expr> = args.into_iter().flat_map(|arg| {
-        if let Meta::NameValue(MetaNameValue { path, value, .. }) = arg {
-            if let Some(name) = path.get_ident() {
-                if &name.to_string() == "rendering_order" {
-                    return Some(value);
+    let rendering_order_expr: Option<Expr> = args
+        .into_iter()
+        .flat_map(|arg| {
+            if let Meta::NameValue(MetaNameValue { path, value, .. }) = arg {
+                if let Some(name) = path.get_ident() {
+                    if &name.to_string() == "rendering_order" {
+                        return Some(value);
+                    }
                 }
             }
-        }
-        None
-    }).next();
+            None
+        })
+        .next();
 
     let rendering_order = if let Some(expr) = rendering_order_expr {
-        quote!{#expr}
+        quote! {#expr}
     } else {
-        quote!{0}
+        quote! {0}
     };
 
     let mut component_struct = parse_macro_input!(item as ItemStruct);
@@ -58,7 +61,7 @@ pub fn component_impl(args: TokenStream, item: TokenStream) -> TokenStream {
         .iter_mut()
         .map(|field| {
             let field_ident = field.ident.clone().unwrap();
-            if let Some(attr) = field.attrs.first().take() {
+            if let Some(attr) = field.attrs.first() {
                 if attr.path().is_ident("default") {
                     if let Ok(expr) = attr.parse_args::<Expr>() {
                         return quote! {#field_ident: Some(#expr)};
@@ -196,18 +199,19 @@ pub fn component_impl(args: TokenStream, item: TokenStream) -> TokenStream {
                 use std::hash::{DefaultHasher, Hash, Hasher};
 
                 let mut hasher = DefaultHasher::new();
-                file!().hash(&mut hasher);
-                let file = (hasher.finish() & v4::ecs::component::ComponentId::MAX as u64) as v4::ecs::component::ComponentId;
-                let line = line!();
+
+                std::time::Instant::now().hash(&mut hasher);
+
+                let id = hasher.finish();
 
                 #ident {
                     #(#builder_field_idents: self.#builder_field_idents.unwrap(),)*
                     id:
-                        if self.id == 0 {
-                            file + line
-                        } else {
-                            self.id
-                        },
+                    if self.id == 0 {
+                        id
+                    } else {
+                        self.id
+                    },
                     parent_entity_id: 0,
                     is_initialized: false,
                     is_enabled: self.enabled,
