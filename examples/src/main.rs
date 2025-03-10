@@ -2,6 +2,7 @@ mod hello_world;
 mod font_render;
 mod workload_test;
 mod compute;
+mod textures;
 
 fn main() {
     match std::env::args().nth(1) {
@@ -18,7 +19,10 @@ fn main() {
                 },
                 "compute" => {
                     compute::main();
-                }
+                },
+                "texures" => {
+                    textures::main();
+                },
                 _ => {println!("Please select a valid example")}
             }
         },

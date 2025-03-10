@@ -1437,10 +1437,11 @@ enum ShaderAttachmentDescriptor {
 impl Parse for ShaderAttachmentDescriptor {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let ident: Ident = input.parse()?;
-        match input.to_string().as_str() {
+
+        match ident.to_string().as_str() {
             "Texture" => Ok(ShaderAttachmentDescriptor::Texture(input.parse()?)),
             "Buffer" => Ok(ShaderAttachmentDescriptor::Buffer(input.parse()?)),
-            _ => Err(syn::Error::new(ident.span(), "Invalid Material Attachment")),
+            _ => Err(syn::Error::new(ident.span(), "Invalid material attachment")),
         }
     }
 }
