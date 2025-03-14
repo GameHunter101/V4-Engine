@@ -230,6 +230,7 @@ fn main(input: VertexOutput) -> @location(0) vec4<f32> {
                 ),
             ),
             spirv_fragment_shader: false,
+            attachments: Vec::new(),
             vertex_layouts: vec![wgpu::VertexBufferLayout {
                 array_stride: 4 * 5,
                 step_mode: wgpu::VertexStepMode::Vertex,

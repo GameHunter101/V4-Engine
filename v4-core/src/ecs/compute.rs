@@ -157,7 +157,6 @@ impl Compute {
     }
 
     pub fn calculate(&self, compute_pass: &mut ComputePass) {
-        // dbg!(&self.bind_groups);
         compute_pass.set_pipeline(self.pipeline.as_ref().expect(
             "The compute pipeline was not created while initializing the compute component",
         ));

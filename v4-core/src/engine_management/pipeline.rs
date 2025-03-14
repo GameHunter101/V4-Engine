@@ -1,10 +1,18 @@
 use std::borrow::Cow;
 
-use wgpu::{util::make_spirv, BindGroupLayout, Device, RenderPipeline, TextureFormat, VertexBufferLayout};
+use wgpu::{
+    util::make_spirv, BindGroupLayout, Device, RenderPipeline, ShaderStages, TextureFormat,
+    VertexBufferLayout,
+};
 
 use crate::engine_support::texture_support::Texture;
 
-// pub type PipelineId = (&'static str, &'static str);
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum PipelineAttachments {
+    SampledTexture(ShaderStages),
+    StorageTexture(ShaderStages),
+    Buffer(ShaderStages),
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PipelineId {
@@ -12,6 +20,7 @@ pub struct PipelineId {
     pub spirv_vertex_shader: bool,
     pub fragment_shader: PipelineShader,
     pub spirv_fragment_shader: bool,
+    pub attachments: Vec<PipelineAttachments>,
     pub vertex_layouts: Vec<wgpu::VertexBufferLayout<'static>>,
     pub uses_camera: bool,
     pub is_screen_space: bool,
@@ -111,19 +120,91 @@ pub fn create_render_pipeline(
         None
     };
 
+    let texture_layouts: Vec<BindGroupLayout> = id
+        .attachments
+        .iter()
+        .enumerate()
+        .map(|(i, attachment)| {
+            let str = format!("Pipeline {id:?} | Attachment {i} bind group layout");
+            let label: Option<&str> = Some(&str);
+            match attachment {
+                PipelineAttachments::SampledTexture(visibility) => {
+                    device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                        label,
+                        entries: &[
+                            wgpu::BindGroupLayoutEntry {
+                                binding: 0,
+                                visibility: *visibility,
+                                ty: wgpu::BindingType::Texture {
+                                    sample_type: wgpu::TextureSampleType::Float {
+                                        filterable: true,
+                                    },
+                                    view_dimension: wgpu::TextureViewDimension::D2,
+                                    multisampled: false,
+                                },
+                                count: None,
+                            },
+                            wgpu::BindGroupLayoutEntry {
+                                binding: 1,
+                                visibility: *visibility,
+                                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                                count: None,
+                            },
+                        ],
+                    })
+                }
+                PipelineAttachments::StorageTexture(visibility) => {
+                    device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                        label,
+                        entries: &[wgpu::BindGroupLayoutEntry {
+                            binding: 0,
+                            visibility: *visibility,
+                            ty: wgpu::BindingType::StorageTexture {
+                                access: todo!(),
+                                format: todo!(),
+                                view_dimension: wgpu::TextureViewDimension::D2,
+                            },
+                            count: None,
+                        }],
+                    })
+                }
+                PipelineAttachments::Buffer(visibility) => {
+                    device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                        label,
+                        entries: &[wgpu::BindGroupLayoutEntry {
+                            binding: 0,
+                            visibility: *visibility,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: todo!(),
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        }],
+                    })
+                }
+            }
+        })
+        .collect();
+
     let bind_group_layouts: Vec<&wgpu::BindGroupLayout> =
         if let Some(camera_layout) = &camera_layout {
             vec![camera_layout]
                 .into_iter()
                 .chain(bind_group_layouts.iter())
+                .chain(texture_layouts.iter())
                 .collect()
         } else if let Some(screen_space_layout) = &screen_space_layout {
             vec![screen_space_layout]
                 .into_iter()
                 .chain(bind_group_layouts.iter())
+                .chain(texture_layouts.iter())
                 .collect()
         } else {
-            bind_group_layouts.iter().collect()
+            bind_group_layouts
+                .iter()
+                .chain(texture_layouts.iter())
+                .collect()
         };
 
     let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -132,7 +213,8 @@ pub fn create_render_pipeline(
         push_constant_ranges: &[],
     });
 
-    let vertex_shader_module = load_shader_module_descriptor(device, &id.vertex_shader, is_vert_spirv);
+    let vertex_shader_module =
+        load_shader_module_descriptor(device, &id.vertex_shader, is_vert_spirv);
     if let Err(error) = vertex_shader_module {
         panic!(
             "Vertex shader error for shader {:?}: {error}",
@@ -141,7 +223,8 @@ pub fn create_render_pipeline(
     }
     let vertex_shader_module = vertex_shader_module.unwrap();
 
-    let fragment_shader_module = load_shader_module_descriptor(device, &id.fragment_shader, is_frag_spirv);
+    let fragment_shader_module =
+        load_shader_module_descriptor(device, &id.fragment_shader, is_frag_spirv);
     if let Err(error) = fragment_shader_module {
         panic!(
             "Fragment shader error for shader {:?}: {error}",
@@ -204,9 +287,6 @@ pub fn load_shader_module_descriptor(
     shader: &PipelineShader,
     spirv: bool,
 ) -> Result<wgpu::ShaderModule, std::io::Error> {
-    /* if spirv {
-        dbg!(shader);
-    } */
     match shader {
         PipelineShader::Path(shader_path) => {
             let shader_contents_bytes = std::fs::read(shader_path)?;

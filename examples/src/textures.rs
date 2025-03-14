@@ -7,6 +7,9 @@ use v4::{
 #[tokio::main]
 pub async fn main() {
     let mut engine = V4::builder().build().await;
+    let rendering_manager = engine.rendering_manager();
+    let device = rendering_manager.device();
+    let queue = rendering_manager.queue();
 
     scene! {
         _ = {
@@ -15,12 +18,21 @@ pub async fn main() {
                     vertex_shader_path: "shaders/hello_world/vertex.wgsl",
                     fragment_shader_path: "shaders/hello_world/fragment.wgsl",
                     vertex_layouts: [Vertex::vertex_layout()],
-                    uses_camera: true,
+                    uses_camera: false,
                 },
                 attachments: [Texture (
-                    texture: v4::ecs::material::GeneralTexture::Regular(),
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-        )],
+                    texture: 
+                        v4::ecs::material::GeneralTexture::Regular(
+                            Texture::from_path(
+                                "./assets/testing_textures/teapot.jpg",
+                                device,
+                                queue,
+                                wgpu::TextureFormat::Rgba8UnormSrgb,
+                                false,
+                            ).await.unwrap()
+                        ),
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                )],
             },
             components: [
                 MeshComponent(

@@ -20,7 +20,7 @@ fn main() {
                 "compute" => {
                     compute::main();
                 },
-                "texures" => {
+                "textures" => {
                     textures::main();
                 },
                 _ => {println!("Please select a valid example")}

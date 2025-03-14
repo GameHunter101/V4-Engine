@@ -24,3 +24,4 @@ imgui-winit-support.workspace = true
 glyphon.workspace = true
 crossbeam-channel.workspace = true
 downcast-rs.workspace = true
+image.workspace = true
