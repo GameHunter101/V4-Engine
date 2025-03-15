@@ -192,20 +192,18 @@ pub fn create_render_pipeline(
             vec![camera_layout]
                 .into_iter()
                 .chain(bind_group_layouts.iter())
-                .chain(texture_layouts.iter())
                 .collect()
         } else if let Some(screen_space_layout) = &screen_space_layout {
             vec![screen_space_layout]
                 .into_iter()
                 .chain(bind_group_layouts.iter())
-                .chain(texture_layouts.iter())
                 .collect()
         } else {
             bind_group_layouts
                 .iter()
-                .chain(texture_layouts.iter())
                 .collect()
         };
+
 
     let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some(&format!("{id:?} Pipeline Layout")),

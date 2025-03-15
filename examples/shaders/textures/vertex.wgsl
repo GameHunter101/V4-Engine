@@ -11,7 +11,7 @@ struct VertexOutput {
 @vertex
 fn main(input: VertexInput) -> VertexOutput {
     var out: VertexOutput;
-    out.pos = input.position;
+    out.pos = vec4f(input.position, 1.0);
     out.tex_coords = input.tex_coords;
     return out;
 }

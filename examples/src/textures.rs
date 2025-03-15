@@ -15,8 +15,8 @@ pub async fn main() {
         _ = {
             material: {
                 pipeline: {
-                    vertex_shader_path: "shaders/hello_world/vertex.wgsl",
-                    fragment_shader_path: "shaders/hello_world/fragment.wgsl",
+                    vertex_shader_path: "shaders/textures/vertex.wgsl",
+                    fragment_shader_path: "shaders/textures/fragment.wgsl",
                     vertex_layouts: [Vertex::vertex_layout()],
                     uses_camera: false,
                 },
@@ -24,14 +24,14 @@ pub async fn main() {
                     texture: 
                         v4::ecs::material::GeneralTexture::Regular(
                             Texture::from_path(
-                                "./assets/testing_textures/teapot.jpg",
+                                "./assets/testing_textures/dude.png",
                                 device,
                                 queue,
                                 wgpu::TextureFormat::Rgba8UnormSrgb,
                                 false,
                             ).await.unwrap()
                         ),
-                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
                 )],
             },
             components: [

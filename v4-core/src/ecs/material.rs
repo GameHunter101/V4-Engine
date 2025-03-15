@@ -167,12 +167,7 @@ impl Material {
         attachment: &ShaderAttachment,
         bind_group_layout: &BindGroupLayout,
     ) -> BindGroup {
-        device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some(&format!(
-                "Material {material_id} | attachment {attachment:?} bind group"
-            )),
-            layout: bind_group_layout,
-            entries: &match attachment {
+        let entries = &match attachment {
                 ShaderAttachment::Texture(tex) => {
                     if let Some(sampler) = tex.texture.sampler_ref() {
                         vec![
@@ -200,7 +195,14 @@ impl Material {
                         resource: buf.buffer.as_entire_binding(),
                     }]
                 }
-            },
+            };
+        dbg!(entries.len());
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some(&format!(
+                "Material {material_id} | attachment {attachment:?} bind group"
+            )),
+            layout: bind_group_layout,
+            entries,
         })
     }
 
@@ -286,7 +288,7 @@ impl ComponentSystem for Material {
         other_components: &[&Component],
     ) {
         let bind_group_offset = if self.uses_camera() { 1 } else { 0 };
-        for (i, bind_group) in self.bind_groups().iter().enumerate() {
+        for (i, bind_group) in self.bind_groups.iter().enumerate() {
             render_pass.set_bind_group(i as u32 + bind_group_offset, bind_group, &[]);
         }
 
