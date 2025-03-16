@@ -26,10 +26,24 @@ pub enum GeneralTexture {
 }
 
 impl GeneralTexture {
+    pub fn texture(&self) -> &wgpu::Texture {
+        match self {
+            GeneralTexture::Regular(texture) => texture.texture_ref(),
+            GeneralTexture::Storage(storage_texture) => storage_texture.texture_ref(),
+        }
+    }
+
     pub fn view_ref(&self) -> &wgpu::TextureView {
         match self {
             GeneralTexture::Regular(texture) => texture.view_ref(),
             GeneralTexture::Storage(storage_texture) => storage_texture.view_ref(),
+        }
+    }
+
+    pub fn view_mut(&mut self) -> &mut wgpu::TextureView {
+        match self {
+            GeneralTexture::Regular(texture) => texture.view_mut(),
+            GeneralTexture::Storage(storage_texture) => storage_texture.view_mut(),
         }
     }
 
@@ -167,40 +181,37 @@ impl Material {
         attachment: &ShaderAttachment,
         bind_group_layout: &BindGroupLayout,
     ) -> BindGroup {
+        let label = format!("Material {material_id} | attachment {attachment:?} bind group");
         let entries = &match attachment {
-                ShaderAttachment::Texture(tex) => {
-                    if let Some(sampler) = tex.texture.sampler_ref() {
-                        vec![
-                            wgpu::BindGroupEntry {
-                                binding: 0,
-                                resource: wgpu::BindingResource::TextureView(
-                                    tex.texture.view_ref(),
-                                ),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 1,
-                                resource: wgpu::BindingResource::Sampler(sampler),
-                            },
-                        ]
-                    } else {
-                        vec![wgpu::BindGroupEntry {
+            ShaderAttachment::Texture(tex) => {
+                if let Some(sampler) = tex.texture.sampler_ref() {
+                    vec![
+                        wgpu::BindGroupEntry {
                             binding: 0,
                             resource: wgpu::BindingResource::TextureView(tex.texture.view_ref()),
-                        }]
-                    }
-                }
-                ShaderAttachment::Buffer(buf) => {
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: wgpu::BindingResource::Sampler(sampler),
+                        },
+                    ]
+                } else {
                     vec![wgpu::BindGroupEntry {
                         binding: 0,
-                        resource: buf.buffer.as_entire_binding(),
+                        resource: wgpu::BindingResource::TextureView(tex.texture.view_ref()),
                     }]
                 }
-            };
+            }
+            ShaderAttachment::Buffer(buf) => {
+                vec![wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: buf.buffer.as_entire_binding(),
+                }]
+            }
+        };
         dbg!(entries.len());
         device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some(&format!(
-                "Material {material_id} | attachment {attachment:?} bind group"
-            )),
+            label: Some(&label),
             layout: bind_group_layout,
             entries,
         })

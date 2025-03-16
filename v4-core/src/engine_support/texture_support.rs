@@ -1,3 +1,5 @@
+use std::io::Write;
+
 use wgpu::{Device, Queue, Sampler, Texture as WgpuTexture, TextureFormat, TextureView};
 
 #[derive(Debug)]
@@ -40,6 +42,10 @@ impl StorageTexture {
     pub fn format(&self) -> TextureFormat {
         self.format
     }
+
+    pub fn view_mut(&mut self) -> &mut TextureView {
+        &mut self.view
+    }
 }
 
 impl Texture {
@@ -80,13 +86,13 @@ impl Texture {
 
         // TODO: Implement actual error handling
         let raw = image::load_from_memory(&raw_image).expect("Failed to create image");
-        let image = raw.into_rgb8();
-        // let bytes = image.as_bytes();
+        // let image = raw.into_rgba8();
+        let bytes = raw.as_bytes();
 
         Ok(Self::from_bytes(
-            &image,
-            image.width(),
-            image.height(),
+            bytes,
+            raw.width(),
+            raw.height(),
             device,
             queue,
             format,
@@ -116,11 +122,29 @@ impl Texture {
             wgpu::Extent3d {
                 width,
                 height,
-                depth_or_array_layers: 0,
+                depth_or_array_layers: 1,
             },
         );
 
         texture
+    }
+
+    pub fn output_image_native(image_data: Vec<u8>, texture_dims: (usize, usize), path: String) {
+        let mut png_data = Vec::<u8>::with_capacity(image_data.len());
+        let mut encoder = png::Encoder::new(
+            std::io::Cursor::new(&mut png_data),
+            texture_dims.0 as u32,
+            texture_dims.1 as u32,
+        );
+        encoder.set_color(png::ColorType::Rgba);
+        let mut png_writer = encoder.write_header().unwrap();
+        png_writer.write_image_data(&image_data[..]).unwrap();
+        png_writer.finish().unwrap();
+        log::info!("PNG file encoded in memory.");
+
+        let mut file = std::fs::File::create(&path).unwrap();
+        file.write_all(&png_data[..]).unwrap();
+        log::info!("PNG file written to disc as \"{}\".", path);
     }
 
     pub fn create_texture(
@@ -137,7 +161,7 @@ impl Texture {
         };
 
         let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: None,
+            label: Some("new created texture"),
             size,
             mip_level_count: 1,
             sample_count: 1,
@@ -152,7 +176,7 @@ impl Texture {
             view_formats: &[],
         });
 
-        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let view = texture.create_view(&Default::default());
 
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: None,
@@ -214,5 +238,9 @@ impl Texture {
             view,
             sampler,
         }
+    }
+
+    pub fn view_mut(&mut self) -> &mut TextureView {
+        &mut self.view
     }
 }
