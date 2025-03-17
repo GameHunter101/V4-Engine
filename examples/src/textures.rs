@@ -29,6 +29,7 @@ pub async fn main() {
                                 queue,
                                 wgpu::TextureFormat::Rgba8UnormSrgb,
                                 false,
+                                true,
                             ).await.unwrap()
                         ),
                     visibility: wgpu::ShaderStages::FRAGMENT,

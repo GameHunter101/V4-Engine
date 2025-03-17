@@ -92,6 +92,7 @@ impl Compute {
         device: &Device,
         compute_id: ComponentId,
     ) -> BindGroup {
+        let mut sampler = None;
         device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some(&format!(
                 "Compute {compute_id} | attachment {attachment:?} bind group"
@@ -99,7 +100,21 @@ impl Compute {
             layout,
             entries: &match &attachment {
                 ShaderAttachment::Texture(tex) => {
-                    if let Some(sampler) = tex.texture.sampler_ref() {
+                    if tex.texture.is_sampled() {
+                        if sampler.is_none() {
+                            sampler = Some(device.create_sampler(&wgpu::SamplerDescriptor {
+                                address_mode_u: wgpu::AddressMode::ClampToEdge,
+                                address_mode_v: wgpu::AddressMode::ClampToEdge,
+                                address_mode_w: wgpu::AddressMode::ClampToEdge,
+                                mag_filter: wgpu::FilterMode::Linear,
+                                min_filter: wgpu::FilterMode::Linear,
+                                mipmap_filter: wgpu::FilterMode::Nearest,
+                                lod_min_clamp: 0.0,
+                                lod_max_clamp: 100.0,
+                                compare: Some(wgpu::CompareFunction::LessEqual),
+                                ..Default::default()
+                            }));
+                        }
                         vec![
                             wgpu::BindGroupEntry {
                                 binding: 0,
@@ -109,7 +124,7 @@ impl Compute {
                             },
                             wgpu::BindGroupEntry {
                                 binding: 1,
-                                resource: wgpu::BindingResource::Sampler(sampler),
+                                resource: wgpu::BindingResource::Sampler(sampler.as_ref().unwrap()),
                             },
                         ]
                     } else {

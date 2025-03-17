@@ -1,13 +1,11 @@
-use std::io::Write;
-
-use wgpu::{Device, Queue, Sampler, Texture as WgpuTexture, TextureFormat, TextureView};
+use wgpu::{Device, Queue, Texture as WgpuTexture, TextureFormat, TextureView};
 
 #[derive(Debug)]
 pub struct Texture {
     format: TextureFormat,
     texture: WgpuTexture,
     view: TextureView,
-    sampler: Sampler,
+    sampled: bool,
 }
 
 #[derive(Debug)]
@@ -16,36 +14,6 @@ pub struct StorageTexture {
     texture: WgpuTexture,
     view: TextureView,
     access: wgpu::StorageTextureAccess,
-}
-
-impl StorageTexture {
-    pub fn texture_ref(&self) -> &WgpuTexture {
-        &self.texture
-    }
-
-    pub fn texture(self) -> WgpuTexture {
-        self.texture
-    }
-
-    pub fn view_ref(&self) -> &TextureView {
-        &self.view
-    }
-
-    pub fn view(self) -> TextureView {
-        self.view
-    }
-
-    pub fn access(&self) -> wgpu::StorageTextureAccess {
-        self.access
-    }
-
-    pub fn format(&self) -> TextureFormat {
-        self.format
-    }
-
-    pub fn view_mut(&mut self) -> &mut TextureView {
-        &mut self.view
-    }
 }
 
 impl Texture {
@@ -67,12 +35,8 @@ impl Texture {
         self.view
     }
 
-    pub fn sampler_ref(&self) -> &Sampler {
-        &self.sampler
-    }
-
-    pub fn sampler(self) -> Sampler {
-        self.sampler
+    pub fn is_sampled(&self) -> bool {
+        self.sampled
     }
 
     pub async fn from_path(
@@ -81,6 +45,7 @@ impl Texture {
         queue: &Queue,
         format: TextureFormat,
         is_storage: bool,
+        sampled: bool,
     ) -> tokio::io::Result<Self> {
         let raw_image = tokio::fs::read(path).await?;
 
@@ -91,60 +56,49 @@ impl Texture {
 
         Ok(Self::from_bytes(
             bytes,
-            raw.width(),
-            raw.height(),
+            (raw.width(), raw.height()),
             device,
             queue,
             format,
             is_storage,
+            sampled,
         ))
     }
 
     pub fn from_bytes(
         bytes: &[u8],
-        width: u32,
-        height: u32,
+        dimensions: (u32, u32),
         device: &Device,
         queue: &Queue,
         format: TextureFormat,
         is_storage: bool,
+        sampled: bool,
     ) -> Self {
-        let texture = Self::create_texture(device, width, height, format, is_storage);
+        let texture = Self::create_texture(
+            device,
+            dimensions.0,
+            dimensions.1,
+            format,
+            is_storage,
+            sampled,
+        );
 
         queue.write_texture(
             texture.texture_ref().as_image_copy(),
             bytes,
             wgpu::TexelCopyBufferLayout {
                 offset: 0,
-                bytes_per_row: Some(format.components() as u32 * width),
-                rows_per_image: Some(height),
+                bytes_per_row: Some(format.components() as u32 * dimensions.0),
+                rows_per_image: Some(dimensions.1),
             },
             wgpu::Extent3d {
-                width,
-                height,
+                width: dimensions.0,
+                height: dimensions.1,
                 depth_or_array_layers: 1,
             },
         );
 
         texture
-    }
-
-    pub fn output_image_native(image_data: Vec<u8>, texture_dims: (usize, usize), path: String) {
-        let mut png_data = Vec::<u8>::with_capacity(image_data.len());
-        let mut encoder = png::Encoder::new(
-            std::io::Cursor::new(&mut png_data),
-            texture_dims.0 as u32,
-            texture_dims.1 as u32,
-        );
-        encoder.set_color(png::ColorType::Rgba);
-        let mut png_writer = encoder.write_header().unwrap();
-        png_writer.write_image_data(&image_data[..]).unwrap();
-        png_writer.finish().unwrap();
-        log::info!("PNG file encoded in memory.");
-
-        let mut file = std::fs::File::create(&path).unwrap();
-        file.write_all(&png_data[..]).unwrap();
-        log::info!("PNG file written to disc as \"{}\".", path);
     }
 
     pub fn create_texture(
@@ -153,6 +107,7 @@ impl Texture {
         height: u32,
         format: TextureFormat,
         is_storage: bool,
+        sampled: bool,
     ) -> Self {
         let size = wgpu::Extent3d {
             width,
@@ -178,22 +133,11 @@ impl Texture {
 
         let view = texture.create_view(&Default::default());
 
-        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            label: None,
-            address_mode_u: wgpu::AddressMode::ClampToEdge,
-            address_mode_v: wgpu::AddressMode::ClampToEdge,
-            address_mode_w: wgpu::AddressMode::ClampToEdge,
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Linear,
-            mipmap_filter: wgpu::FilterMode::Nearest,
-            ..Default::default()
-        });
-
         Self {
             format,
             texture,
             view,
-            sampler,
+            sampled,
         }
     }
 
@@ -219,25 +163,47 @@ impl Texture {
         let texture = device.create_texture(&desc);
 
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            address_mode_u: wgpu::AddressMode::ClampToEdge,
-            address_mode_v: wgpu::AddressMode::ClampToEdge,
-            address_mode_w: wgpu::AddressMode::ClampToEdge,
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Linear,
-            mipmap_filter: wgpu::FilterMode::Nearest,
-            lod_min_clamp: 0.0,
-            lod_max_clamp: 100.0,
-            compare: Some(wgpu::CompareFunction::LessEqual),
-            ..Default::default()
-        });
 
         Self {
             format: texture.format(),
             texture,
             view,
-            sampler,
+            sampled: true,
         }
+    }
+
+    pub fn view_mut(&mut self) -> &mut TextureView {
+        &mut self.view
+    }
+
+    pub fn format(&self) -> TextureFormat {
+        self.format
+    }
+}
+
+impl StorageTexture {
+    pub fn texture_ref(&self) -> &WgpuTexture {
+        &self.texture
+    }
+
+    pub fn texture(self) -> WgpuTexture {
+        self.texture
+    }
+
+    pub fn view_ref(&self) -> &TextureView {
+        &self.view
+    }
+
+    pub fn view(self) -> TextureView {
+        self.view
+    }
+
+    pub fn access(&self) -> wgpu::StorageTextureAccess {
+        self.access
+    }
+
+    pub fn format(&self) -> TextureFormat {
+        self.format
     }
 
     pub fn view_mut(&mut self) -> &mut TextureView {
