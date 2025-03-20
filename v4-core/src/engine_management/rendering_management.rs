@@ -37,6 +37,7 @@ impl RenderingManager {
         window: &winit::window::Window,
         antialiasing_enabled: bool,
         clear_color: wgpu::Color,
+        features: wgpu::Features,
     ) -> Self {
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
             backends: wgpu::Backends::all(),
@@ -67,6 +68,7 @@ impl RenderingManager {
                 &wgpu::DeviceDescriptor {
                     label: Some("Renderer device descriptor"),
                     memory_hints: wgpu::MemoryHints::Performance,
+                    required_features: features,
                     ..Default::default()
                 },
                 None,
