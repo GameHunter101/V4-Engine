@@ -19,6 +19,9 @@ pub async fn main() {
                     fragment_shader_path: "shaders/textures/fragment.wgsl",
                     vertex_layouts: [Vertex::vertex_layout()],
                     uses_camera: false,
+                    geometry_details: {
+                        polygon_mode: wgpu::PolygonMode::Fill,
+                    }
                 },
                 attachments: [Texture (
                     texture: 

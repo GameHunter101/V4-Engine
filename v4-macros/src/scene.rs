@@ -719,14 +719,19 @@ impl Parse for SimpleField {
         let colon = input.parse::<Token![:]>();
         let mut value = None;
         if colon.is_ok() {
-            if let Ok(expr) = input.parse::<Expr>() {
+            if input.peek(syn::token::Brace) {
+                let content;
+                braced!(content in input);
+                value = Some(SimpleFieldValue::Group(content.parse()?));
+            } else if Expr::peek(input) {
+                let expr: Expr = input.parse()?;
                 if let Expr::Lit(lit) = expr {
                     value = Some(SimpleFieldValue::Literal(lit.lit));
                 } else {
                     value = Some(SimpleFieldValue::Expression(expr));
                 }
-            }
-            if let Ok(lit) = input.parse::<Lit>() {
+            } else if input.peek(Lit) {
+                let lit: Lit = input.parse()?;
                 value = Some(SimpleFieldValue::Literal(lit));
             }
         }
@@ -735,10 +740,21 @@ impl Parse for SimpleField {
     }
 }
 
-#[derive(PartialEq)]
+#[derive(Debug)]
 enum SimpleFieldValue {
     Expression(Expr),
     Literal(Lit),
+    Group(TokenStream2),
+}
+
+impl PartialEq for SimpleFieldValue {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Expression(l0), Self::Expression(r0)) => l0 == r0,
+            (Self::Literal(l0), Self::Literal(r0)) => l0 == r0,
+            _ => false,
+        }
+    }
 }
 
 impl SimpleFieldValue {
@@ -764,6 +780,7 @@ impl quote::ToTokens for SimpleFieldValue {
         tokens.extend(match self {
             SimpleFieldValue::Expression(expr) => quote! {#expr},
             SimpleFieldValue::Literal(lit) => quote! {#lit},
+            SimpleFieldValue::Group(group) => quote! {#group},
         });
     }
 }
@@ -1014,6 +1031,7 @@ impl Parse for PipelineIdVariants {
                 let span = match val {
                     SimpleFieldValue::Expression(expr) => expr.span(),
                     SimpleFieldValue::Literal(lit) => lit.span(),
+                    SimpleFieldValue::Group(group) => group.span(),
                 };
                 Err(syn::Error::new(
                     span,
@@ -1048,12 +1066,6 @@ impl Parse for ScreenSpacePipelineIdDescriptor {
                 "fragment_shader_path" => {
                     if let Some(value) = field.value {
                         match value {
-                            SimpleFieldValue::Expression(expr) => {
-                                return Err(syn::Error::new(
-                                    expr.span(),
-                                    "Only string literals are valid paths",
-                                ))
-                            }
                             SimpleFieldValue::Literal(lit) => {
                                 if let Lit::Str(str) = lit {
                                     fragment_shader_path = Some(str)
@@ -1063,6 +1075,12 @@ impl Parse for ScreenSpacePipelineIdDescriptor {
                                         "Only string literals are valid paths",
                                     ));
                                 }
+                            }
+                            rest => {
+                                return Err(syn::Error::new_spanned(
+                                    rest,
+                                    "Only string literals are valid paths",
+                                ))
                             }
                         }
                     }
@@ -1165,12 +1183,6 @@ impl Parse for PipelineIdDescriptor {
                 "vertex_shader_path" => {
                     if let Some(value) = field.value {
                         match value {
-                            SimpleFieldValue::Expression(expr) => {
-                                return Err(syn::Error::new(
-                                    expr.span(),
-                                    "Only string literals are valid paths",
-                                ))
-                            }
                             SimpleFieldValue::Literal(lit) => {
                                 if let Lit::Str(str) = lit {
                                     vertex_shader_path = Some(str)
@@ -1181,18 +1193,18 @@ impl Parse for PipelineIdDescriptor {
                                     ));
                                 }
                             }
+                            rest => {
+                                return Err(syn::Error::new_spanned(
+                                    rest,
+                                    "Only string literals are valid paths",
+                                ))
+                            }
                         }
                     }
                 }
                 "spirv_vertex_shader" => {
                     if let Some(value) = field.value {
                         match value {
-                            SimpleFieldValue::Expression(expr) => {
-                                return Err(syn::Error::new(
-                                    expr.span(),
-                                    "Only boolean literals are valid here",
-                                ));
-                            }
                             SimpleFieldValue::Literal(lit) => {
                                 if let Lit::Bool(bool) = lit {
                                     spirv_vertex_shader = Some(bool);
@@ -1203,18 +1215,18 @@ impl Parse for PipelineIdDescriptor {
                                     ));
                                 }
                             }
+                            rest => {
+                                return Err(syn::Error::new_spanned(
+                                    rest,
+                                    "Only boolean literals are valid here",
+                                ));
+                            }
                         }
                     }
                 }
                 "fragment_shader_path" => {
                     if let Some(value) = field.value {
                         match value {
-                            SimpleFieldValue::Expression(expr) => {
-                                return Err(syn::Error::new(
-                                    expr.span(),
-                                    "Only string literals are valid paths",
-                                ));
-                            }
                             SimpleFieldValue::Literal(lit) => {
                                 if let Lit::Str(str) = lit {
                                     fragment_shader_path = Some(str)
@@ -1225,18 +1237,18 @@ impl Parse for PipelineIdDescriptor {
                                     ));
                                 }
                             }
+                            rest => {
+                                return Err(syn::Error::new_spanned(
+                                    rest,
+                                    "Only string literals are valid paths",
+                                ));
+                            }
                         }
                     }
                 }
                 "spirv_fragment_shader" => {
                     if let Some(value) = field.value {
                         match value {
-                            SimpleFieldValue::Expression(expr) => {
-                                return Err(syn::Error::new(
-                                    expr.span(),
-                                    "Only boolean literals are valid here",
-                                ));
-                            }
                             SimpleFieldValue::Literal(lit) => {
                                 if let Lit::Bool(bool) = lit {
                                     spirv_fragment_shader = Some(bool);
@@ -1247,6 +1259,12 @@ impl Parse for PipelineIdDescriptor {
                                     ));
                                 }
                             }
+                            rest => {
+                                return Err(syn::Error::new_spanned(
+                                    rest,
+                                    "Only boolean literals are valid here",
+                                ));
+                            }
                         }
                     }
                 }
@@ -1254,12 +1272,12 @@ impl Parse for PipelineIdDescriptor {
                     if let Some(value) = field.value {
                         match value {
                             SimpleFieldValue::Expression(expr) => {
-                                let stream = quote! {#expr};
+                                let stream = quote!{#expr};
                                 vertex_layouts = parse2::<VertexLayoutsDescriptor>(stream)?.0;
                             }
-                            SimpleFieldValue::Literal(lit) => {
-                                return Err(syn::Error::new(
-                                    lit.span(),
+                            rest => {
+                                return Err(syn::Error::new_spanned(
+                                    rest,
                                     "Invalid value for vertex layout",
                                 ))
                             }
@@ -1271,7 +1289,29 @@ impl Parse for PipelineIdDescriptor {
                         uses_camera = Some(bool);
                     }
                 }
-                "geometry_details" => geometry_details = Some(input.parse()?),
+                "geometry_details" => {
+                    if let Some(value) = field.value {
+                        match value {
+                            SimpleFieldValue::Group(expr) => {
+                                let stream = quote! {#expr};
+                                geometry_details =
+                                    Some(parse2::<GeometryDetailsDescriptor>(stream)?);
+                            }
+                            SimpleFieldValue::Literal(lit) => {
+                                return Err(syn::Error::new(
+                                    lit.span(),
+                                    "Invalid value for geometry details",
+                                ))
+                            }
+                            SimpleFieldValue::Expression(expr) => {
+                                return Err(syn::Error::new(
+                                    expr.span(),
+                                    "Invalid value for geometry details",
+                                ))
+                            }
+                        }
+                    }
+                }
                 "ident" => {
                     if let Some(SimpleFieldValue::Literal(lit)) = field.value {
                         ident = Some(lit);
@@ -1381,19 +1421,75 @@ struct GeometryDetailsDescriptor {
 
 impl Parse for GeometryDetailsDescriptor {
     fn parse(input: ParseStream) -> syn::Result<Self> {
-        let content;
-        braced!(content in input);
-        let fields = content.parse_terminated(SimpleField::parse, Token![,])?;
+        let fields = input.parse_terminated(SimpleField::parse, Token![,])?;
 
         let mut details = GeometryDetailsDescriptor::default();
 
         for field in fields {
             match field.ident.to_string().as_str() {
-                "topology" => details.topology = Some(input.parse()?),
-                "strip_index_format" => details.strip_index_format = Some(input.parse()?),
-                "front_face" => details.front_face = Some(input.parse()?),
-                "cull_mode" => details.cull_mode = Some(input.parse()?),
-                "polygon_mode" => details.polygon_mode = Some(input.parse()?),
+                "topology" => match field.value.unwrap() {
+                    SimpleFieldValue::Expression(expr) => {
+                        if let Expr::Path(path) = expr {
+                            details.topology = Some(path);
+                        }
+                    }
+                    rest => {
+                        return Err(syn::Error::new_spanned(
+                            rest,
+                            "Invalid argument passed into geometry details topology field",
+                        ))
+                    }
+                },
+                "strip_index_format" => match field.value.unwrap() {
+                    SimpleFieldValue::Expression(expr) => {
+                        if let Expr::Path(path) = expr {
+                            details.strip_index_format = Some(path);
+                        }
+                    }
+                    rest => return Err(syn::Error::new_spanned(
+                        rest,
+                        "Invalid argument passed into geometry details strip index format field",
+                    )),
+                },
+                "front_face" => match field.value.unwrap() {
+                    SimpleFieldValue::Expression(expr) => {
+                        if let Expr::Path(path) = expr {
+                            details.front_face = Some(path);
+                        }
+                    }
+                    rest => {
+                        return Err(syn::Error::new_spanned(
+                            rest,
+                            "Invalid argument passed into geometry details front face field",
+                        ))
+                    }
+                },
+                "cull_mode" => match field.value.unwrap() {
+                    SimpleFieldValue::Expression(expr) => {
+                        if let Expr::Path(path) = expr {
+                            details.cull_mode = Some(path);
+                        }
+                    }
+                    rest => {
+                        return Err(syn::Error::new_spanned(
+                            rest,
+                            "Invalid argument passed into geometry details cull mode field",
+                        ))
+                    }
+                },
+                "polygon_mode" => match field.value.unwrap() {
+                    SimpleFieldValue::Expression(expr) => {
+                        if let Expr::Path(path) = expr {
+                            details.polygon_mode = Some(path);
+                        }
+                    }
+                    rest => {
+                        return Err(syn::Error::new_spanned(
+                            rest,
+                            "Invalid argument passed into geometry details polygon mode field",
+                        ))
+                    }
+                },
                 _ => {
                     return Err(syn::Error::new_spanned(
                         field.ident,
@@ -1528,9 +1624,7 @@ impl Parse for ShaderTextureAttachmentDescriptor {
                     texture = match field.value {
                         Some(value) => Some(match value {
                             SimpleFieldValue::Expression(expr) => Ok(expr),
-                            SimpleFieldValue::Literal(lit) => {
-                                Err(syn::Error::new(lit.span(), "Invalid texture value"))
-                            }
+                            rest => Err(syn::Error::new_spanned(rest, "Invalid texture value")),
                         }?),
                         None => None,
                     }
@@ -1548,8 +1642,8 @@ impl Parse for ShaderTextureAttachmentDescriptor {
                                     ))
                                 }
                             }
-                            SimpleFieldValue::Literal(lit) => Err(syn::Error::new(
-                                lit.span(),
+                            rest => Err(syn::Error::new_spanned(
+                                rest,
                                 "Invalid texture visibility value",
                             )),
                         }?),
@@ -1585,9 +1679,7 @@ impl Parse for ShaderBufferAttachmentDescriptor {
                     buffer = match field.value {
                         Some(value) => Some(match value {
                             SimpleFieldValue::Expression(expr) => Ok(expr),
-                            SimpleFieldValue::Literal(lit) => {
-                                Err(syn::Error::new(lit.span(), "Invalid buffer value"))
-                            }
+                            rest => Err(syn::Error::new_spanned(rest, "Invalid buffer value")),
                         }?),
                         None => None,
                     }
@@ -1605,8 +1697,8 @@ impl Parse for ShaderBufferAttachmentDescriptor {
                                     ))
                                 }
                             }
-                            SimpleFieldValue::Literal(lit) => Err(syn::Error::new(
-                                lit.span(),
+                            rest => Err(syn::Error::new_spanned(
+                                rest,
                                 "Invalid buffer visibility value",
                             )),
                         }?),
