@@ -26,6 +26,7 @@ pub trait VertexDescriptor: Debug + Pod + Zeroable {
 #[component(rendering_order = 500)]
 pub struct MeshComponent<V: VertexDescriptor> {
     vertices: Vec<Vec<V>>,
+    #[default]
     indices: Vec<Vec<u32>>,
     #[default]
     vertex_buffer: Option<Vec<Buffer>>,
@@ -106,18 +107,20 @@ impl<V: VertexDescriptor + Send + Sync> ComponentSystem for MeshComponent<V> {
                 })
                 .collect(),
         );
-        self.index_buffer = Some(
-            self.enabled_models
-                .iter()
-                .map(|index| {
-                    device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some(&format!("Component {} | Index Buffer", self.id())),
-                        contents: bytemuck::cast_slice(&self.indices[*index]),
-                        usage: wgpu::BufferUsages::INDEX,
+        if !self.indices.is_empty() {
+            self.index_buffer = Some(
+                self.enabled_models
+                    .iter()
+                    .map(|index| {
+                        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some(&format!("Component {} | Index Buffer", self.id())),
+                            contents: bytemuck::cast_slice(&self.indices[*index]),
+                            usage: wgpu::BufferUsages::INDEX,
+                        })
                     })
-                })
-                .collect(),
-        );
+                    .collect(),
+            );
+        }
         self.is_initialized = true;
 
         Vec::new()
@@ -138,14 +141,13 @@ impl<V: VertexDescriptor + Send + Sync> ComponentSystem for MeshComponent<V> {
                     .expect("Attempted to render an uninitialized mesh.")[*index]
                     .slice(..),
             );
-            render_pass.set_index_buffer(
-                self.index_buffer
-                    .as_ref()
-                    .expect("Attempted to render an uninitialized mesh.")[*index]
-                    .slice(..),
-                wgpu::IndexFormat::Uint32,
-            );
-            render_pass.draw_indexed(0..(self.indices[*index].len() as u32), 0, 0..1);
+            if let Some(index_buffers) = &self.index_buffer {
+                render_pass
+                    .set_index_buffer(index_buffers[*index].slice(..), wgpu::IndexFormat::Uint32);
+                render_pass.draw_indexed(0..(self.indices[*index].len() as u32), 0, 0..1);
+            } else {
+                render_pass.draw(0..self.vertices[*index].len() as u32, 0..1);
+            }
         }
     }
 }
