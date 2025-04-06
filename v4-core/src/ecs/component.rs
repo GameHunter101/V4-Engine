@@ -1,12 +1,15 @@
 use downcast_rs::{impl_downcast, DowncastSync};
 use std::{collections::HashMap, fmt::Debug, ops::Range};
-use wgpu::{Device, Queue, RenderPass};
+use wgpu::{CommandEncoder, Device, Queue, RenderPass};
 use winit_input_helper::WinitInputHelper;
 
 use crate::EngineDetails;
 
 use super::{
-    actions::ActionQueue, entity::{Entity, EntityId}, material::Material, scene::WorkloadOutput
+    actions::ActionQueue,
+    entity::{Entity, EntityId},
+    material::Material,
+    scene::WorkloadOutput,
 };
 
 pub type ComponentId = u64;
@@ -43,6 +46,15 @@ pub trait ComponentSystem: ComponentDetails + Debug + DowncastSync + Send + Sync
         device: &Device,
         queue: &Queue,
         render_pass: &mut RenderPass,
+        other_components: &[&Component],
+    ) {
+    }
+
+    fn command_encoder_operations(
+        &self,
+        device: &Device,
+        queue: &Queue,
+        encoder: &mut CommandEncoder,
         other_components: &[&Component],
     ) {
     }

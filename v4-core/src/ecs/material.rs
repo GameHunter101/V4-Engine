@@ -1,6 +1,6 @@
 use std::{collections::HashMap, ops::Range};
 
-use wgpu::{util::DeviceExt, BindGroup, BindGroupLayout, Buffer, Device, Queue, ShaderStages};
+use wgpu::{util::DeviceExt, BindGroup, BindGroupLayout, Buffer, CommandEncoder, Device, Queue, ShaderStages};
 
 use crate::{
     engine_management::pipeline::PipelineId,
@@ -332,6 +332,20 @@ impl ComponentSystem for Material {
         for range in &self.component_ranges {
             for component in &other_components[range.clone()] {
                 component.render(device, queue, render_pass, other_components);
+            }
+        }
+    }
+
+    fn command_encoder_operations(
+        &self,
+        device: &Device,
+        queue: &Queue,
+        encoder: &mut CommandEncoder,
+        other_components: &[&Component],
+    ) {
+        for range in &self.component_ranges {
+            for component in &other_components[range.clone()] {
+                component.command_encoder_operations(device, queue, encoder, other_components);
             }
         }
     }

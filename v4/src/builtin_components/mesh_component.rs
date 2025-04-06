@@ -91,6 +91,22 @@ impl<V: VertexDescriptor> MeshComponent<V> {
             is_enabled,
         })
     }
+
+    pub fn vertex_buffer(&self) -> Option<&Vec<Buffer>> {
+        self.vertex_buffer.as_ref()
+    }
+
+    pub fn index_buffer(&self) -> Option<&Vec<Buffer>> {
+        self.index_buffer.as_ref()
+    }
+
+    pub fn enabled_models(&self) -> &[usize] {
+        &self.enabled_models
+    }
+
+    pub fn enabled_models_mut(&mut self) -> &mut Vec<usize> {
+        &mut self.enabled_models
+    }
 }
 
 impl<V: VertexDescriptor + Send + Sync> ComponentSystem for MeshComponent<V> {

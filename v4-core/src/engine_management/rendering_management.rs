@@ -321,19 +321,11 @@ fn main(input: VertexOutput) -> @location(0) vec4<f32> {
                 label: Some("Render encoder"),
             });
 
-        if !scene.computes().is_empty() {
-            let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("Compute pass"),
-                timestamp_writes: None,
-            });
-            for compute in scene.computes() {
-                compute.calculate(&mut compute_pass);
-            }
-        }
-
         let smaa_frame = self
             .smaa_target
             .start_frame(&self.device, &self.queue, &view);
+
+        let all_components = scene.all_components();
 
         {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -358,7 +350,6 @@ fn main(input: VertexOutput) -> @location(0) vec4<f32> {
                 occlusion_query_set: None,
             });
 
-            let all_components = scene.all_components();
 
             for (pipeline_id, pipeline) in pipelines {
                 if pipeline_id.is_screen_space {
@@ -380,6 +371,15 @@ fn main(input: VertexOutput) -> @location(0) vec4<f32> {
                     material.render(&self.device, &self.queue, &mut render_pass, &all_components);
                 }
             }
+        }
+
+        for material in scene.materials() {
+            material.command_encoder_operations(
+                &self.device,
+                &self.queue,
+                &mut encoder,
+                &all_components,
+            );
         }
 
         smaa_frame.resolve();

@@ -186,6 +186,7 @@ impl V4 {
                                         &self.details,
                                     )
                                     .await;
+                                scene.execute_computes(device, queue);
                             });
                         });
 

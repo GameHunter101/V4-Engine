@@ -184,6 +184,14 @@ impl Compute {
             self.workgroup_counts.2,
         );
     }
+
+    pub fn input_attachments(&self) -> &[ShaderAttachment] {
+        &self.input
+    }
+
+    pub fn output_attachments(&self) -> Option<&ShaderAttachment> {
+        self.output.as_ref()
+    }
 }
 
 impl ComponentSystem for Compute {

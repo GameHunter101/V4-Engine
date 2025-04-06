@@ -30,7 +30,7 @@ pub async fn main() {
                             wgpu::ShaderStages::COMPUTE
                         )),
                     shader_path: "shaders/compute/compute.wgsl",
-                    workgroup_counts: (4, 0, 0),
+                    workgroup_counts: (8, 1, 1),
                 ),
             ]
         },
