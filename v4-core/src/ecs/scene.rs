@@ -179,6 +179,7 @@ impl Scene {
                     }
                 }
                 let workload_outputs = &self.workload_outputs;
+                let computes = &self.computes;
 
                 let (_, outputs) = async_scoped::TokioScope::scope_and_block(|scope| {
                     scope.spawn(async {
@@ -188,6 +189,7 @@ impl Scene {
                                 queue,
                                 input_manager,
                                 &other_components,
+                                computes,
                                 &all_materials,
                                 engine_details,
                                 workload_outputs,
@@ -252,6 +254,7 @@ impl Scene {
                 .iter_mut()
                 .chain(later_materials.iter_mut())
                 .collect();
+            let computes = &self.computes;
 
             let _ = async_scoped::TokioScope::scope_and_block(|scope| {
                 let entity_component_groupings = self.entity_component_groupings.clone();
@@ -262,6 +265,7 @@ impl Scene {
                             queue,
                             input_manager,
                             &all_components,
+                            computes,
                             &other_materials,
                             engine_details,
                             workload_outputs,

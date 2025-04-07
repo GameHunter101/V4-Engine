@@ -7,6 +7,7 @@ use crate::EngineDetails;
 
 use super::{
     actions::ActionQueue,
+    compute::Compute,
     entity::{Entity, EntityId},
     material::Material,
     scene::WorkloadOutput,
@@ -31,6 +32,7 @@ pub trait ComponentSystem: ComponentDetails + Debug + DowncastSync + Send + Sync
         queue: &Queue,
         input_manager: &WinitInputHelper,
         other_components: &[&mut Component],
+        computes: &[Compute],
         materials: &[&mut Material],
         engine_details: &EngineDetails,
         workload_outputs: &HashMap<ComponentId, Vec<WorkloadOutput>>,

@@ -297,6 +297,7 @@ impl ComponentSystem for Material {
         _queue: &Queue,
         _input_manager: &winit_input_helper::WinitInputHelper,
         _other_components: &[&mut crate::ecs::component::Component],
+        _computes: &[super::compute::Compute],
         _materials: &[&mut Material],
         _engine_details: &crate::EngineDetails,
         _workload_outputs: &HashMap<ComponentId, Vec<crate::ecs::scene::WorkloadOutput>>,

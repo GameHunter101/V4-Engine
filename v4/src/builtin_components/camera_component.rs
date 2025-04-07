@@ -30,6 +30,7 @@ impl ComponentSystem for CameraComponent {
         _queue: &Queue,
         _input_manager: &WinitInputHelper,
         other_components: &[&mut Component],
+        _computes: &[v4_core::ecs::compute::Compute],
         _materials: &[&mut Material],
         _engine_details: &EngineDetails,
         _workload_outputs: &HashMap<ComponentId, Vec<WorkloadOutput>>,
