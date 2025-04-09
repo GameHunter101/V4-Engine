@@ -118,7 +118,7 @@ impl<V: VertexDescriptor + Send + Sync> ComponentSystem for MeshComponent<V> {
                     device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                         label: Some(&format!("Component {} | Vertex Buffer", self.id())),
                         contents: bytemuck::cast_slice(&self.vertices[*index]),
-                        usage: wgpu::BufferUsages::VERTEX,
+                        usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
                     })
                 })
                 .collect(),
@@ -131,7 +131,7 @@ impl<V: VertexDescriptor + Send + Sync> ComponentSystem for MeshComponent<V> {
                         device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                             label: Some(&format!("Component {} | Index Buffer", self.id())),
                             contents: bytemuck::cast_slice(&self.indices[*index]),
-                            usage: wgpu::BufferUsages::INDEX,
+                            usage: wgpu::BufferUsages::INDEX| wgpu::BufferUsages::COPY_DST,
                         })
                     })
                     .collect(),
