@@ -72,6 +72,7 @@ impl ShaderBufferAttachment {
         data: &[u8],
         buffer_type: wgpu::BufferBindingType,
         visibility: ShaderStages,
+        extra_usages: wgpu::BufferUsages,
     ) -> Self {
         Self {
             buffer: device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -80,7 +81,7 @@ impl ShaderBufferAttachment {
                 usage: match buffer_type {
                     wgpu::BufferBindingType::Uniform => wgpu::BufferUsages::UNIFORM,
                     wgpu::BufferBindingType::Storage { .. } => wgpu::BufferUsages::STORAGE,
-                },
+                } | extra_usages,
             }),
             buffer_type,
             visibility,
