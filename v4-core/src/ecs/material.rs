@@ -1,6 +1,9 @@
 use std::{collections::HashMap, ops::Range};
 
-use wgpu::{util::DeviceExt, BindGroup, BindGroupLayout, Buffer, CommandEncoder, Device, Queue, ShaderStages};
+use wgpu::{
+    util::DeviceExt, BindGroup, BindGroupLayout, Buffer, CommandEncoder, Device, Queue,
+    ShaderStages,
+};
 
 use crate::{
     engine_management::pipeline::PipelineId,
@@ -17,6 +20,7 @@ use super::{
 pub struct ShaderTextureAttachment {
     pub texture: GeneralTexture,
     pub visibility: ShaderStages,
+    pub extra_usages: wgpu::TextureUsages,
 }
 
 #[derive(Debug)]
@@ -237,6 +241,7 @@ impl ComponentSystem for Material {
                     if let ShaderAttachment::Texture(ShaderTextureAttachment {
                         texture,
                         visibility,
+                        ..
                     }) = attachment
                     {
                         if texture.is_sampled() {

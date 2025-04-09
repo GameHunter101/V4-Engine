@@ -1272,7 +1272,7 @@ impl Parse for PipelineIdDescriptor {
                     if let Some(value) = field.value {
                         match value {
                             SimpleFieldValue::Expression(expr) => {
-                                let stream = quote!{#expr};
+                                let stream = quote! {#expr};
                                 vertex_layouts = parse2::<VertexLayoutsDescriptor>(stream)?.0;
                             }
                             rest => {
@@ -1583,24 +1583,45 @@ impl quote::ToTokens for ShaderAttachmentDescriptor {
             ShaderAttachmentDescriptor::Texture(ShaderTextureAttachmentDescriptor {
                 texture,
                 visibility,
+                extra_usages,
                 ..
-            }) => tokens.extend(quote! {
+            }) => {
+                let usages = if let Some(usages) = extra_usages {
+                    quote! {#usages}
+                } else {
+                    quote! {
+                        wgpu::TextureUsages::empty()
+                    }
+                };
+                    tokens.extend(quote! {
                 v4::ecs::material::ShaderAttachment::Texture(
                     v4::ecs::material::ShaderTextureAttachment {
                         texture: #texture,
                         visibility: #visibility,
+                        extra_usages: #usages,
                     }
                 )
-            }),
+            })},
             ShaderAttachmentDescriptor::Buffer(ShaderBufferAttachmentDescriptor {
                 buffer,
                 visibility,
-            }) => tokens.extend(quote! {
-                v4::ecs::material::ShaderBufferAttachment {
-                    buffer: #buffer,
-                    visibility: #visibility,
-                }
-            }),
+                extra_usages,
+            }) => {
+                let usages = if let Some(usages) = extra_usages {
+                    quote! {#usages}
+                } else {
+                    quote! {
+                        wgpu::BufferUsages::empty()
+                    }
+                };
+                tokens.extend(quote! {
+                    v4::ecs::material::ShaderBufferAttachment {
+                        buffer: #buffer,
+                        visibility: #visibility,
+                            extra_usages: #usages
+                    }
+                })
+            }
         };
     }
 }
@@ -1609,6 +1630,7 @@ struct ShaderTextureAttachmentDescriptor {
     texture: Expr,
     is_storage: bool,
     visibility: ExprPath,
+    extra_usages: Option<Expr>,
 }
 
 impl Parse for ShaderTextureAttachmentDescriptor {
@@ -1618,6 +1640,7 @@ impl Parse for ShaderTextureAttachmentDescriptor {
         let fields = content.parse_terminated(SimpleField::parse, Token![,])?;
         let mut texture: Option<Expr> = None;
         let mut visibility: Option<ExprPath> = None;
+        let mut extra_usages: Option<Expr> = None;
         for field in fields {
             match field.ident.to_string().as_str() {
                 "texture" => {
@@ -1650,6 +1673,15 @@ impl Parse for ShaderTextureAttachmentDescriptor {
                         None => None,
                     }
                 }
+                "extra_usages" => {
+                    extra_usages = match field.value {
+                        Some(value) => Some(match value {
+                            SimpleFieldValue::Expression(expr) => Ok(expr),
+                            rest => Err(syn::Error::new_spanned(rest, "Invalid extra usages")),
+                        }?),
+                        None => None,
+                    }
+                }
                 _ => {}
             }
         }
@@ -1657,6 +1689,7 @@ impl Parse for ShaderTextureAttachmentDescriptor {
             texture: texture.unwrap(),
             is_storage: false,
             visibility: visibility.unwrap(),
+            extra_usages,
         })
     }
 }
@@ -1664,6 +1697,7 @@ impl Parse for ShaderTextureAttachmentDescriptor {
 struct ShaderBufferAttachmentDescriptor {
     buffer: Expr,
     visibility: ExprPath,
+    extra_usages: Option<Expr>,
 }
 
 impl Parse for ShaderBufferAttachmentDescriptor {
@@ -1673,6 +1707,7 @@ impl Parse for ShaderBufferAttachmentDescriptor {
         let fields = content.parse_terminated(SimpleField::parse, Token![,])?;
         let mut buffer: Option<Expr> = None;
         let mut visibility: Option<ExprPath> = None;
+        let mut extra_usages: Option<Expr> = None;
         for field in fields {
             match field.ident.to_string().as_str() {
                 "buffer" => {
@@ -1705,12 +1740,22 @@ impl Parse for ShaderBufferAttachmentDescriptor {
                         None => None,
                     }
                 }
+                "extra_usages" => {
+                    extra_usages = match field.value {
+                        Some(value) => Some(match value {
+                            SimpleFieldValue::Expression(expr) => Ok(expr),
+                            rest => Err(syn::Error::new_spanned(rest, "Invalid extra usages")),
+                        }?),
+                        None => None,
+                    }
+                }
                 _ => {}
             }
         }
         Ok(ShaderBufferAttachmentDescriptor {
             buffer: buffer.unwrap(),
             visibility: visibility.unwrap(),
+            extra_usages,
         })
     }
 }
