@@ -1,14 +1,11 @@
 use std::collections::HashMap;
 
+use darling::FromMeta;
+use proc_macro::TokenStream;
 use proc_macro2::{TokenStream as TokenStream2, TokenTree};
 use quote::{format_ident, quote, ToTokens};
 use syn::{
-    braced, bracketed, parenthesized,
-    parse::{Parse, ParseStream},
-    parse2,
-    punctuated::Punctuated,
-    spanned::Spanned,
-    AngleBracketedGenericArguments, Expr, ExprCall, ExprPath, Ident, Lit, LitBool, LitStr, Token,
+    braced, bracketed, parenthesized, parse::{discouraged::Speculative, Parse, ParseBuffer, ParseStream}, parse2, parse_macro_input, punctuated::Punctuated, spanned::Spanned, AngleBracketedGenericArguments, Expr, ExprCall, ExprMethodCall, ExprPath, Ident, Lit, LitBool, LitStr, Token
 };
 use v4_core::ecs::{component::ComponentId, entity::EntityId};
 
@@ -441,7 +438,7 @@ impl Parse for EntityParameters {
 struct ComponentDescriptor {
     component_type: Ident,
     generics: Option<AngleBracketedGenericArguments>,
-    params: Vec<SimpleField>,
+    parameters: Vec<SimpleField>,
     custom_constructor: Option<ComponentConstructor>,
     ident: Option<Lit>,
 }
@@ -456,11 +453,33 @@ impl ComponentDescriptor {
         };
 
         if let Some(constructor) = &self.custom_constructor {
+            let params = constructor.parameters.iter().map(|param| {
+                if let Expr::Call(ExprCall { func, args, .. }) = param {
+                    if let Expr::Path(ExprPath { path, .. }) = *func.clone() {
+                        if let Some(possible_ident) = path.get_ident() {
+                            if &possible_ident.to_string() == "ident" {
+                                if let Some(Expr::Lit(lit)) = args.first() {
+                                    let id = idents.get(&lit.lit).unwrap();
+                                    return syn::Expr::Verbatim(quote! {#id});
+                                }
+                            }
+                        }
+                    }
+                }
+
+                return param.clone();
+            });
+
+            let new_constructor = ComponentConstructor {
+                parameters: Punctuated::from_iter(params.into_iter()),
+                ..(constructor.clone())
+            };
+
             tokens.extend(quote! {
-                Box::new(#component_type #component_generics::#constructor)
+                Box::new(#component_type #component_generics::#new_constructor)
             });
         } else {
-            let params = self.params.iter().map(|param| {
+            let params = self.parameters.iter().map(|param| {
                 let field = &param.ident;
                 if let Some(value) = &param.value {
                     if let Some(ident) = value.get_ident() {
@@ -500,11 +519,10 @@ impl Parse for ComponentDescriptor {
             let _: Token![::] = input.parse()?;
             let mut custom_constructor: ComponentConstructor = input.parse()?;
             let ident = custom_constructor.component_ident.take();
-
             Ok(ComponentDescriptor {
                 component_type,
                 generics,
-                params: Vec::new(),
+                parameters: Vec::new(),
                 custom_constructor: Some(custom_constructor),
                 ident,
             })
@@ -512,12 +530,12 @@ impl Parse for ComponentDescriptor {
             let content;
             parenthesized!(content in input);
 
-            let mut params: Vec<SimpleField> = content
+            let mut parameters: Vec<SimpleField> = content
                 .parse_terminated(SimpleField::parse, Token![,])?
                 .into_iter()
                 .collect();
 
-            let ident = params
+            let ident = parameters
                 .iter()
                 .filter(|param| &param.ident.to_string() == "ident" && param.value.is_some())
                 .flat_map(|param| {
@@ -530,8 +548,8 @@ impl Parse for ComponentDescriptor {
                 .next();
 
             if let Some(ident) = &ident {
-                params.remove(
-                    params
+                parameters.remove(
+                    parameters
                         .iter()
                         .position(|param| {
                             param.value == Some(SimpleFieldValue::Literal(ident.clone()))
@@ -543,11 +561,80 @@ impl Parse for ComponentDescriptor {
             Ok(ComponentDescriptor {
                 component_type,
                 generics,
-                params,
+                parameters,
                 custom_constructor: None,
                 ident,
             })
         }
+    }
+}
+
+#[derive(Clone)]
+struct ComponentConstructor {
+    constructor_ident: Ident,
+    parameters: Punctuated<Expr, Token![,]>,
+    postfix: Option<TokenStream2>,
+    component_ident: Option<Lit>,
+}
+
+impl Parse for ComponentConstructor {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let constructor_ident: Ident = input.parse()?;
+        let content;
+        parenthesized!(content in input);
+        let parameters = content.parse_terminated(Expr::parse, Token![,])?;
+
+        let (postfix, ident): (Option<TokenStream2>, Option<Lit>) = if input.is_empty() || input.peek(Token![,]) {
+            Ok::<(Option<TokenStream2>, Option<Lit>), syn::Error>((None, None))
+        } else {
+            let mut ident = None;
+            let mut tokens = quote! {};
+
+            let mut tail_getter = |stream: ParseStream| -> syn::Result<()> {
+                while !stream.peek(Token![,]) && !stream.is_empty() {
+                    let token: TokenTree = stream.parse()?;
+                    tokens.extend(token.to_token_stream());
+                }
+                Ok(())
+            };
+
+            let fork = input.fork();
+            // Parse second token in fork to check for ident (constructor.ident("Temp ident"))
+            if let Ok(_) = fork.parse::<Token![.]>() {
+                if let Ok(ident_func_name) = fork.parse::<Ident>() {
+                    if &ident_func_name.to_string() == "ident" {
+                        let ident_buf;
+                        parenthesized!(ident_buf in fork);
+                        ident = Some(ident_buf.parse()?);
+                        tail_getter(&fork)?;
+                    }
+                }
+            } else {
+                tail_getter(&input)?;
+            }
+
+            input.advance_to(&fork);
+
+            Ok((Some(tokens), ident))
+        }?;
+
+        Ok(ComponentConstructor {
+            constructor_ident,
+            parameters,
+            postfix,
+            component_ident: ident,
+        })
+    }
+}
+
+impl quote::ToTokens for ComponentConstructor {
+    fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
+        let constructor_ident = &self.constructor_ident;
+        let parameters = &self.parameters;
+        let postfix = &self.postfix;
+        tokens.extend(quote! {
+            #constructor_ident(#parameters)#postfix
+        });
     }
 }
 
@@ -624,87 +711,6 @@ impl Parse for ComputeDescriptor {
         }
 
         Ok(ComputeDescriptor { params, ident })
-    }
-}
-
-struct ComponentConstructor {
-    constructor_ident: Ident,
-    parameters: Punctuated<Expr, Token![,]>,
-    postfix: Option<TokenStream2>,
-    component_ident: Option<Lit>,
-}
-
-impl Parse for ComponentConstructor {
-    fn parse(input: ParseStream) -> syn::Result<Self> {
-        let constructor_ident: Ident = input.parse()?;
-        let content;
-        parenthesized!(content in input);
-        let mut parameters = content.parse_terminated(Expr::parse, Token![,])?;
-
-        let ident_search = parameters
-            .iter()
-            .enumerate()
-            .flat_map(|(i, param)| {
-                if let Expr::Call(ExprCall { func, args, .. }) = param {
-                    if let Expr::Path(ExprPath { path, .. }) = *func.clone() {
-                        if let Some(possible_ident) = path.get_ident() {
-                            if &possible_ident.to_string() == "ident" {
-                                if let Some(Expr::Lit(lit)) = args.first() {
-                                    return Some((i, lit.lit.clone()));
-                                }
-                            }
-                        }
-                    }
-                }
-                None
-            })
-            .next();
-
-        let ident = if let Some((index, ident)) = ident_search {
-            parameters =
-                Punctuated::from_iter(parameters.into_iter().enumerate().flat_map(|(i, param)| {
-                    if i != index {
-                        Some(param)
-                    } else {
-                        None
-                    }
-                }));
-
-            Some(ident)
-        } else {
-            None
-        };
-
-        let postfix: Option<TokenStream2> = if input.is_empty() || input.peek(Token![,]) {
-            None
-        } else {
-            let mut tokens = quote! {};
-
-            while !input.peek(Token![,]) && !input.is_empty() {
-                let token: TokenTree = input.parse()?;
-                tokens.extend(token.to_token_stream());
-            }
-
-            Some(tokens)
-        };
-
-        Ok(ComponentConstructor {
-            constructor_ident,
-            parameters,
-            postfix,
-            component_ident: ident,
-        })
-    }
-}
-
-impl quote::ToTokens for ComponentConstructor {
-    fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
-        let constructor_ident = &self.constructor_ident;
-        let parameters = &self.parameters;
-        let postfix = &self.postfix;
-        tokens.extend(quote! {
-            #constructor_ident(#parameters)#postfix
-        });
     }
 }
 
@@ -1593,15 +1599,16 @@ impl quote::ToTokens for ShaderAttachmentDescriptor {
                         wgpu::TextureUsages::empty()
                     }
                 };
-                    tokens.extend(quote! {
-                v4::ecs::material::ShaderAttachment::Texture(
-                    v4::ecs::material::ShaderTextureAttachment {
-                        texture: #texture,
-                        visibility: #visibility,
-                        extra_usages: #usages,
-                    }
-                )
-            })},
+                tokens.extend(quote! {
+                    v4::ecs::material::ShaderAttachment::Texture(
+                        v4::ecs::material::ShaderTextureAttachment {
+                            texture: #texture,
+                            visibility: #visibility,
+                            extra_usages: #usages,
+                        }
+                    )
+                })
+            }
             ShaderAttachmentDescriptor::Buffer(ShaderBufferAttachmentDescriptor {
                 buffer,
                 visibility,

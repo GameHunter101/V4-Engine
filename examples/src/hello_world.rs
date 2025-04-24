@@ -48,8 +48,8 @@ pub async fn main() {
                 },
             },
             components: [
-                MeshComponent<Vertex>::from_obj("assets/models/basic_cube.obj", true).await.unwrap(),
-                TransformComponent(position: Vector3::new(0.0, 0.0, 2.0)),
+                TransformComponent(position: Vector3::new(0.0, 0.0, 2.0), ident: "thing"),
+                MeshComponent<Vertex>::from_obj("assets/models/basic_cube.obj", true).ident("unused ident").await.unwrap(),
             ]
         },
         "cam_ent" = {

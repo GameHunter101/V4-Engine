@@ -85,7 +85,12 @@ impl<V: VertexDescriptor> MeshComponent<V> {
             vertex_buffer: None,
             index_buffer: None,
             enabled_models: (0..model_count).collect(),
-            id: ComponentId::MAX,
+            id: {
+                use std::hash::{Hash, Hasher};
+                let mut hasher = std::hash::DefaultHasher::new();
+                std::time::Instant::now().hash(&mut hasher);
+                hasher.finish()
+            },
             parent_entity_id: 0,
             is_initialized: false,
             is_enabled,
@@ -131,7 +136,7 @@ impl<V: VertexDescriptor + Send + Sync> ComponentSystem for MeshComponent<V> {
                         device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                             label: Some(&format!("Component {} | Index Buffer", self.id())),
                             contents: bytemuck::cast_slice(&self.indices[*index]),
-                            usage: wgpu::BufferUsages::INDEX| wgpu::BufferUsages::COPY_DST,
+                            usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
                         })
                     })
                     .collect(),
