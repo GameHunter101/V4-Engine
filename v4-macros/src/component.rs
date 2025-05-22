@@ -6,6 +6,16 @@ use syn::{
     ItemStruct, Meta, MetaNameValue, Token, TypeParam,
 };
 
+// TODO: Default values specified through attributes should have const variables in the builder
+// class created with said default values.
+// const variable name: {member_name}_DEFAULT_VAL
+// const must have type, can probably extract the type while iterating through component members to
+// get the attribute. Store in a tuple array?
+// Scene macro will then check to see if a value was specified for some member. If a value was not
+// specified, then it will use the const default value. If no default value is specified for the
+// member, then there will be a COMPILE TIME ERROR stating that {member_name}_DEFAULT_VAL does not
+// exist
+
 pub fn component_impl(args: TokenStream, item: TokenStream) -> TokenStream {
     let args = parse_macro_input!(args with Punctuated::<Meta, Token![,]>::parse_terminated);
     let rendering_order_expr: Option<Expr> = args
@@ -67,13 +77,12 @@ pub fn component_impl(args: TokenStream, item: TokenStream) -> TokenStream {
                         return quote! {#field_ident: Some(#expr)};
                     } else {
                         return quote! {#field_ident: Some(Default::default())};
-                    }
+                    };
                 } else {
                     panic!("Invalid attribute for field {field_ident}");
                 }
             }
-
-            quote! {#field_ident: None}
+            return quote! {#field_ident: None};
         })
         .collect();
 
@@ -183,6 +192,8 @@ pub fn component_impl(args: TokenStream, item: TokenStream) -> TokenStream {
         }
 
         impl #generics #builder_ident #impl_post_params {
+            // #(#const_defaults)*
+
             #(#builder_methods)*
 
             pub fn enabled(mut self, enabled: bool) -> Self {

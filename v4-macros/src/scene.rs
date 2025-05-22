@@ -1,11 +1,15 @@
 use std::collections::HashMap;
 
-use darling::FromMeta;
-use proc_macro::TokenStream;
 use proc_macro2::{TokenStream as TokenStream2, TokenTree};
 use quote::{format_ident, quote, ToTokens};
 use syn::{
-    braced, bracketed, parenthesized, parse::{discouraged::Speculative, Parse, ParseBuffer, ParseStream}, parse2, parse_macro_input, punctuated::Punctuated, spanned::Spanned, AngleBracketedGenericArguments, Expr, ExprCall, ExprMethodCall, ExprPath, Ident, Lit, LitBool, LitStr, Token
+    braced, bracketed, parenthesized,
+    parse::{discouraged::Speculative, Parse, ParseStream},
+    parse2,
+    punctuated::Punctuated,
+    spanned::Spanned,
+    AngleBracketedGenericArguments, Expr, ExprCall, ExprPath, Ident, Lit, LitBool,
+    LitStr, Token,
 };
 use v4_core::ecs::{component::ComponentId, entity::EntityId};
 
@@ -584,39 +588,40 @@ impl Parse for ComponentConstructor {
         parenthesized!(content in input);
         let parameters = content.parse_terminated(Expr::parse, Token![,])?;
 
-        let (postfix, ident): (Option<TokenStream2>, Option<Lit>) = if input.is_empty() || input.peek(Token![,]) {
-            Ok::<(Option<TokenStream2>, Option<Lit>), syn::Error>((None, None))
-        } else {
-            let mut ident = None;
-            let mut tokens = quote! {};
-
-            let mut tail_getter = |stream: ParseStream| -> syn::Result<()> {
-                while !stream.peek(Token![,]) && !stream.is_empty() {
-                    let token: TokenTree = stream.parse()?;
-                    tokens.extend(token.to_token_stream());
-                }
-                Ok(())
-            };
-
-            let fork = input.fork();
-            // Parse second token in fork to check for ident (constructor.ident("Temp ident"))
-            if let Ok(_) = fork.parse::<Token![.]>() {
-                if let Ok(ident_func_name) = fork.parse::<Ident>() {
-                    if &ident_func_name.to_string() == "ident" {
-                        let ident_buf;
-                        parenthesized!(ident_buf in fork);
-                        ident = Some(ident_buf.parse()?);
-                        tail_getter(&fork)?;
-                    }
-                }
+        let (postfix, ident): (Option<TokenStream2>, Option<Lit>) =
+            if input.is_empty() || input.peek(Token![,]) {
+                Ok::<(Option<TokenStream2>, Option<Lit>), syn::Error>((None, None))
             } else {
-                tail_getter(&input)?;
-            }
+                let mut ident = None;
+                let mut tokens = quote! {};
 
-            input.advance_to(&fork);
+                let mut tail_getter = |stream: ParseStream| -> syn::Result<()> {
+                    while !stream.peek(Token![,]) && !stream.is_empty() {
+                        let token: TokenTree = stream.parse()?;
+                        tokens.extend(token.to_token_stream());
+                    }
+                    Ok(())
+                };
 
-            Ok((Some(tokens), ident))
-        }?;
+                let fork = input.fork();
+                // Parse second token in fork to check for ident (constructor.ident("Temp ident"))
+                if let Ok(_) = fork.parse::<Token![.]>() {
+                    if let Ok(ident_func_name) = fork.parse::<Ident>() {
+                        if &ident_func_name.to_string() == "ident" {
+                            let ident_buf;
+                            parenthesized!(ident_buf in fork);
+                            ident = Some(ident_buf.parse()?);
+                            tail_getter(&fork)?;
+                        }
+                    }
+                } else {
+                    tail_getter(&input)?;
+                }
+
+                input.advance_to(&fork);
+
+                Ok((Some(tokens), ident))
+            }?;
 
         Ok(ComponentConstructor {
             constructor_ident,
