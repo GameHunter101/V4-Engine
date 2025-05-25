@@ -8,9 +8,9 @@ use wgpu::{util::DeviceExt, BufferUsages, VertexAttribute, VertexBufferLayout};
 
 #[component]
 pub struct TransformComponent {
-    position: Vector3<f32>,
     #[default]
     rotation: Rotor3,
+    position: Vector3<f32>,
     #[default(Vector3::new(1.0, 1.0, 1.0))]
     scale: Vector3<f32>,
     #[default(true)]

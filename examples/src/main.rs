@@ -113,7 +113,7 @@ where
 }
 
 fn main() {
-    let test = Comp::builder().foo(2).bar(2).build();
+    let test = Comp::builder().foo(2).bar(2).baz(0.0).build();
     dbg!(test);
     match std::env::args().nth(1) {
         Some(args) => match args.as_str() {
@@ -137,5 +137,116 @@ fn main() {
             }
         },
         None => println!("Please select a example."),
+    }
+}
+
+#[derive(Debug)]
+pub struct CameraComponent {
+    field_of_view: f32,
+    aspect_ratio: f32,
+    near_plane: f32,
+    far_plane: f32,
+    id: v4::ecs::component::ComponentId,
+    parent_entity_id: v4::ecs::entity::EntityId,
+    is_initialized: bool,
+    is_enabled: bool,
+}
+pub struct CameraComponentBuilder<FieldOfView, AspectRatio, NearPlane, FarPlane> {
+    field_of_view: Option<f32>,
+    aspect_ratio: Option<f32>,
+    near_plane: Option<f32>,
+    far_plane: Option<f32>,
+    id: v4::ecs::component::ComponentId,
+    parent_entity_id: v4::ecs::entity::EntityId,
+    is_initialized: bool,
+    is_enabled: bool,
+    _marker: std::marker::PhantomData<(FieldOfView, AspectRatio, NearPlane, FarPlane)>,
+}
+struct Set;
+struct Unset;
+trait HasFieldOfView {}
+trait HasAspectRatio {}
+trait HasNearPlane {}
+trait HasFarPlane {}
+impl HasFieldOfView for Set {}
+impl HasAspectRatio for Set {}
+impl HasNearPlane for Set {}
+impl HasFarPlane for Set {}
+impl<AspectRatio, NearPlane, FarPlane>
+    CameraComponentBuilder<Unset, AspectRatio, NearPlane, FarPlane>
+{
+    fn field_of_view(
+        self,
+        field_of_view: Option<f32>,
+    ) -> CameraComponentBuilder<Set, AspectRatio, NearPlane, FarPlane> {
+        CameraComponentBuilder::<Unset, AspectRatio, NearPlane, FarPlane> {
+            field_of_view: Some(field_of_view),
+            ..self
+        }
+    }
+}
+impl<FieldOfView, NearPlane, FarPlane>
+    CameraComponentBuilder<FieldOfView, Unset, NearPlane, FarPlane>
+{
+    fn aspect_ratio(
+        self,
+        aspect_ratio: f32,
+    ) -> CameraComponentBuilder<FieldOfView, Set, NearPlane, FarPlane> {
+        CameraComponentBuilder::<FieldOfView, Set, NearPlane, FarPlane> {
+            aspect_ratio: Some(aspect_ratio),
+            ..self
+        }
+    }
+}
+impl<FieldOfView, AspectRatio, FarPlane>
+    CameraComponentBuilder<FieldOfView, AspectRatio, Unset, FarPlane>
+{
+    fn near_plane(
+        self,
+        near_plane: Option<f32>,
+    ) -> CameraComponentBuilder<FieldOfView, AspectRatio, Set, FarPlane> {
+        CameraComponentBuilder::<FieldOfView, AspectRatio, Set, FarPlane> {
+            near_plane: Some(near_plane),
+            ..self
+        }
+    }
+}
+impl<FieldOfView, AspectRatio, NearPlane>
+    CameraComponentBuilder<FieldOfView, AspectRatio, NearPlane, Unset>
+{
+    fn far_plane(
+        self,
+        far_plane: Option<f32>,
+    ) -> CameraComponentBuilder<FieldOfView, AspectRatio, NearPlane, Set> {
+        CameraComponentBuilder::<FieldOfView, AspectRatio, NearPlane, Set> {
+            far_plane: Some(far_plane),
+            ..self
+        }
+    }
+}
+impl v4::ecs::component::ComponentDetails for CameraComponent {
+    fn id(&self) -> v4::ecs::component::ComponentId {
+        self.id
+    }
+    fn is_initialized(&self) -> bool {
+        self.is_initialized
+    }
+    fn set_initialized(&mut self) {
+        self.is_initialized = true;
+    }
+    fn parent_entity_id(&self) -> v4::ecs::entity::EntityId {
+        self.parent_entity_id
+    }
+    fn set_parent_entity(&mut self, parent_id: v4::ecs::entity::EntityId) {
+        self.parent_entity_id = parent_id;
+    }
+    fn is_enabled(&self) -> bool {
+        self.is_enabled
+    }
+    fn set_enabled_state(&mut self, enabled_state: bool) {
+        self.is_enabled = enabled_state;
+    }
+    fn rendering_order(&self) -> i32 {
+        0
     }
 }
