@@ -3,8 +3,8 @@ use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::{format_ident, quote, ToTokens};
 use syn::{
-    parse::Parser, parse_macro_input, punctuated::Punctuated, Expr, Field, GenericParam, Ident,
-    ItemStruct, Meta, MetaNameValue, Token, Type, TypeParam,
+    parse::Parser, parse_macro_input, punctuated::Punctuated, Expr, Field, GenericParam, Generics,
+    Ident, ItemStruct, Meta, MetaNameValue, Token, Type, TypeParam,
 };
 
 pub fn component_impl(args: TokenStream, item: TokenStream) -> TokenStream {
@@ -34,7 +34,28 @@ pub fn component_impl(args: TokenStream, item: TokenStream) -> TokenStream {
     let ident = component_struct.ident.clone();
     let generics = component_struct.generics.clone();
 
-    let builder_ident = format_ident!("{}Builder", ident.to_string());
+    let builder_name = format!("{}Builder", ident.to_string());
+    let builder_ident = format_ident!("{}", builder_name);
+
+    let set_type_ident = format_ident!("{builder_name}Set");
+    let set_type = TypeParam {
+        ident: set_type_ident.clone(),
+        attrs: Vec::new(),
+        colon_token: None,
+        bounds: Punctuated::new(),
+        eq_token: None,
+        default: None,
+    };
+
+    let unset_type_ident = format_ident!("{builder_name}Unset");
+    let unset_type = TypeParam {
+        ident: unset_type_ident.clone(),
+        attrs: Vec::new(),
+        colon_token: None,
+        bounds: Punctuated::new(),
+        eq_token: None,
+        default: None,
+    };
 
     let builder_fields_partial: Vec<Field> = component_struct
         .fields
@@ -111,9 +132,9 @@ pub fn component_impl(args: TokenStream, item: TokenStream) -> TokenStream {
             if let Some(attr) = attrs.first() {
                 if attr.path().is_ident("default") {
                     if let Ok(expr) = attr.parse_args::<Expr>() {
-                        return quote! {#field_ident: Some(#expr)};
+                        return quote! {#field_ident: #expr};
                     } else {
-                        return quote! {#field_ident: Some(Default::default())};
+                        return quote! {#field_ident: Default::default()};
                     };
                 } else {
                     panic!("Invalid attribute for field {field_ident}");
@@ -123,49 +144,38 @@ pub fn component_impl(args: TokenStream, item: TokenStream) -> TokenStream {
         })
         .collect();
 
-    // let test = required_fields.iter().map(|field| field.ty.to_token_stream());
-    // panic!("{}", quote!{#(#test),*});
     let builder_required_methods: Vec<TokenStream2> = required_fields.iter().enumerate().map(|(i, field)| {
         let field_ident = field.ident.as_ref().unwrap();
         let original_type_string = field.ty.to_token_stream().to_string();
         let field_type = Type::from_string(&original_type_string[8..original_type_string.len()-1]).unwrap();
 
-        let mut current_generics = generics.clone();
-        let mut counter = 0;
+        let mut current_generics_with_unset = generics.clone();
         for index in 0..builder_required_field_generics.len() {
-            if index != i {
-                current_generics.params.insert(counter, GenericParam::Type(builder_required_field_generics[index].clone()));
-                counter += 1;
+            if index == i {
+                current_generics_with_unset.params.insert(index, GenericParam::Type(unset_type.clone()));
+            } else {
+                current_generics_with_unset.params.insert(index, GenericParam::Type(builder_required_field_generics[index].clone()));
             }
         }
 
-        let mut current_generics_with_unset = generics.clone();
-        current_generics_with_unset.params.extend(
-            builder_required_field_generics
-                .iter()
-                .enumerate()
-                .map(|(index, field)| {
-                    if index == i {
-                        GenericParam::Type(TypeParam::from_string("Unset").unwrap())
-                    } else {
-                        GenericParam::Type(field.clone())
-                    }
-                }),
-        );
+        let mut current_generics_with_set = current_generics_with_unset.clone();
+        current_generics_with_set.params.iter_mut().for_each(|generic| if let GenericParam::Type(type_param) = generic {
+            if type_param.ident.to_string() == unset_type_ident.to_string() {
+                *type_param = set_type.clone();
+            }
+            type_param.bounds = Punctuated::new();
+        });
 
-        let mut current_generics_with_set = generics.clone();
-        current_generics_with_set.params.extend(
-            builder_required_field_generics
-                .iter()
-                .enumerate()
-                .map(|(index, field)| {
-                    if index == i {
-                        GenericParam::Type(TypeParam::from_string("Set").unwrap())
-                    } else {
-                        GenericParam::Type(field.clone())
-                    }
-                }),
-        );
+        let mut current_generics = current_generics_with_unset.clone();
+        current_generics.params = Punctuated::from_iter(current_generics.params.into_iter().filter(|generic| if let GenericParam::Type(type_param) = generic {
+            type_param.ident.to_string() != unset_type_ident.to_string()
+        } else {
+                true
+            }));
+
+        current_generics_with_unset.params.iter_mut().for_each(|generic| if let GenericParam::Type(type_param) = generic {
+            type_param.bounds = Punctuated::new();
+        });
 
         let required_field_names: Vec<&&Ident> = required_field_names
             .iter()
@@ -174,14 +184,12 @@ pub fn component_impl(args: TokenStream, item: TokenStream) -> TokenStream {
 
         quote! {
             impl #current_generics #builder_ident #current_generics_with_unset {
-                fn #field_ident(self, #field_ident: #field_type) -> #builder_ident #current_generics_with_set {
+                pub fn #field_ident(self, #field_ident: #field_type) -> #builder_ident #current_generics_with_set {
                     #builder_ident {
                         #field_ident: Some(#field_ident),
                         #(#required_field_names: self.#required_field_names,)*
                         #(#optional_field_names: self.#optional_field_names,)*
                         id: self.id,
-                        parent_entity_id: self.parent_entity_id,
-                        is_initialized: self.is_initialized,
                         is_enabled: self.is_enabled,
                         _marker: std::marker::PhantomData,
                     }
@@ -190,14 +198,41 @@ pub fn component_impl(args: TokenStream, item: TokenStream) -> TokenStream {
         }
     }).collect();
 
+    let optional_builder_generics = Generics {
+        params: builder_required_field_generics
+            .iter()
+            .map(|type_param| GenericParam::Type(type_param.clone()))
+            .chain(generics.params.iter().cloned())
+            .collect(),
+        ..generics.clone()
+    };
+
+    let optional_builder_generics_no_bounds = Generics {
+        params: optional_builder_generics
+            .params
+            .iter()
+            .map(|generic| {
+                if let GenericParam::Type(type_param) = generic {
+                    GenericParam::Type(TypeParam {
+                        bounds: Punctuated::new(),
+                        ..type_param.clone()
+                    })
+                } else {
+                    generic.clone()
+                }
+            })
+            .collect(),
+        ..generics.clone()
+    };
+
     let builder_optional_methods: Vec<TokenStream2> = optional_fields
         .iter()
         .map(|field| {
-            let field_ident = field.ident.as_ref().unwrap().to_string();
+            let field_ident = field.ident.as_ref().unwrap();
             let field_type = &field.ty;
 
             quote! {
-                fn #field_ident(self, #field_ident: #field_type) -> Self {
+                pub fn #field_ident(self, #field_ident: #field_type) -> Self {
                     Self { #field_ident, ..self }
                 }
             }
@@ -216,16 +251,36 @@ pub fn component_impl(args: TokenStream, item: TokenStream) -> TokenStream {
         .params
         .extend(required_generics.iter().flat_map(|generic| {
             if let GenericParam::Type(_) = generic {
-                Some(GenericParam::Type(TypeParam::from_string("Unset").unwrap()))
+                Some(GenericParam::Type(unset_type.clone()))
             } else {
                 None
             }
         }));
 
     let mut builder_generics = generics.clone();
-    builder_generics.params.extend(required_generics);
+    for i in 0..required_generics.len() {
+        builder_generics
+            .params
+            .insert(i, required_generics[i].clone());
+    }
 
-    let added_fields = [
+    let mut builder_all_unset_generics = generics.clone();
+    for i in 0..required_generics.len() {
+        builder_all_unset_generics.params.insert(
+            i,
+            GenericParam::Type(unset_type.clone()),
+        );
+    }
+    builder_all_unset_generics
+        .params
+        .iter_mut()
+        .for_each(|generic| {
+            if let GenericParam::Type(type_param) = generic {
+                type_param.bounds = Punctuated::new();
+            }
+        });
+
+    let added_component_fields = [
         Field::parse_named
             .parse2(quote! {
                 id: v4::ecs::component::ComponentId
@@ -248,11 +303,29 @@ pub fn component_impl(args: TokenStream, item: TokenStream) -> TokenStream {
             .unwrap(),
     ];
 
+    let added_builder_fields = [
+        Field::parse_named
+            .parse2(quote! {
+                id: v4::ecs::component::ComponentId
+            })
+            .unwrap(),
+        Field::parse_named
+            .parse2(quote! {
+                is_enabled: bool
+            })
+            .unwrap(),
+        Field::parse_named
+            .parse2(quote! {
+                _marker: std::marker::PhantomData<(#builder_required_field_generics_stream)>
+            })
+            .unwrap(),
+    ];
+
     if let syn::Fields::Named(fields) = &mut component_struct.fields {
         fields
             .named
             .extend(Punctuated::<Field, Token![,]>::from_iter(
-                added_fields.clone().into_iter(),
+                added_component_fields.clone().into_iter(),
             ));
     }
 
@@ -289,20 +362,14 @@ pub fn component_impl(args: TokenStream, item: TokenStream) -> TokenStream {
         quote! {<#impl_post_params>}
     };
 
-    let marker = Field::parse_named
-        .parse2(quote! {
-            _marker: std::marker::PhantomData<(#builder_required_field_generics_stream)>
-        })
-        .unwrap();
-
     let builder_fields = builder_fields_partial
+        .clone()
         .into_iter()
         .map(|field| Field {
             attrs: Vec::new(),
             ..field
         })
-        .chain(added_fields.into_iter())
-        .chain(Some(marker).into_iter());
+        .chain(added_builder_fields.into_iter());
 
     let syn::Fields::Named(comp_fields) = &component_struct.fields else {
         panic!("Unnamed component is invalid");
@@ -315,6 +382,7 @@ pub fn component_impl(args: TokenStream, item: TokenStream) -> TokenStream {
             brace_token: comp_fields.brace_token,
             named: Punctuated::from_iter(builder_fields),
         }),
+        vis: syn::Visibility::Public(syn::token::Pub::default()),
         ..component_struct.clone()
     };
 
@@ -322,73 +390,73 @@ pub fn component_impl(args: TokenStream, item: TokenStream) -> TokenStream {
         #[derive(Debug)]
         #component_struct
 
-        #builder_struct
+            #builder_struct
 
-        struct Set;
-        struct Unset;
+            pub struct #set_type_ident;
+            pub struct #unset_type_ident;
 
-        #(trait #required_field_trait_idents {})*
+            #(pub trait #required_field_trait_idents {})*
 
-        #(impl #required_field_trait_idents for Set {})*
+            #(impl #required_field_trait_idents for #set_type_ident {})*
 
-        #(#builder_required_methods)*
+            #(#builder_required_methods)*
 
-        /* impl<#builder_required_field_generics_stream> #builder_ident #builder_generics {
-            #(#builder_optional_methods)*
+            impl #optional_builder_generics #builder_ident #optional_builder_generics_no_bounds {
+                #(#builder_optional_methods)*
 
-            pub fn enabled(self, enabled: bool) -> Self {
-                Self {enabled, ..self}
-            }
+                pub fn is_enabled(self, is_enabled: bool) -> Self {
+                    Self {is_enabled, ..self}
+                }
 
-            pub fn id(self, id: v4::ecs::component::ComponentId) -> Self {
-                Self {id, ..self}
-            }
-        }
-
-        impl<#builder_required_field_generics_stream> #builder_ident #builder_generics
-        where
-            #(#builder_required_field_generics: #required_field_trait_idents,)* {
-            fn build(self) -> #ident #impl_post_params {
-                use std::hash::{DefaultHasher, Hash, Hasher};
-
-                let mut hasher = DefaultHasher::new();
-
-                std::time::Instant::now().hash(&mut hasher);
-
-                let id = hasher.finish();
-
-                #ident {
-                    #(#required_field_names: self.#required_field_names.unwrap(),)*
-                    #(#optional_field_names: self.#optional_field_names,)*
-                    id:
-                    if self.id == 0 {
-                        id
-                    } else {
-                        self.id
-                    },
-                    parent_entity_id: 0,
-                    is_initialized: false,
-                    is_enabled: self.enabled,
+                pub fn id(self, id: v4::ecs::component::ComponentId) -> Self {
+                    Self {id, ..self}
                 }
             }
-        }
 
-        impl #generics Default for #builder_ident #impl_post_params {
-            fn default() -> Self {
-                Self {
-                    #(#field_defaults,)*
-                    enabled: true,
-                    id: 0,
-                    _marker: std::marker::PhantomData,
+            impl #optional_builder_generics #builder_ident #optional_builder_generics_no_bounds
+            where
+                #(#builder_required_field_generics: #required_field_trait_idents,)* {
+                pub fn build(self) -> #ident #impl_post_params {
+                    use std::hash::{DefaultHasher, Hash, Hasher};
+
+                    let mut hasher = DefaultHasher::new();
+
+                    std::time::Instant::now().hash(&mut hasher);
+
+                    let id = hasher.finish();
+
+                    #ident {
+                        #(#required_field_names: self.#required_field_names.unwrap(),)*
+                        #(#optional_field_names: self.#optional_field_names,)*
+                        id:
+                        if self.id == 0 {
+                            id
+                        } else {
+                            self.id
+                        },
+                        parent_entity_id: 0,
+                        is_initialized: false,
+                        is_enabled: self.is_enabled,
+                    }
                 }
             }
-        }
 
-        impl #generics #ident #impl_post_params {
-            pub fn builder() -> #builder_ident #builder_generics_unset {
-                #builder_ident::default()
+            impl #generics Default for #builder_ident #builder_all_unset_generics {
+                fn default() -> Self {
+                    Self {
+                        #(#field_defaults,)*
+                        is_enabled: true,
+                        id: 0,
+                        _marker: std::marker::PhantomData,
+                    }
+                }
             }
-        } */
+
+            impl #generics #ident #impl_post_params {
+                pub fn builder() -> #builder_ident #builder_all_unset_generics {
+                    #builder_ident::default()
+                }
+            }
 
         impl #generics v4::ecs::component::ComponentDetails for #ident #impl_post_params {
             fn id(&self) -> v4::ecs::component::ComponentId {

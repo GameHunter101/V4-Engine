@@ -2,7 +2,7 @@ use std::fmt::Debug;
 
 use crate::v4;
 use bytemuck::{Pod, Zeroable};
-use v4_core::ecs::component::{Component, ComponentDetails, ComponentId, ComponentSystem};
+use v4_core::ecs::component::{Component, ComponentDetails, ComponentSystem};
 use v4_macros::component;
 use wgpu::{util::DeviceExt, Buffer, Device, Queue, RenderPass, VertexAttribute};
 
