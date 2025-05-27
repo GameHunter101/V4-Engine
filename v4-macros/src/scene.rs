@@ -8,8 +8,7 @@ use syn::{
     parse2,
     punctuated::Punctuated,
     spanned::Spanned,
-    AngleBracketedGenericArguments, Expr, ExprCall, ExprPath, Ident, Lit, LitBool,
-    LitStr, Token,
+    AngleBracketedGenericArguments, Expr, ExprCall, ExprPath, Ident, Lit, LitBool, LitStr, Token,
 };
 use v4_core::ecs::{component::ComponentId, entity::EntityId};
 
@@ -95,6 +94,7 @@ impl Parse for SceneDescriptor {
         let mut pipelines = Vec::new();
 
         let mut current_entity_id = 1;
+        let mut current_component_id = 1;
         let transformed_entities = entities.into_iter().map(|entity| {
             let material_id = if let Some(material) = entity.material {
                 Some(material.initialize_and_get_id(current_entity_id, input, &mut idents, &mut pipelines, &mut materials)?)
@@ -141,8 +141,15 @@ impl Parse for SceneDescriptor {
 
             for component in &transformed_entity.components {
                 if let Some(ident) = &component.ident {
-                    idents.insert(ident.clone(), Id::Component(current_entity_id));
-                    current_entity_id += 1;
+                    idents.insert(ident.clone(), Id::Component(current_component_id));
+                    current_component_id += 1;
+                }
+            }
+
+            for compute in &transformed_entity.computes {
+                if let Some(ident) = &compute.ident {
+                    idents.insert(ident.clone(), Id::Component(current_component_id));
+                    current_component_id += 1;
                 }
             }
 
@@ -694,31 +701,35 @@ impl Parse for ComputeDescriptor {
             .into_iter()
             .collect();
 
-        let ident = params
+        let ident_and_index = params
             .iter()
-            .filter(|param| &param.ident.to_string() == "ident" && param.value.is_some())
-            .flat_map(|param| {
+            .enumerate()
+            .filter(|(_, param)| &param.ident.to_string() == "ident" && param.value.is_some())
+            .flat_map(|(i, param)| {
                 if let SimpleFieldValue::Literal(ident) = param.value.as_ref().unwrap() {
-                    Some(ident.clone())
+                    Some((i, ident.clone()))
                 } else {
                     None
                 }
             })
             .next();
 
-        if let Some(ident) = &ident {
+        if let Some((ident_index, _)) = &ident_and_index {
             params.remove(
-                params
-                    .iter()
-                    .position(|param| param.value == Some(SimpleFieldValue::Literal(ident.clone())))
-                    .unwrap(),
+                *ident_index, /* params
+                             .iter()
+                             .position(|param| param.value == Some(SimpleFieldValue::Literal(ident.clone())))
+                             .unwrap(), */
             );
         }
+
+        let ident = ident_and_index.into_iter().map(|(_, ident)| ident).next();
 
         Ok(ComputeDescriptor { params, ident })
     }
 }
 
+#[derive(Debug)]
 struct SimpleField {
     ident: Ident,
     value: Option<SimpleFieldValue>,

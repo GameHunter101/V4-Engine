@@ -1,6 +1,5 @@
 use v4::{
-    ecs::{compute::Compute, material::{ShaderAttachment, ShaderBufferAttachment}},
-    scene, V4,
+    builtin_components::camera_component::CameraComponent, ecs::{compute::Compute, material::{ShaderAttachment, ShaderBufferAttachment}}, scene, V4
 };
 
 #[tokio::main]
@@ -33,8 +32,9 @@ pub async fn main() {
                         )),
                     shader_path: "shaders/compute/compute.wgsl",
                     workgroup_counts: (8, 1, 1),
+                    ident: "temp"
                 ),
-            ]
+            ],
         },
     }
 
