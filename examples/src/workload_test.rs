@@ -1,7 +1,7 @@
 use std::{collections::HashMap, ops::Range};
 
 use v4::{
-    builtin_actions::{WorkloadAction, WorkloadOutputFreeAction},
+    builtin_actions::{CreateEntityAction, WorkloadAction, WorkloadOutputFreeAction},
     component,
     ecs::{
         component::{ComponentDetails, ComponentId, ComponentSystem},
@@ -49,6 +49,7 @@ impl ComponentSystem for WorkloadTesterComponent {
     fn initialize(&mut self, _device: &wgpu::Device) -> v4::ecs::actions::ActionQueue {
         self.initialized_time = std::time::Instant::now();
         self.set_initialized();
+        println!("Initialized!");
         Vec::new()
     }
 
@@ -67,7 +68,6 @@ impl ComponentSystem for WorkloadTesterComponent {
         _active_camera: Option<ComponentId>,
     ) -> v4::ecs::actions::ActionQueue {
         if self.initialized_time.elapsed().as_secs_f32() % 1.0 <= 0.01 {
-            // println!("Creating workload");
             return vec![Box::new(WorkloadAction(
                 self.id(),
                 Box::pin(Self::create_workload(self.duration)),
@@ -83,6 +83,21 @@ impl ComponentSystem for WorkloadTesterComponent {
                 );
                 return vec![Box::new(WorkloadOutputFreeAction(self.id(), 0))];
             }
+        }
+
+        if self.initialized_time.elapsed().as_secs_f32() >= 1.0 {
+            return vec![Box::new(CreateEntityAction {
+                entity_parent_id: Some(self.parent_entity_id()),
+                components: vec![Box::new(
+                    WorkloadTesterComponent::builder()
+                        .initialized_time(std::time::Instant::now())
+                        .duration(self.duration)
+                        .build(),
+                )],
+                computes: Vec::new(),
+                active_material: None,
+                is_enabled: true,
+            })];
         }
         Vec::new()
     }

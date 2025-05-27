@@ -1,5 +1,9 @@
 use v4::{
-    builtin_components::camera_component::CameraComponent, ecs::{compute::Compute, material::{ShaderAttachment, ShaderBufferAttachment}}, scene, V4
+    ecs::{
+        compute::Compute,
+        material::{ShaderAttachment, ShaderBufferAttachment},
+    },
+    scene, V4,
 };
 
 #[tokio::main]
@@ -22,7 +26,7 @@ pub async fn main() {
                             wgpu::BufferUsages::empty(),
                         ))
                     ],
-                    output: 
+                    output:
                         ShaderAttachment::Buffer(ShaderBufferAttachment::new(
                             device,
                             bytemuck::cast_slice(&[0.0_f32,0.0,0.0,0.0, 0.0, 0.0, 0.0, 0.0]),
@@ -34,7 +38,7 @@ pub async fn main() {
                     workgroup_counts: (8, 1, 1),
                     ident: "temp"
                 ),
-            ],
+            ]
         },
     }
 

@@ -111,20 +111,38 @@ impl Scene {
         self.workload_output_receiver = Some(workload_output_receiver);
         self.engine_action_sender = Some(engine_action_sender);
 
-        let action_queue: ActionQueue = self
+        self.initialize_components(device, queue).await;
+    }
+
+    async fn initialize_components(&mut self, device: &Device, queue: &Queue) {
+        let comp_action_queue: ActionQueue = self
             .components
             .iter_mut()
+            .filter(|comp| !comp.is_initialized())
             .flat_map(|comp| comp.initialize(device))
             .collect();
+
+        let mat_action_queue: ActionQueue = self
+            .materials
+            .iter_mut()
+            .filter(|mat| !mat.is_initialized())
+            .flat_map(|mat| mat.initialize(device))
+            .collect();
+
+        let compute_action_queue: ActionQueue = self
+            .computes
+            .iter_mut()
+            .filter(|compute| !compute.is_initialized())
+            .flat_map(|compute| compute.initialize(device))
+            .collect();
+
+        let action_queue: ActionQueue = comp_action_queue
+            .into_iter()
+            .chain(mat_action_queue.into_iter())
+            .chain(compute_action_queue.into_iter())
+            .collect();
+
         self.execute_action_queue(action_queue, device, queue).await;
-
-        for material in &mut self.materials {
-            material.initialize(device);
-        }
-
-        for compute in &mut self.computes {
-            compute.initialize(device);
-        }
     }
 
     pub async fn update(
@@ -211,6 +229,8 @@ impl Scene {
             .collect();
 
         self.execute_action_queue(action_queue, device, queue).await;
+
+        self.initialize_components(device, queue).await;
     }
 
     pub fn execute_computes(&self, device: &Device, queue: &Queue) {
