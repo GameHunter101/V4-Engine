@@ -9,12 +9,7 @@ pub(crate) mod v4 {
     pub(crate) mod ecs {
         pub(crate) use v4_core::ecs::*;
     }
-    pub struct Set;
-    pub struct Unset;
 }
-
-pub struct Set;
-pub struct Unset;
 
 pub mod builtin_actions;
 
