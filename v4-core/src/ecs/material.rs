@@ -196,6 +196,10 @@ impl Material {
         })
     }
 
+    pub fn attach_entity(&mut self, entity_id: EntityId) {
+        self.entities_attached.push(entity_id);
+    }
+
     pub fn bind_group_layouts(&self) -> &[BindGroupLayout] {
         self.bind_group_layouts.as_ref()
     }

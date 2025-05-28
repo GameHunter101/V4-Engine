@@ -459,6 +459,16 @@ fn main(input: VertexInput) -> VertexOutput {
             id,
             self.components.len()..(self.components.len() + components.len()),
         );
+
+        if let Some(mat_id) = material {
+            let material = self
+                .materials
+                .iter_mut()
+                .find(|mat| mat.id() == mat_id)
+                .expect(&format!("The specified material ID ({mat_id}) is invalid"));
+            material.attach_entity(id);
+        }
+
         self.components.append(&mut components);
         self.computes.extend(computes);
 
