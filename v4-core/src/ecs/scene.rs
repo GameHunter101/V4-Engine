@@ -142,7 +142,7 @@ impl Scene {
             .chain(compute_action_queue.into_iter())
             .collect();
 
-        self.execute_action_queue(action_queue, device, queue).await;
+        Box::pin(self.execute_action_queue(action_queue, device, queue)).await;
     }
 
     pub async fn update(
@@ -229,8 +229,6 @@ impl Scene {
             .collect();
 
         self.execute_action_queue(action_queue, device, queue).await;
-
-        self.initialize_components(device, queue).await;
     }
 
     pub fn execute_computes(&self, device: &Device, queue: &Queue) {
@@ -510,8 +508,13 @@ fn main(input: VertexInput) -> VertexOutput {
         device: &Device,
         queue: &Queue,
     ) {
+        let len = action_queue.len();
         for action in action_queue {
             action.execute_async(self, device, queue).await;
+        }
+
+        if len != 0 {
+            self.initialize_components(device, queue).await;
         }
     }
 
