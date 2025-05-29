@@ -59,7 +59,7 @@ pub async fn main() {
                         },
                     ]],
                     indices: vec![vec![0,1,2,0,2,3]],
-                    enabled_models: vec![0],
+                    enabled_models: vec![(0, None)],
                 ),
             ]
         }

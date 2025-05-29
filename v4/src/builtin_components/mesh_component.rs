@@ -1,4 +1,4 @@
-use std::fmt::Debug;
+use std::{fmt::Debug, ops::Range};
 
 use crate::v4;
 use bytemuck::{Pod, Zeroable};
@@ -23,16 +23,19 @@ pub trait VertexDescriptor: Debug + Pod + Zeroable {
     fn from_pos_normal_coords(pos: Vec<f32>, normal: Vec<f32>, tex_coords: Vec<f32>) -> Self;
 }
 
+/// When specifying `enabled_models`, it is possible to specify the byte range in the vertex buffer
+/// from which to draw. The number of elements in `enabled_models` dictates the number of models
+/// and consequently the number of draw calls
 #[component(rendering_order = 500)]
 pub struct MeshComponent<V: VertexDescriptor> {
     vertices: Vec<Vec<V>>,
     #[default]
     indices: Vec<Vec<u32>>,
     #[default]
-    vertex_buffer: Option<Vec<Buffer>>,
+    vertex_buffers: Option<Vec<Buffer>>,
     #[default]
-    index_buffer: Option<Vec<Buffer>>,
-    enabled_models: Vec<usize>,
+    index_buffers: Option<Vec<Buffer>>,
+    enabled_models: Vec<(usize, Option<Range<u64>>)>,
 }
 
 impl<V: VertexDescriptor> MeshComponent<V> {
@@ -82,9 +85,9 @@ impl<V: VertexDescriptor> MeshComponent<V> {
         Ok(Self {
             vertices,
             indices,
-            vertex_buffer: None,
-            index_buffer: None,
-            enabled_models: (0..model_count).collect(),
+            vertex_buffers: None,
+            index_buffers: None,
+            enabled_models: (0..model_count).map(|i| (i, None)).collect(),
             id: {
                 use std::hash::{Hash, Hasher};
                 let mut hasher = std::hash::DefaultHasher::new();
@@ -97,29 +100,29 @@ impl<V: VertexDescriptor> MeshComponent<V> {
         })
     }
 
-    pub fn vertex_buffer(&self) -> Option<&Vec<Buffer>> {
-        self.vertex_buffer.as_ref()
+    pub fn vertex_buffers(&self) -> Option<&Vec<Buffer>> {
+        self.vertex_buffers.as_ref()
     }
 
-    pub fn index_buffer(&self) -> Option<&Vec<Buffer>> {
-        self.index_buffer.as_ref()
+    pub fn index_buffers(&self) -> Option<&Vec<Buffer>> {
+        self.index_buffers.as_ref()
     }
 
-    pub fn enabled_models(&self) -> &[usize] {
+    pub fn enabled_models(&self) -> &[(usize, Option<Range<u64>>)] {
         &self.enabled_models
     }
 
-    pub fn enabled_models_mut(&mut self) -> &mut Vec<usize> {
+    pub fn enabled_models_mut(&mut self) -> &mut Vec<(usize, Option<Range<u64>>)> {
         &mut self.enabled_models
     }
 }
 
 impl<V: VertexDescriptor + Send + Sync> ComponentSystem for MeshComponent<V> {
     fn initialize(&mut self, device: &Device) -> v4_core::ecs::actions::ActionQueue {
-        self.vertex_buffer = Some(
+        self.vertex_buffers = Some(
             self.enabled_models
                 .iter()
-                .map(|index| {
+                .map(|(index, _)| {
                     device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                         label: Some(&format!("Component {} | Vertex Buffer", self.id())),
                         contents: bytemuck::cast_slice(&self.vertices[*index]),
@@ -129,10 +132,10 @@ impl<V: VertexDescriptor + Send + Sync> ComponentSystem for MeshComponent<V> {
                 .collect(),
         );
         if !self.indices.is_empty() {
-            self.index_buffer = Some(
+            self.index_buffers = Some(
                 self.enabled_models
                     .iter()
-                    .map(|index| {
+                    .map(|(index, _)| {
                         device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                             label: Some(&format!("Component {} | Index Buffer", self.id())),
                             contents: bytemuck::cast_slice(&self.indices[*index]),
@@ -154,15 +157,22 @@ impl<V: VertexDescriptor + Send + Sync> ComponentSystem for MeshComponent<V> {
         render_pass: &mut RenderPass,
         _other_components: &[&Component],
     ) {
-        for index in &self.enabled_models {
+        for (index, range_opt) in &self.enabled_models {
             render_pass.set_vertex_buffer(
                 0,
-                self.vertex_buffer
-                    .as_ref()
-                    .expect("Attempted to render an uninitialized mesh.")[*index]
-                    .slice(..),
+                if let Some(range) = range_opt {
+                    self.vertex_buffers
+                        .as_ref()
+                        .expect("Attempted to render an uninitialized mesh.")[*index]
+                        .slice(range.clone())
+                } else {
+                    self.vertex_buffers
+                        .as_ref()
+                        .expect("Attempted to render an uninitialized mesh.")[*index]
+                        .slice(..)
+                },
             );
-            if let Some(index_buffers) = &self.index_buffer {
+            if let Some(index_buffers) = &self.index_buffers {
                 render_pass
                     .set_index_buffer(index_buffers[*index].slice(..), wgpu::IndexFormat::Uint32);
                 render_pass.draw_indexed(0..(self.indices[*index].len() as u32), 0, 0..1);
