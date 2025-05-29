@@ -23,7 +23,7 @@ pub trait VertexDescriptor: Debug + Pod + Zeroable {
     fn from_pos_normal_coords(pos: Vec<f32>, normal: Vec<f32>, tex_coords: Vec<f32>) -> Self;
 }
 
-/// When specifying `enabled_models`, it is possible to specify the byte range in the vertex buffer
+/// When specifying `enabled_models`, it is possible to specify the vertex range in the vertex buffer
 /// from which to draw. The number of elements in `enabled_models` dictates the number of models
 /// and consequently the number of draw calls
 #[component(rendering_order = 500)]
@@ -161,10 +161,12 @@ impl<V: VertexDescriptor + Send + Sync> ComponentSystem for MeshComponent<V> {
             render_pass.set_vertex_buffer(
                 0,
                 if let Some(range) = range_opt {
+                    let byte_range =
+                        (range.start * size_of::<V>() as u64)..(range.end * size_of::<V>() as u64);
                     self.vertex_buffers
                         .as_ref()
                         .expect("Attempted to render an uninitialized mesh.")[*index]
-                        .slice(range.clone())
+                        .slice(byte_range)
                 } else {
                     self.vertex_buffers
                         .as_ref()
@@ -177,7 +179,14 @@ impl<V: VertexDescriptor + Send + Sync> ComponentSystem for MeshComponent<V> {
                     .set_index_buffer(index_buffers[*index].slice(..), wgpu::IndexFormat::Uint32);
                 render_pass.draw_indexed(0..(self.indices[*index].len() as u32), 0, 0..1);
             } else {
-                render_pass.draw(0..self.vertices[*index].len() as u32, 0..1);
+                render_pass.draw(
+                    if let Some(range) = range_opt {
+                        (range.start as u32)..(range.end as u32)
+                    } else {
+                        0..self.vertices[*index].len() as u32
+                    },
+                    0..1,
+                );
             }
         }
     }
