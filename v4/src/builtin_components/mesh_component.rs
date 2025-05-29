@@ -181,7 +181,7 @@ impl<V: VertexDescriptor + Send + Sync> ComponentSystem for MeshComponent<V> {
             } else {
                 render_pass.draw(
                     if let Some(range) = range_opt {
-                        (range.start as u32)..(range.end as u32)
+                        0..(range.end - range.start) as u32
                     } else {
                         0..self.vertices[*index].len() as u32
                     },
