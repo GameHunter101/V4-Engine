@@ -1,12 +1,7 @@
-use std::{collections::HashMap, ops::Range};
-
 use v4::{
     builtin_actions::UpdateTextComponentAction,
     component,
-    ecs::{
-        component::{ComponentDetails, ComponentId, ComponentSystem},
-        entity::{Entity, EntityId},
-    },
+    ecs::component::{ComponentDetails, ComponentId, ComponentSystem, UpdateParams},
     engine_management::font_management::{TextComponentProperties, TextDisplayInfo},
     scene, V4,
 };
@@ -72,17 +67,7 @@ impl ComponentSystem for TextComponent {
 
     async fn update(
         &mut self,
-        _device: &wgpu::Device,
-        _queue: &wgpu::Queue,
-        input_manager: &winit_input_helper::WinitInputHelper,
-        _other_components: &[&mut v4::ecs::component::Component],
-        _computes: &[v4::ecs::compute::Compute],
-        _materials: &[&mut v4::ecs::material::Material],
-        _engine_details: &v4::EngineDetails,
-        _workload_outputs: &HashMap<ComponentId, Vec<v4::ecs::scene::WorkloadOutput>>,
-        _entities: &HashMap<EntityId, Entity>,
-        _entity_component_groups: HashMap<EntityId, Range<usize>>,
-        _active_camera: Option<ComponentId>,
+        UpdateParams { input_manager, .. }: UpdateParams<'_>,
     ) -> v4::ecs::actions::ActionQueue {
         let text = input_manager.text();
 
@@ -125,17 +110,7 @@ impl ComponentSystem for TextComponent {
 impl ComponentSystem for ToggleComponent {
     async fn update(
         &mut self,
-        _device: &wgpu::Device,
-        _queue: &wgpu::Queue,
-        input_manager: &winit_input_helper::WinitInputHelper,
-        _other_components: &[&mut v4::ecs::component::Component],
-        _computes: &[v4::ecs::compute::Compute],
-        _materials: &[&mut v4::ecs::material::Material],
-        _engine_details: &v4::EngineDetails,
-        _workload_outputs: &HashMap<ComponentId, Vec<v4::ecs::scene::WorkloadOutput>>,
-        _entities: &HashMap<EntityId, Entity>,
-        _entity_component_groups: HashMap<EntityId, Range<usize>>,
-        _active_camera: Option<ComponentId>,
+        UpdateParams { input_manager, .. }: UpdateParams<'_>,
     ) -> v4::ecs::actions::ActionQueue {
         let text = input_manager.text();
 

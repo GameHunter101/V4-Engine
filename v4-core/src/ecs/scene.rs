@@ -203,17 +203,19 @@ impl Scene {
                     scope.spawn(async {
                         current_component
                             .update(
-                                device,
-                                queue,
-                                input_manager,
-                                &other_components,
-                                computes,
-                                &all_materials,
-                                engine_details,
-                                workload_outputs,
-                                entities,
-                                entity_component_groupings,
-                                active_camera,
+                                super::component::UpdateParams {
+                                    device,
+                                    queue,
+                                    input_manager,
+                                    other_components: &other_components,
+                                    computes,
+                                    materials: &all_materials,
+                                    engine_details,
+                                    workload_outputs,
+                                    entities,
+                                    entity_component_groupings,
+                                    active_camera,
+                                },
                             )
                             .await
                     });
@@ -278,19 +280,19 @@ impl Scene {
                 let entity_component_groupings = self.entity_component_groupings.clone();
                 scope.spawn(async {
                     current_material
-                        .update(
+                        .update(super::component::UpdateParams {
                             device,
                             queue,
                             input_manager,
-                            &all_components,
+                            other_components: &all_components,
                             computes,
-                            &other_materials,
+                            materials: &other_materials,
                             engine_details,
                             workload_outputs,
                             entities,
                             entity_component_groupings,
                             active_camera,
-                        )
+                        })
                         .await
                 });
             });

@@ -1,4 +1,4 @@
-use std::{collections::HashMap, ops::Range};
+use std::ops::Range;
 
 use wgpu::{
     util::DeviceExt, BindGroup, BindGroupLayout, Buffer, CommandEncoder, Device, Queue,
@@ -12,8 +12,8 @@ use crate::{
 
 use super::{
     actions::ActionQueue,
-    component::{Component, ComponentDetails, ComponentId, ComponentSystem},
-    entity::{Entity, EntityId},
+    component::{Component, ComponentDetails, ComponentId, ComponentSystem, UpdateParams},
+    entity::EntityId,
 };
 
 #[derive(Debug)]
@@ -303,19 +303,12 @@ impl ComponentSystem for Material {
 
     async fn update(
         &mut self,
-        _device: &Device,
-        _queue: &Queue,
-        _input_manager: &winit_input_helper::WinitInputHelper,
-        _other_components: &[&mut crate::ecs::component::Component],
-        _computes: &[super::compute::Compute],
-        _materials: &[&mut Material],
-        _engine_details: &crate::EngineDetails,
-        _workload_outputs: &HashMap<ComponentId, Vec<crate::ecs::scene::WorkloadOutput>>,
-        _entities: &HashMap<EntityId, Entity>,
-        entity_component_groups: HashMap<EntityId, Range<usize>>,
-        _active_camera: Option<ComponentId>,
+        UpdateParams {
+            entity_component_groupings,
+            ..
+        }: UpdateParams<'_>,
     ) -> crate::ecs::actions::ActionQueue {
-        self.component_ranges = entity_component_groups
+        self.component_ranges = entity_component_groupings
             .iter()
             .flat_map(|(entity_id, range)| {
                 if self.entities_attached.contains(entity_id) {

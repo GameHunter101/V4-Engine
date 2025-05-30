@@ -1,11 +1,8 @@
-use std::{collections::HashMap, ops::Range};
-
 use v4::{
     builtin_actions::{CreateEntityAction, WorkloadAction, WorkloadOutputFreeAction},
     component,
     ecs::{
-        component::{ComponentDetails, ComponentId, ComponentSystem},
-        entity::{Entity, EntityId},
+        component::{ComponentDetails, ComponentSystem, UpdateParams},
         scene::WorkloadOutput,
     },
     scene, V4,
@@ -55,17 +52,7 @@ impl ComponentSystem for WorkloadTesterComponent {
 
     async fn update(
         &mut self,
-        _device: &wgpu::Device,
-        _queue: &wgpu::Queue,
-        _input_manager: &winit_input_helper::WinitInputHelper,
-        _other_components: &[&mut v4::ecs::component::Component],
-        _computes: &[v4::ecs::compute::Compute],
-        _materials: &[&mut v4::ecs::material::Material],
-        _engine_details: &v4::EngineDetails,
-        workload_outputs: &HashMap<ComponentId, Vec<v4::ecs::scene::WorkloadOutput>>,
-        _entities: &HashMap<EntityId, Entity>,
-        _entity_component_groups: HashMap<EntityId, Range<usize>>,
-        _active_camera: Option<ComponentId>,
+        UpdateParams { workload_outputs, .. }: UpdateParams<'_>,
     ) -> v4::ecs::actions::ActionQueue {
         if self.initialized_time.elapsed().as_secs_f32() % 1.0 <= 0.01 {
             return vec![Box::new(WorkloadAction(
@@ -110,17 +97,7 @@ struct TempComponent {}
 impl ComponentSystem for TempComponent {
     async fn update(
         &mut self,
-        _device: &wgpu::Device,
-        _queue: &wgpu::Queue,
-        _input_manager: &winit_input_helper::WinitInputHelper,
-        _other_components: &[&mut v4::ecs::component::Component],
-        _computes: &[v4::ecs::compute::Compute],
-        _materials: &[&mut v4::ecs::material::Material],
-        engine_details: &v4::EngineDetails,
-        _workload_outputs: &HashMap<ComponentId, Vec<v4::ecs::scene::WorkloadOutput>>,
-        _entities: &HashMap<EntityId, Entity>,
-        _entity_component_groups: HashMap<EntityId, Range<usize>>,
-        _active_camera: Option<ComponentId>,
+        UpdateParams { engine_details, .. }: UpdateParams<'_>,
     ) -> v4::ecs::actions::ActionQueue {
         if engine_details.initialization_time.elapsed().as_millis() % 100 == 0 {
             println!("Check");

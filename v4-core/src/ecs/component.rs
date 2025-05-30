@@ -17,6 +17,20 @@ pub type ComponentId = u64;
 
 pub type Component = Box<dyn ComponentSystem>;
 
+pub struct UpdateParams<'a> {
+    pub device: &'a Device,
+    pub queue: &'a Queue,
+    pub input_manager: &'a WinitInputHelper,
+    pub other_components: &'a [&'a mut Component],
+    pub computes: &'a [Compute],
+    pub materials: &'a [&'a mut Material],
+    pub engine_details: &'a EngineDetails,
+    pub workload_outputs: &'a HashMap<ComponentId, Vec<WorkloadOutput>>,
+    pub entities: &'a HashMap<EntityId, Entity>,
+    pub entity_component_groupings: HashMap<EntityId, Range<usize>>,
+    pub active_camera: Option<ComponentId>,
+}
+
 #[allow(unused)]
 #[async_trait::async_trait]
 pub trait ComponentSystem: ComponentDetails + Debug + DowncastSync + Send + Sync {
@@ -26,20 +40,7 @@ pub trait ComponentSystem: ComponentDetails + Debug + DowncastSync + Send + Sync
     }
 
     #[allow(clippy::too_many_arguments)]
-    async fn update(
-        &mut self,
-        device: &Device,
-        queue: &Queue,
-        input_manager: &WinitInputHelper,
-        other_components: &[&mut Component],
-        computes: &[Compute],
-        materials: &[&mut Material],
-        engine_details: &EngineDetails,
-        workload_outputs: &HashMap<ComponentId, Vec<WorkloadOutput>>,
-        entities: &HashMap<EntityId, Entity>,
-        entity_component_groups: HashMap<EntityId, Range<usize>>,
-        active_camera: Option<ComponentId>,
-    ) -> ActionQueue {
+    async fn update(&mut self, params: UpdateParams<'_>) -> ActionQueue {
         Vec::new()
     }
 

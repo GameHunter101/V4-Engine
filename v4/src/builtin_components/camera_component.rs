@@ -1,16 +1,12 @@
-use std::{any::TypeId, collections::HashMap, ops::Range};
+use std::any::TypeId;
 
 use crate::{builtin_actions::UpdateCameraBufferAction, v4};
 use nalgebra::Matrix4;
-use v4_core::{
-    ecs::{
-        actions::ActionQueue, component::{Component, ComponentDetails, ComponentId, ComponentSystem}, entity::{Entity, EntityId}, material::Material, scene::WorkloadOutput
-    },
-    EngineDetails,
+use v4_core::ecs::{
+    actions::ActionQueue,
+    component::{ComponentDetails, ComponentSystem, UpdateParams},
 };
 use v4_macros::component;
-use wgpu::{Device, Queue};
-use winit_input_helper::WinitInputHelper;
 
 use super::transform_component::TransformComponent;
 
@@ -26,22 +22,17 @@ pub struct CameraComponent {
 impl ComponentSystem for CameraComponent {
     async fn update(
         &mut self,
-        _device: &Device,
-        _queue: &Queue,
-        _input_manager: &WinitInputHelper,
-        other_components: &[&mut Component],
-        _computes: &[v4_core::ecs::compute::Compute],
-        _materials: &[&mut Material],
-        _engine_details: &EngineDetails,
-        _workload_outputs: &HashMap<ComponentId, Vec<WorkloadOutput>>,
-        _entities: &HashMap<EntityId, Entity>,
-        entity_component_groups: HashMap<EntityId, Range<usize>>,
-        active_camera: Option<ComponentId>,
+        UpdateParams {
+            other_components,
+            entity_component_groupings,
+            active_camera,
+            ..
+        }: UpdateParams<'_>,
     ) -> ActionQueue {
         if let Some(active) = active_camera {
             if active == self.id() {
                 let sibling_components =
-                    &other_components[entity_component_groups[&self.parent_entity_id].clone()];
+                    &other_components[entity_component_groupings[&self.parent_entity_id].clone()];
 
                 let transform_component: Option<&TransformComponent> = sibling_components
                     .iter()
