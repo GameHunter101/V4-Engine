@@ -1,4 +1,6 @@
-use wgpu::{Device, Queue, Texture as WgpuTexture, TextureFormat, TextureView};
+use wgpu::{Device, Queue, StorageTextureAccess, Texture as WgpuTexture, TextureFormat, TextureView};
+
+use crate::ecs::material::GeneralTexture;
 
 #[derive(Debug)]
 pub struct Texture {
@@ -44,9 +46,9 @@ impl Texture {
         device: &Device,
         queue: &Queue,
         format: TextureFormat,
-        is_storage: bool,
+        storage_texture_access: Option<StorageTextureAccess>,
         sampled: bool,
-    ) -> tokio::io::Result<Self> {
+    ) -> tokio::io::Result<GeneralTexture> {
         let raw_image = tokio::fs::read(path).await?;
 
         // TODO: Implement actual error handling
@@ -60,7 +62,7 @@ impl Texture {
             device,
             queue,
             format,
-            is_storage,
+            storage_texture_access,
             sampled,
         ))
     }
@@ -71,20 +73,20 @@ impl Texture {
         device: &Device,
         queue: &Queue,
         format: TextureFormat,
-        is_storage: bool,
+        storage_texture_access: Option<StorageTextureAccess>,
         sampled: bool,
-    ) -> Self {
+    ) -> GeneralTexture {
         let texture = Self::create_texture(
             device,
             dimensions.0,
             dimensions.1,
             format,
-            is_storage,
+            storage_texture_access,
             sampled,
         );
 
         queue.write_texture(
-            texture.texture_ref().as_image_copy(),
+            texture.texture().as_image_copy(),
             bytes,
             wgpu::TexelCopyBufferLayout {
                 offset: 0,
@@ -106,9 +108,9 @@ impl Texture {
         width: u32,
         height: u32,
         format: TextureFormat,
-        is_storage: bool,
+        storage_texture_access: Option<StorageTextureAccess>,
         sampled: bool,
-    ) -> Self {
+    ) -> GeneralTexture {
         let size = wgpu::Extent3d {
             width,
             height,
@@ -123,7 +125,7 @@ impl Texture {
             dimension: wgpu::TextureDimension::D2,
             format,
             usage: wgpu::TextureUsages::COPY_DST
-                | if is_storage {
+                | if storage_texture_access.is_some() {
                     wgpu::TextureUsages::STORAGE_BINDING
                 } else {
                     wgpu::TextureUsages::TEXTURE_BINDING
@@ -133,11 +135,15 @@ impl Texture {
 
         let view = texture.create_view(&Default::default());
 
-        Self {
-            format,
-            texture,
-            view,
-            sampled,
+        if let Some(access) = storage_texture_access {
+            GeneralTexture::Storage(StorageTexture { format, texture, view, access })
+        } else {
+            GeneralTexture::Regular( Texture {
+                format,
+                texture,
+                view,
+                sampled,
+            })
         }
     }
 
