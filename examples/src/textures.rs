@@ -32,6 +32,7 @@ pub async fn main() {
                             wgpu::TextureFormat::Rgba8UnormSrgb,
                             None,
                             true,
+                            wgpu::TextureUsages::empty(),
                         ).await.unwrap(),
                     visibility: wgpu::ShaderStages::FRAGMENT,
                 )],

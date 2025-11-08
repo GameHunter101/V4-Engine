@@ -1,4 +1,4 @@
-use wgpu::{Device, Queue, StorageTextureAccess, Texture as WgpuTexture, TextureFormat, TextureView};
+use wgpu::{Device, Queue, StorageTextureAccess, Texture as WgpuTexture, TextureFormat, TextureUsages, TextureView};
 
 use crate::ecs::material::GeneralTexture;
 
@@ -48,6 +48,7 @@ impl Texture {
         format: TextureFormat,
         storage_texture_access: Option<StorageTextureAccess>,
         sampled: bool,
+        extra_usages: TextureUsages,
     ) -> tokio::io::Result<GeneralTexture> {
         let raw_image = tokio::fs::read(path).await?;
 
@@ -64,6 +65,7 @@ impl Texture {
             format,
             storage_texture_access,
             sampled,
+            extra_usages,
         ))
     }
 
@@ -75,6 +77,7 @@ impl Texture {
         format: TextureFormat,
         storage_texture_access: Option<StorageTextureAccess>,
         sampled: bool,
+        extra_usages: TextureUsages,
     ) -> GeneralTexture {
         let texture = Self::create_texture(
             device,
@@ -83,6 +86,7 @@ impl Texture {
             format,
             storage_texture_access,
             sampled,
+            extra_usages,
         );
 
         queue.write_texture(
@@ -110,6 +114,7 @@ impl Texture {
         format: TextureFormat,
         storage_texture_access: Option<StorageTextureAccess>,
         sampled: bool,
+        extra_usages: TextureUsages,
     ) -> GeneralTexture {
         let size = wgpu::Extent3d {
             width,
@@ -124,11 +129,11 @@ impl Texture {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format,
-            usage: wgpu::TextureUsages::COPY_DST
+            usage: extra_usages | TextureUsages::COPY_DST
                 | if storage_texture_access.is_some() {
-                    wgpu::TextureUsages::STORAGE_BINDING
+                    TextureUsages::STORAGE_BINDING
                 } else {
-                    wgpu::TextureUsages::TEXTURE_BINDING
+                    TextureUsages::TEXTURE_BINDING
                 },
             view_formats: &[],
         });
@@ -163,7 +168,7 @@ impl Texture {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: Self::DEPTH_FORMAT,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING,
             view_formats: &[],
         };
         let texture = device.create_texture(&desc);
