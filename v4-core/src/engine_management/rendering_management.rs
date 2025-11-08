@@ -379,6 +379,8 @@ fn main(input: VertexOutput) -> @location(0) vec4<f32> {
                 &self.queue,
                 &mut encoder,
                 &all_components,
+                scene.materials(),
+                scene.computes(),
             );
         }
 

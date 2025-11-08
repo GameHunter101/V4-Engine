@@ -6,8 +6,7 @@ use wgpu::{
 };
 
 use crate::{
-    engine_management::pipeline::PipelineId,
-    engine_support::texture_support::{StorageTexture, Texture},
+    ecs::compute::Compute, engine_management::pipeline::PipelineId, engine_support::texture_support::{StorageTexture, Texture}
 };
 
 use super::{
@@ -346,10 +345,12 @@ impl ComponentSystem for Material {
         queue: &Queue,
         encoder: &mut CommandEncoder,
         other_components: &[&Component],
+        materials: &[Material],
+        computes: &[Compute],
     ) {
         for range in &self.component_ranges {
             for component in &other_components[range.clone()] {
-                component.command_encoder_operations(device, queue, encoder, other_components);
+                component.command_encoder_operations(device, queue, encoder, other_components, materials, computes);
             }
         }
     }
