@@ -43,9 +43,13 @@ impl SceneDescriptor {
             let ident: Ident = input.parse()?;
             if &ident.to_string() == "active_camera" {
                 let _: Token![:] = input.parse()?;
-                let entity_ident: Lit = input.parse()?;
-                let _: Token![,] = input.parse()?;
-                Ok(Some(entity_ident))
+                if input.peek(Token![_]) {
+                    Ok(None)
+                } else {
+                    let entity_ident: Lit = input.parse()?;
+                    let _: Token![,] = input.parse()?;
+                    Ok(Some(entity_ident))
+                }
             } else {
                 Err(syn::Error::new(ident.span(), "Invalid specifier found. In order to specify the active camera, use the `active_camera` field"))
             }
