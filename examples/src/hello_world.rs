@@ -26,7 +26,7 @@ pub async fn main() {
 
     scene! {
         scene: hello_scene,
-        active_camera: "cam",
+        active_camera: "cam_ent",
         screen_space_materials: [
             {
                 pipeline: {

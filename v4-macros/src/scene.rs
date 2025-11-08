@@ -44,6 +44,8 @@ impl SceneDescriptor {
             if &ident.to_string() == "active_camera" {
                 let _: Token![:] = input.parse()?;
                 if input.peek(Token![_]) {
+                    input.parse::<Token![_]>()?;
+                    input.parse::<Token![,]>()?;
                     Ok(None)
                 } else {
                     let entity_ident: Lit = input.parse()?;
