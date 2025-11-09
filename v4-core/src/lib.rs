@@ -320,6 +320,7 @@ pub struct V4Builder {
     antialiasing_enabled: bool,
     clear_color: wgpu::Color,
     features: wgpu::Features,
+    limits: wgpu::Limits,
 }
 
 impl Default for V4Builder {
@@ -332,6 +333,7 @@ impl Default for V4Builder {
             antialiasing_enabled: false,
             clear_color: wgpu::Color::BLACK,
             features: wgpu::Features::default(),
+            limits: wgpu::Limits::default(),
         }
     }
 }
@@ -366,6 +368,11 @@ impl V4Builder {
         self
     }
 
+    pub fn limits(mut self, limits: wgpu::Limits) -> Self {
+        self.limits = limits;
+        self
+    }
+
     pub async fn build(self) -> V4 {
         let event_loop = EventLoop::new().expect("Failed to create event loop.");
         event_loop.set_control_flow(winit::event_loop::ControlFlow::Poll);
@@ -378,7 +385,7 @@ impl V4Builder {
         let input_manager = WinitInputHelper::new();
 
         let rendering_manager =
-            RenderingManager::new(&window, self.antialiasing_enabled, self.clear_color, self.features).await;
+            RenderingManager::new(&window, self.antialiasing_enabled, self.clear_color, self.features, self.limits).await;
 
         let device = rendering_manager.device();
         let queue = rendering_manager.queue();
