@@ -2,7 +2,7 @@ use wgpu::{Device, Queue, StorageTextureAccess, Texture as WgpuTexture, TextureF
 
 use crate::ecs::material::GeneralTexture;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Texture {
     format: TextureFormat,
     texture: WgpuTexture,
@@ -10,7 +10,7 @@ pub struct Texture {
     sampled: bool,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct StorageTexture {
     format: TextureFormat,
     texture: WgpuTexture,

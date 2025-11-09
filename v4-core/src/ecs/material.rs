@@ -15,14 +15,14 @@ use super::{
     entity::EntityId,
 };
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ShaderTextureAttachment {
     pub texture: GeneralTexture,
     pub visibility: ShaderStages,
     pub extra_usages: wgpu::TextureUsages,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum GeneralTexture {
     Regular(Texture),
     Storage(StorageTexture),
@@ -58,7 +58,7 @@ impl GeneralTexture {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ShaderBufferAttachment {
     buffer: Buffer,
     visibility: ShaderStages,
@@ -100,7 +100,7 @@ impl ShaderBufferAttachment {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum ShaderAttachment {
     Texture(ShaderTextureAttachment),
     Buffer(ShaderBufferAttachment),
