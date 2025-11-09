@@ -245,7 +245,9 @@ impl Scene {
                 });
 
             for compute in &self.computes {
-                compute.calculate(&mut compute_pass);
+                for _ in 0..compute.iterate_count() {
+                    compute.calculate(&mut compute_pass);
+                }
             }
         }
         queue.submit(Some(command_encoder.finish()));

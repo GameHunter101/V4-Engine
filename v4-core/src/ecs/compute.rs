@@ -1,8 +1,7 @@
 use std::hash::{DefaultHasher, Hash, Hasher};
 
 use wgpu::{
-    BindGroup, BindGroupLayout, /* CommandEncoder, */ ComputePass, ComputePipeline, Device, /* Extent3d, */
-    ShaderStages,
+    BindGroup, BindGroupLayout, ComputePass, ComputePipeline, Device,  ShaderStages,
 };
 
 use crate::engine_management::pipeline::{load_shader_module_descriptor, PipelineShader};
@@ -27,7 +26,7 @@ pub struct Compute {
     is_enabled: bool,
     is_initialized: bool,
     parent_entity: EntityId,
-    // output_copy_target: Option<ShaderAttachment>,
+    iterate_count: usize,
 }
 
 impl Compute {
@@ -241,6 +240,10 @@ impl Compute {
     pub fn output_attachments(&self) -> Option<&ShaderAttachment> {
         self.output.as_ref()
     }
+
+    pub fn iterate_count(&self) -> usize {
+        self.iterate_count
+    }
 }
 
 impl ComponentSystem for Compute {
@@ -312,7 +315,7 @@ pub struct ComputeBuilder {
     workgroup_counts: (u32, u32, u32),
     id: ComponentId,
     enabled: bool,
-    // output_copy_target: Option<ShaderAttachment>,
+    iterate_count: usize,
 }
 
 impl Default for ComputeBuilder {
@@ -325,7 +328,7 @@ impl Default for ComputeBuilder {
             workgroup_counts: (0, 0, 0),
             id: 0,
             enabled: true,
-            // output_copy_target: None,
+            iterate_count: 1
         }
     }
 }
@@ -366,6 +369,11 @@ impl ComputeBuilder {
         self
     }
 
+    pub fn iterate_count(mut self, iterate_count: usize) -> Self {
+        self.iterate_count = iterate_count;
+        self
+    }
+
     pub fn build(self) -> Compute {
         Compute {
             input: self.input,
@@ -386,7 +394,7 @@ impl ComputeBuilder {
             is_enabled: self.enabled,
             is_initialized: false,
             parent_entity: 0,
-            // output_copy_target: self.output_copy_target,
+            iterate_count: self.iterate_count,
         }
     }
 }
