@@ -32,7 +32,7 @@ pub async fn main() {
 
     scene! {
         scene: hello_scene,
-        active_camera: "cam_ent",
+        active_camera: "cam",
         screen_space_materials: [
             {
                 pipeline: {
@@ -62,7 +62,7 @@ pub async fn main() {
         "cam_ent" = {
             components: [
                 CameraComponent(field_of_view: 80.0, aspect_ratio: 1.0, near_plane: 0.1, far_plane: 50.0, sensitivity: 0.01, movement_speed: 0.01, ident: "cam"),
-                TransformComponent(position: Vector3::new(1.0, 0.0, 0.0), /* rotation: (Bivector::new(0.0, 1.0, 0.0) * std::f32::consts::FRAC_PI_8).exponentiate(), */ uses_buffer: false),
+                TransformComponent(position: Vector3::new(1.0, 0.0, 0.0), uses_buffer: false),
             ]
         },
         "test_ent" = {

@@ -89,7 +89,7 @@ impl ComponentSystem for CameraComponent {
                     let pitch_rotation =
                         (up.wedge(&forward) * sens * cursor_delta.1 / 2.0).exponentiate();
                     let yaw_rotation =
-                        Bivector::new(0.0, 0.0, sens * cursor_delta.0 / -2.0).exponentiate();
+                        Bivector::new(0.0, 0.0, sens * cursor_delta.0 / 2.0).exponentiate();
                     transform.set_rotation((yaw_rotation * pitch_rotation * rotation).normalize());
 
                     let movement_sens = self.movement_speed / delta_time;
