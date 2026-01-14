@@ -68,6 +68,30 @@ impl TransformComponent {
 
         transformation_matrix * rotation_matrix * scale_matrix
     }
+
+    pub fn set_position(&mut self, position: Vector3<f32>) {
+        self.position = position;
+    }
+
+    pub fn set_rotation(&mut self, rotation: Rotor3) {
+        self.rotation = rotation;
+    }
+
+    pub fn set_scale(&mut self, scale: Vector3<f32>) {
+        self.scale = scale;
+    }
+
+    pub fn get_position(&self) -> Vector3<f32> {
+        self.position
+    }
+
+    pub fn get_rotation(&self) -> Rotor3 {
+        self.rotation
+    }
+
+    pub fn get_scale(&self) -> Vector3<f32> {
+        self.scale
+    }
 }
 
 impl ComponentSystem for TransformComponent {

@@ -67,7 +67,7 @@ impl ComponentSystem for TextComponent {
 
     async fn update(
         &mut self,
-        UpdateParams { input_manager, .. }: UpdateParams<'_>,
+        UpdateParams { input_manager, .. }: UpdateParams<'_, '_>,
     ) -> v4::ecs::actions::ActionQueue {
         let text = input_manager.text();
 
@@ -110,7 +110,7 @@ impl ComponentSystem for TextComponent {
 impl ComponentSystem for ToggleComponent {
     async fn update(
         &mut self,
-        UpdateParams { input_manager, .. }: UpdateParams<'_>,
+        UpdateParams { input_manager, .. }: UpdateParams<'_, '_>,
     ) -> v4::ecs::actions::ActionQueue {
         let text = input_manager.text();
 

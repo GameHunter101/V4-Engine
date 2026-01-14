@@ -51,3 +51,23 @@ impl EngineAction for UpdateTextBufferEngineAction {
         );
     }
 }
+
+pub struct SetCursorVisibilityEngineAction(pub bool);
+
+impl EngineAction for SetCursorVisibilityEngineAction {
+    fn execute(self: Box<Self>, engine: V4Mutable) {
+        engine.window.set_cursor_visible(self.0);
+    }
+}
+
+pub struct SetCursorPositionEngineAction(pub winit::dpi::Position);
+
+impl EngineAction for SetCursorPositionEngineAction
+{
+    fn execute(self: Box<Self>, engine: V4Mutable) {
+        engine
+            .window
+            .set_cursor_position(self.0.clone())
+            .unwrap_or_else(|_| panic!("Error setting cursor to position {:?}", self.0));
+    }
+}

@@ -306,7 +306,7 @@ impl ComponentSystem for Material {
         UpdateParams {
             entity_component_groupings,
             ..
-        }: UpdateParams<'_>,
+        }: UpdateParams<'_, '_>,
     ) -> crate::ecs::actions::ActionQueue {
         self.component_ranges = entity_component_groupings
             .iter()

@@ -320,6 +320,7 @@ pub struct V4Builder {
     antialiasing_enabled: bool,
     clear_color: wgpu::Color,
     features: wgpu::Features,
+    hide_cursor: bool,
 }
 
 impl Default for V4Builder {
@@ -332,6 +333,7 @@ impl Default for V4Builder {
             antialiasing_enabled: false,
             clear_color: wgpu::Color::BLACK,
             features: wgpu::Features::default(),
+            hide_cursor: false,
         }
     }
 }
@@ -366,6 +368,11 @@ impl V4Builder {
         self
     }
 
+    pub fn hide_cursor(mut self, hide_cursor: bool) -> Self {
+        self.hide_cursor = hide_cursor;
+        self
+    }
+
     pub async fn build(self) -> V4 {
         let event_loop = EventLoop::new().expect("Failed to create event loop.");
         event_loop.set_control_flow(winit::event_loop::ControlFlow::Poll);
@@ -391,6 +398,13 @@ impl V4Builder {
         let mut atlas = TextAtlas::new(device, queue, &cache, format);
         let text_renderer =
             TextRenderer::new(&mut atlas, device, wgpu::MultisampleState::default(), None);
+
+        window.set_cursor_visible(!self.hide_cursor);
+        /* if self.hide_cursor {
+            window.set_cursor_grab(winit::window::CursorGrabMode::Confined).unwrap_or_else(|_| {
+                window.set_cursor_grab(winit::window::CursorGrabMode::Locked).unwrap();
+            });
+        } */
 
         let font_state = FontState {
             font_system,

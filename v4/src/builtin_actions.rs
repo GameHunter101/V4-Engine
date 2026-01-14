@@ -2,10 +2,17 @@ use std::fmt::Debug;
 
 use v4_core::{
     ecs::{
-        actions::Action, component::{Component, ComponentId}, compute::Compute, entity::EntityId, scene::{Scene, Workload}
+        actions::Action,
+        component::{Component, ComponentId},
+        compute::Compute,
+        entity::EntityId,
+        scene::{Scene, Workload},
     },
     engine_management::{
-        engine_action::{CreateTextBufferEngineAction, UpdateTextBufferEngineAction},
+        engine_action::{
+            CreateTextBufferEngineAction, SetCursorPositionEngineAction,
+            SetCursorVisibilityEngineAction, UpdateTextBufferEngineAction,
+        },
         font_management::{TextAttributes, TextComponentProperties, TextDisplayInfo},
     },
 };
@@ -205,5 +212,24 @@ impl Action for UpdateCameraBufferAction {
             scene.set_active_camera_bind_group(Some(bind_group));
             scene.set_active_camera_buffer(Some(buffer));
         }
+    }
+}
+
+#[derive(Debug)]
+pub struct SetCursorVisibilityAction(pub bool);
+
+impl Action for SetCursorVisibilityAction {
+    fn execute(self: Box<Self>, scene: &mut Scene, _device: &Device, _queue: &Queue) {
+        scene.send_engine_action(Box::new(SetCursorVisibilityEngineAction(self.0)));
+    }
+}
+
+#[derive(Debug)]
+pub struct SetCursorPositionAction(pub winit::dpi::Position);
+
+impl Action for SetCursorPositionAction
+{
+    fn execute(self: Box<Self>, scene: &mut Scene, _device: &Device, _queue: &Queue) {
+        scene.send_engine_action(Box::new(SetCursorPositionEngineAction(self.0)));
     }
 }

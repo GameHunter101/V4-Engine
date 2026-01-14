@@ -1,5 +1,5 @@
 use downcast_rs::{impl_downcast, DowncastSync};
-use std::{collections::HashMap, fmt::Debug, ops::Range};
+use std::{collections::HashMap, fmt::Debug, ops::Range, sync::{Arc, Mutex}};
 use wgpu::{CommandEncoder, Device, Queue, RenderPass};
 use winit_input_helper::WinitInputHelper;
 
@@ -17,13 +17,13 @@ pub type ComponentId = u64;
 
 pub type Component = Box<dyn ComponentSystem>;
 
-pub struct UpdateParams<'a> {
+pub struct UpdateParams<'a: 'b, 'b> {
     pub device: &'a Device,
     pub queue: &'a Queue,
     pub input_manager: &'a WinitInputHelper,
-    pub other_components: &'a [&'a mut Component],
+    pub other_components: Arc<Mutex<Vec<&'b mut Component>>>,
     pub computes: &'a [Compute],
-    pub materials: &'a [&'a mut Material],
+    pub materials: Arc<Mutex<Vec<&'b mut Material>>>,
     pub engine_details: &'a EngineDetails,
     pub workload_outputs: &'a HashMap<ComponentId, Vec<WorkloadOutput>>,
     pub entities: &'a HashMap<EntityId, Entity>,
@@ -40,7 +40,7 @@ pub trait ComponentSystem: ComponentDetails + Debug + DowncastSync + Send + Sync
     }
 
     #[allow(clippy::too_many_arguments)]
-    async fn update(&mut self, params: UpdateParams<'_>) -> ActionQueue {
+    async fn update(&mut self, params: UpdateParams<'_, '_>) -> ActionQueue {
         Vec::new()
     }
 

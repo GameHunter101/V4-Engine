@@ -52,7 +52,7 @@ impl ComponentSystem for WorkloadTesterComponent {
 
     async fn update(
         &mut self,
-        UpdateParams { workload_outputs, .. }: UpdateParams<'_>,
+        UpdateParams { workload_outputs, .. }: UpdateParams<'_, '_>,
     ) -> v4::ecs::actions::ActionQueue {
         if self.initialized_time.elapsed().as_secs_f32() % 1.0 <= 0.01 {
             return vec![Box::new(WorkloadAction(
@@ -97,7 +97,7 @@ struct TempComponent {}
 impl ComponentSystem for TempComponent {
     async fn update(
         &mut self,
-        UpdateParams { engine_details, .. }: UpdateParams<'_>,
+        UpdateParams { engine_details, .. }: UpdateParams<'_, '_>,
     ) -> v4::ecs::actions::ActionQueue {
         if engine_details.initialization_time.elapsed().as_millis() % 100 == 0 {
             println!("Check");
