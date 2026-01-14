@@ -320,11 +320,8 @@ pub struct V4Builder {
     antialiasing_enabled: bool,
     clear_color: wgpu::Color,
     features: wgpu::Features,
-<<<<<<< HEAD
     hide_cursor: bool,
-=======
     limits: wgpu::Limits,
->>>>>>> 837ff4c30635aca3a7fe0f1b128ea4d86c0a6554
 }
 
 impl Default for V4Builder {
@@ -337,11 +334,8 @@ impl Default for V4Builder {
             antialiasing_enabled: false,
             clear_color: wgpu::Color::BLACK,
             features: wgpu::Features::default(),
-<<<<<<< HEAD
             hide_cursor: false,
-=======
             limits: wgpu::Limits::default(),
->>>>>>> 837ff4c30635aca3a7fe0f1b128ea4d86c0a6554
         }
     }
 }
@@ -376,13 +370,13 @@ impl V4Builder {
         self
     }
 
-<<<<<<< HEAD
     pub fn hide_cursor(mut self, hide_cursor: bool) -> Self {
         self.hide_cursor = hide_cursor;
-=======
+        self
+    }
+
     pub fn limits(mut self, limits: wgpu::Limits) -> Self {
         self.limits = limits;
->>>>>>> 837ff4c30635aca3a7fe0f1b128ea4d86c0a6554
         self
     }
 

@@ -7,11 +7,7 @@ members = [ "examples", "v4",
 resolver = "2"
 
 [workspace.package]
-<<<<<<< HEAD
-version = "0.2.42"
-=======
 version = "0.2.49"
->>>>>>> 837ff4c30635aca3a7fe0f1b128ea4d86c0a6554
 authors = ["Lior Carmeli"]
 
 [workspace.dependencies]
