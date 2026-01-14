@@ -25,16 +25,15 @@ pub async fn main() {
                 },
                 attachments: [Texture (
                     texture: 
-                        v4::ecs::material::GeneralTexture::Regular(
-                            Texture::from_path(
-                                "./assets/testing_textures/dude.png",
-                                device,
-                                queue,
-                                wgpu::TextureFormat::Rgba8UnormSrgb,
-                                false,
-                                true,
-                            ).await.unwrap()
-                        ),
+                        Texture::from_path(
+                            "./assets/testing_textures/dude.png",
+                            device,
+                            queue,
+                            wgpu::TextureFormat::Rgba8UnormSrgb,
+                            None,
+                            true,
+                            wgpu::TextureUsages::empty(),
+                        ).await.unwrap(),
                     visibility: wgpu::ShaderStages::FRAGMENT,
                 )],
             },

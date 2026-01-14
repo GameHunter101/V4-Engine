@@ -320,7 +320,11 @@ pub struct V4Builder {
     antialiasing_enabled: bool,
     clear_color: wgpu::Color,
     features: wgpu::Features,
+<<<<<<< HEAD
     hide_cursor: bool,
+=======
+    limits: wgpu::Limits,
+>>>>>>> 837ff4c30635aca3a7fe0f1b128ea4d86c0a6554
 }
 
 impl Default for V4Builder {
@@ -333,7 +337,11 @@ impl Default for V4Builder {
             antialiasing_enabled: false,
             clear_color: wgpu::Color::BLACK,
             features: wgpu::Features::default(),
+<<<<<<< HEAD
             hide_cursor: false,
+=======
+            limits: wgpu::Limits::default(),
+>>>>>>> 837ff4c30635aca3a7fe0f1b128ea4d86c0a6554
         }
     }
 }
@@ -368,8 +376,13 @@ impl V4Builder {
         self
     }
 
+<<<<<<< HEAD
     pub fn hide_cursor(mut self, hide_cursor: bool) -> Self {
         self.hide_cursor = hide_cursor;
+=======
+    pub fn limits(mut self, limits: wgpu::Limits) -> Self {
+        self.limits = limits;
+>>>>>>> 837ff4c30635aca3a7fe0f1b128ea4d86c0a6554
         self
     }
 
@@ -385,7 +398,7 @@ impl V4Builder {
         let input_manager = WinitInputHelper::new();
 
         let rendering_manager =
-            RenderingManager::new(&window, self.antialiasing_enabled, self.clear_color, self.features).await;
+            RenderingManager::new(&window, self.antialiasing_enabled, self.clear_color, self.features, self.limits).await;
 
         let device = rendering_manager.device();
         let queue = rendering_manager.queue();

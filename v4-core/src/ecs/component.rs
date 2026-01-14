@@ -59,6 +59,8 @@ pub trait ComponentSystem: ComponentDetails + Debug + DowncastSync + Send + Sync
         queue: &Queue,
         encoder: &mut CommandEncoder,
         other_components: &[&Component],
+        materials: &[Material],
+        computes: &[Compute],
     ) {
     }
 }

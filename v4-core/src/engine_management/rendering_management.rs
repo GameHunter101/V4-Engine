@@ -38,6 +38,7 @@ impl RenderingManager {
         antialiasing_enabled: bool,
         clear_color: wgpu::Color,
         features: wgpu::Features,
+        limits: wgpu::Limits,
     ) -> Self {
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
             backends: wgpu::Backends::all(),
@@ -69,6 +70,7 @@ impl RenderingManager {
                     label: Some("Renderer device descriptor"),
                     memory_hints: wgpu::MemoryHints::Performance,
                     required_features: features,
+                    required_limits: limits,
                     ..Default::default()
                 },
                 None,
@@ -379,6 +381,8 @@ fn main(input: VertexOutput) -> @location(0) vec4<f32> {
                 &self.queue,
                 &mut encoder,
                 &all_components,
+                scene.materials(),
+                scene.computes(),
             );
         }
 
