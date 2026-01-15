@@ -1,11 +1,13 @@
 use std::any::TypeId;
 
 use crate::{
-    builtin_actions::{SetCursorPositionAction, SetCursorVisibilityAction, UpdateCameraBufferAction},
+    builtin_actions::{
+        SetCursorPositionAction, SetCursorVisibilityAction, UpdateCameraBufferAction,
+    },
     v4,
 };
 use algoe::{bivector::Bivector, vector::GeometricOperations};
-use nalgebra::{Matrix4, Vector3};
+use nalgebra::{Matrix4, Perspective3, Scale3, Vector3, Vector4};
 use v4_core::{
     ecs::{
         actions::ActionQueue,
@@ -29,7 +31,7 @@ pub struct CameraComponent {
     #[default(1.0)]
     movement_speed: f32,
     #[default(false)]
-    frozen: bool
+    frozen: bool,
 }
 
 #[async_trait::async_trait]
@@ -83,13 +85,13 @@ impl ComponentSystem for CameraComponent {
                     let sens = self.sensitivity / delta_time;
 
                     let forward = rotation * Vector3::z();
-                    let left = rotation * Vector3::x();
+                    let right = rotation * Vector3::x();
                     let up = Vector3::y();
 
                     let pitch_rotation =
-                        (up.wedge(&forward) * sens * cursor_delta.1 / 2.0).exponentiate();
+                        (up.wedge(&forward) * sens * cursor_delta.1 / -2.0).exponentiate();
                     let yaw_rotation =
-                        Bivector::new(0.0, 0.0, sens * cursor_delta.0 / 2.0).exponentiate();
+                        Bivector::new(0.0, 0.0, sens * cursor_delta.0 / -2.0).exponentiate();
                     transform.set_rotation((yaw_rotation * pitch_rotation * rotation).normalize());
 
                     let movement_sens = self.movement_speed / delta_time;
@@ -99,8 +101,8 @@ impl ComponentSystem for CameraComponent {
                         as f32
                         * movement_sens;
 
-                    let left_diff = ((input_manager.key_held(KeyCode::KeyA) as i32)
-                        - (input_manager.key_held(KeyCode::KeyD) as i32))
+                    let right_diff = ((input_manager.key_held(KeyCode::KeyD) as i32)
+                        - (input_manager.key_held(KeyCode::KeyA) as i32))
                         as f32
                         * movement_sens;
 
@@ -109,7 +111,7 @@ impl ComponentSystem for CameraComponent {
                         as f32
                         * movement_sens;
 
-                    let translation = forward * forward_diff + left * left_diff - up * up_diff;
+                    let translation = forward * forward_diff + right * right_diff + up * up_diff;
                     transform.set_position(transform.get_position() + translation);
 
                     Some(transform)
@@ -140,7 +142,7 @@ struct RawCameraData {
 
 impl RawCameraData {
     fn from_component(comp: &CameraComponent, transform: Option<&TransformComponent>) -> Self {
-        let c = 1.0 / (comp.field_of_view / 2.0).tan();
+        let c = 1.0 / (comp.field_of_view * std::f32::consts::PI / 360.0).tan();
         let aspect_ratio = comp.aspect_ratio;
         let far_plane = comp.far_plane;
         let near_plane = comp.near_plane;
@@ -156,13 +158,12 @@ impl RawCameraData {
             Matrix4::identity()
         };
 
-        #[rustfmt::skip]
-        let projection_matrix= Matrix4::new(
-            c * aspect_ratio,  0.0,    0.0,                     0.0,
-            0.0,               c,      0.0,                     0.0,
-            0.0,               0.0,    far_plane / difference,  - (far_plane * near_plane) / difference,
-            0.0,               0.0,    1.0,                     0.0,
-        );
+        let projection_matrix = Matrix4::from_columns(&[
+            Vector4::new(c / aspect_ratio, 0.0, 0.0, 0.0),
+            Vector4::new(0.0, c, 0.0, 0.0),
+            Vector4::new(0.0, 0.0, far_plane / difference, 1.0),
+            Vector4::new(0.0, 0.0, -(far_plane * near_plane) / difference, 0.0),
+        ]);
 
         Self {
             matrix: (projection_matrix * view_matrix).into(),

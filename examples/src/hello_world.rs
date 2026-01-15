@@ -33,7 +33,7 @@ pub async fn main() {
     scene! {
         scene: hello_scene,
         active_camera: "cam",
-        screen_space_materials: [
+        /* screen_space_materials: [
             {
                 pipeline: {
                     fragment_shader_path: "shaders/hello_world/screen_space.wgsl",
@@ -44,7 +44,7 @@ pub async fn main() {
                     fragment_shader_path: "shaders/hello_world/screen_space_blur.wgsl"
                 }
             }
-        ],
+        ], */
         _ = {
             material: {
                 pipeline: {
@@ -55,14 +55,14 @@ pub async fn main() {
                 },
             },
             components: [
-                TransformComponent(position: Vector3::new(0.0, 0.0, 5.0), ident: "thing"),
+                TransformComponent(position: Vector3::new(1.0, 1.0, 1.4), ident: "thing"),
                 MeshComponent<Vertex>::from_obj("assets/models/basic_cube.obj", true).ident("unused ident").await.unwrap(),
             ]
         },
         "cam_ent" = {
             components: [
-                CameraComponent(field_of_view: 80.0, aspect_ratio: 1.0, near_plane: 0.1, far_plane: 50.0, sensitivity: 0.01, movement_speed: 0.01, ident: "cam"),
-                TransformComponent(position: Vector3::new(1.0, 0.0, 0.0), uses_buffer: false),
+                CameraComponent(field_of_view: 80.0, aspect_ratio: 1.0, near_plane: 0.1, far_plane: 50.0, sensitivity: 0.0008, movement_speed: 0.01, ident: "cam"),
+                TransformComponent(position: Vector3::new(0.1, 0.0, -1.0), uses_buffer: false),
             ]
         },
         "test_ent" = {
