@@ -174,16 +174,22 @@ impl Action for DisableCameraAction {
 }
 
 #[derive(Debug)]
-pub struct UpdateCameraBufferAction(pub [[f32; 4]; 4]);
+pub struct UpdateCameraBufferAction(pub [[f32; 4]; 4], pub [f32; 3]);
 
 impl Action for UpdateCameraBufferAction {
     fn execute(self: Box<Self>, scene: &mut Scene, device: &Device, queue: &Queue) {
+        let buf = bytemuck::cast_slice(&self.0)
+            .into_iter()
+            .chain(bytemuck::cast_slice(&self.1))
+            .copied()
+            .chain([0; 4])
+            .collect::<Vec<_>>();
         if let Some(camera_buffer) = scene.active_camera_buffer() {
-            queue.write_buffer(camera_buffer, 0, bytemuck::cast_slice(&self.0));
+            queue.write_buffer(camera_buffer, 0, &buf);
         } else {
             let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some(&format!("Scene {} Camera Buffer", scene.scene_index())),
-                contents: bytemuck::cast_slice(&self.0),
+                contents: &buf,
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             });
             let bind_group_layout =
@@ -227,8 +233,7 @@ impl Action for SetCursorVisibilityAction {
 #[derive(Debug)]
 pub struct SetCursorPositionAction(pub winit::dpi::Position);
 
-impl Action for SetCursorPositionAction
-{
+impl Action for SetCursorPositionAction {
     fn execute(self: Box<Self>, scene: &mut Scene, _device: &Device, _queue: &Queue) {
         scene.send_engine_action(Box::new(SetCursorPositionEngineAction(self.0)));
     }
