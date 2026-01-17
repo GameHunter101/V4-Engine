@@ -10,8 +10,8 @@ use v4_core::{
     },
     engine_management::{
         engine_action::{
-            CreateTextBufferEngineAction, SetCursorPositionEngineAction,
-            SetCursorVisibilityEngineAction, UpdateTextBufferEngineAction,
+            CreateTextBufferEngineAction, SetCursorLockEngineAction, SetCursorPositionEngineAction,
+            UpdateTextBufferEngineAction,
         },
         font_management::{TextAttributes, TextComponentProperties, TextDisplayInfo},
     },
@@ -222,11 +222,11 @@ impl Action for UpdateCameraBufferAction {
 }
 
 #[derive(Debug)]
-pub struct SetCursorVisibilityAction(pub bool);
+pub struct SetCursorLockAction(pub bool);
 
-impl Action for SetCursorVisibilityAction {
+impl Action for SetCursorLockAction {
     fn execute(self: Box<Self>, scene: &mut Scene, _device: &Device, _queue: &Queue) {
-        scene.send_engine_action(Box::new(SetCursorVisibilityEngineAction(self.0)));
+        scene.send_engine_action(Box::new(SetCursorLockEngineAction(self.0)));
     }
 }
 

@@ -52,11 +52,18 @@ impl EngineAction for UpdateTextBufferEngineAction {
     }
 }
 
-pub struct SetCursorVisibilityEngineAction(pub bool);
+pub struct SetCursorLockEngineAction(pub bool);
 
-impl EngineAction for SetCursorVisibilityEngineAction {
+impl EngineAction for SetCursorLockEngineAction {
     fn execute(self: Box<Self>, engine: V4Mutable) {
         engine.window.set_cursor_visible(self.0);
+        if self.0 {
+            engine.window.set_cursor_grab(winit::window::CursorGrabMode::None).unwrap();
+        } else {
+            engine.window.set_cursor_grab(winit::window::CursorGrabMode::Locked).unwrap_or_else(|_| {
+                engine.window.set_cursor_grab(winit::window::CursorGrabMode::Confined).unwrap();
+            });
+        }
     }
 }
 

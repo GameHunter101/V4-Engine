@@ -1,9 +1,7 @@
 use std::any::TypeId;
 
 use crate::{
-    builtin_actions::{
-        SetCursorPositionAction, SetCursorVisibilityAction, UpdateCameraBufferAction,
-    },
+    builtin_actions::{SetCursorLockAction, UpdateCameraBufferAction},
     v4,
 };
 use algoe::{bivector::Bivector, vector::GeometricOperations};
@@ -16,7 +14,7 @@ use v4_core::{
     EngineDetails,
 };
 use v4_macros::component;
-use winit::{dpi::PhysicalPosition, keyboard::KeyCode};
+use winit::keyboard::KeyCode;
 
 use super::transform_component::TransformComponent;
 
@@ -32,6 +30,10 @@ pub struct CameraComponent {
     movement_speed: f32,
     #[default(false)]
     frozen: bool,
+    #[default(0.0)]
+    pitch: f32,
+    #[default(0.0)]
+    yaw: f32,
 }
 
 #[async_trait::async_trait]
@@ -42,25 +44,15 @@ impl ComponentSystem for CameraComponent {
             other_components,
             entity_component_groupings,
             active_camera,
-            engine_details:
-                EngineDetails {
-                    cursor_position,
-                    window_resolution,
-                    ..
-                },
+            engine_details: EngineDetails { cursor_delta, .. },
             input_manager,
             ..
         }: UpdateParams<'_, '_>,
     ) -> ActionQueue {
-        let cursor_delta = (
-            cursor_position.0 as f32 - window_resolution.0 as f32 / 2.0,
-            cursor_position.1 as f32 - window_resolution.0 as f32 / 2.0,
-        );
-
         if let Some(active) = active_camera {
             if input_manager.key_pressed(KeyCode::Escape) {
                 self.frozen = !self.frozen;
-                return vec![Box::new(SetCursorVisibilityAction(self.frozen))];
+                return vec![Box::new(SetCursorLockAction(self.frozen))];
             }
             if active == self.id() && !self.frozen {
                 let sibling_components = &mut other_components.lock().unwrap()
@@ -84,9 +76,16 @@ impl ComponentSystem for CameraComponent {
                     let mut forward = rotation * Vector3::z();
                     let up = Vector3::y();
 
-                    let pitch_rotation = (up.wedge(&forward) * self.sensitivity * cursor_delta.1
-                        / -2.0)
-                        .exponentiate();
+                    let mut pitch_increase = self.sensitivity * cursor_delta.1;
+                    if (self.pitch + pitch_increase).abs() >= std::f32::consts::PI - 0.1 {
+                        pitch_increase = 0.0;
+                    }
+
+                    self.pitch += pitch_increase;
+                    self.yaw += self.sensitivity * cursor_delta.0;
+
+                    let pitch_rotation =
+                        (up.wedge(&forward) * pitch_increase / -2.0).exponentiate();
                     let yaw_rotation =
                         Bivector::new(0.0, 0.0, self.sensitivity * cursor_delta.0 / -2.0)
                             .exponentiate();
@@ -121,13 +120,10 @@ impl ComponentSystem for CameraComponent {
                 };
 
                 let raw_camera = RawCameraData::from_component(self, comp);
-                return vec![
-                    Box::new(UpdateCameraBufferAction(raw_camera.matrix, raw_camera.pos)),
-                    Box::new(SetCursorPositionAction(
-                        PhysicalPosition::new(window_resolution.0 / 2, window_resolution.1 / 2)
-                            .into(),
-                    )),
-                ];
+                return vec![Box::new(UpdateCameraBufferAction(
+                    raw_camera.matrix,
+                    raw_camera.pos,
+                ))];
             }
         }
         Vec::new()

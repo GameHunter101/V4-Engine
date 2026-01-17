@@ -13,12 +13,7 @@ use wgpu::vertex_attr_array;
 #[tokio::main]
 pub async fn main() {
     let mut engine = V4::builder()
-        .window_settings(
-            600,
-            600,
-            "Example V4 Project",
-            None,
-        )
+        .window_settings(600, 600, "Example V4 Project", None)
         .clear_color(wgpu::Color {
             r: 0.8,
             g: 0.15,
@@ -61,8 +56,8 @@ pub async fn main() {
         },
         "cam_ent" = {
             components: [
-                CameraComponent(field_of_view: 80.0, aspect_ratio: 1.0, near_plane: 0.1, far_plane: 50.0, sensitivity: 0.0008, movement_speed: 0.01, ident: "cam"),
-                TransformComponent(position: Vector3::new(0.1, 0.0, -1.0), uses_buffer: false),
+                CameraComponent(field_of_view: 80.0, aspect_ratio: 1.0, near_plane: 0.1, far_plane: 50.0, sensitivity: 0.002, movement_speed: 0.01, ident: "cam"),
+                TransformComponent(position: Vector3::new(0.0, 5.0, -5.0), rotation: Bivector::new(0.0, -std::f32::consts::FRAC_PI_4 / 2.0, 0.0).exponentiate(), uses_buffer: false),
             ]
         },
         "test_ent" = {

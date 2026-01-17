@@ -20,7 +20,7 @@ use wgpu::Device;
 use wgpu::{RenderPipeline, TextureFormat};
 
 use winit::{
-    event::{Event::WindowEvent, MouseButton},
+    event::{Event, MouseButton},
     event_loop::EventLoop,
     window::{Fullscreen, Window, WindowBuilder},
 };
@@ -68,6 +68,7 @@ pub struct EngineDetails {
     pub window_resolution: (u32, u32),
     pub cursor_position: (u32, u32),
     pub mouse_state: HashSet<MouseButton>,
+    pub cursor_delta: (f32, f32),
 }
 
 impl Default for EngineDetails {
@@ -79,6 +80,7 @@ impl Default for EngineDetails {
             window_resolution: (0, 0),
             cursor_position: (0, 0),
             mouse_state: HashSet::new(),
+            cursor_delta: (0.0, 0.0),
         }
     }
 }
@@ -99,11 +101,12 @@ impl V4 {
             Receiver<_>,
         ) = crossbeam_channel::unbounded();
 
+
         self.event_loop
             .run(move |event, elwt| {
                 self.input_manager.update(&event);
                 match &event {
-                    WindowEvent { event, .. } => match event {
+                    Event::WindowEvent { event, .. } => match event {
                         winit::event::WindowEvent::Resized(new_size) => {
                             self.rendering_manager
                                 .resize(new_size.width, new_size.height);
@@ -133,7 +136,13 @@ impl V4 {
                         }
                         _ => {}
                     },
-                    winit::event::Event::AboutToWait => {
+                    Event::DeviceEvent { event, ..} => match event {
+                        winit::event::DeviceEvent::MouseMotion { delta } => {
+                            self.details.cursor_delta = (delta.0 as f32, delta.1 as f32);
+                        },
+                        _ => {}
+                    }
+                    Event::AboutToWait => {
                         if self.scenes.is_empty() {
                             return;
                         }
@@ -207,6 +216,7 @@ impl V4 {
 
                         self.details.frames_elapsed += 1;
                         self.details.last_frame_instant = Instant::now();
+                        self.details.cursor_delta = (0.0, 0.0);
                     }
                     _ => {}
                 }
@@ -407,11 +417,11 @@ impl V4Builder {
             TextRenderer::new(&mut atlas, device, wgpu::MultisampleState::default(), None);
 
         window.set_cursor_visible(!self.hide_cursor);
-        /* if self.hide_cursor {
-            window.set_cursor_grab(winit::window::CursorGrabMode::Confined).unwrap_or_else(|_| {
-                window.set_cursor_grab(winit::window::CursorGrabMode::Locked).unwrap();
+        if self.hide_cursor {
+            window.set_cursor_grab(winit::window::CursorGrabMode::Locked).unwrap_or_else(|_| {
+                window.set_cursor_grab(winit::window::CursorGrabMode::Confined).unwrap();
             });
-        } */
+        }
 
         let font_state = FontState {
             font_system,
