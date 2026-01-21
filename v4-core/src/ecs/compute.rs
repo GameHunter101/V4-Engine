@@ -44,8 +44,8 @@ impl Compute {
             )),
             entries: &match attachment {
                 ShaderAttachment::Texture(tex) => match &tex.texture {
-                    super::material::GeneralTexture::Regular(_regular_tex) => vec![
-                        wgpu::BindGroupLayoutEntry {
+                    super::material::GeneralTexture::Regular(_regular_tex) => {
+                        let texture = wgpu::BindGroupLayoutEntry {
                             binding: 0,
                             visibility: ShaderStages::COMPUTE,
                             ty: wgpu::BindingType::Texture {
@@ -54,14 +54,19 @@ impl Compute {
                                 multisampled: false,
                             },
                             count: None,
-                        },
-                        wgpu::BindGroupLayoutEntry {
+                        };
+                        let sampler = wgpu::BindGroupLayoutEntry {
                             binding: 1,
                             visibility: ShaderStages::COMPUTE,
                             ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                             count: None,
-                        },
-                    ],
+                        };
+                        if tex.texture.is_sampled() {
+                            vec![texture, sampler]
+                        } else {
+                            vec![texture]
+                        }
+                    },
                     super::material::GeneralTexture::Storage(storage_tex) => {
                         vec![wgpu::BindGroupLayoutEntry {
                             binding: 0,
