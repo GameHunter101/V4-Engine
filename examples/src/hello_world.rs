@@ -1,12 +1,11 @@
 use algoe::bivector::Bivector;
 use nalgebra::Vector3;
 use v4::{
-    builtin_components::{
+    V4, builtin_components::{
         camera_component::CameraComponent,
         mesh_component::{MeshComponent, VertexDescriptor},
         transform_component::TransformComponent,
-    },
-    scene, V4,
+    }, component, ecs::component::{ComponentDetails, ComponentSystem, UpdateParams}, scene
 };
 use wgpu::vertex_attr_array;
 
@@ -72,6 +71,7 @@ pub async fn main() {
                         polygon_mode: wgpu::PolygonMode::Line,
                     }
                 },
+                ident: "some_mat",
             },
             components: [
                 MeshComponent(
@@ -81,7 +81,8 @@ pub async fn main() {
                 MeshComponent(
                     vertices: vec![vec![Vertex{pos: [-0.7, 0.0, 0.0]}, Vertex{pos: [0.0, 0.2, 0.0]}, Vertex{pos: [0.9, 0.9, 0.0]}, Vertex { pos: [-0.3, -0.3, 0.0] }]],
                     enabled_models: vec![(0, None)]
-                )
+                ),
+                HideComponent(mat: ident("some_mat"))
             ]
         }
     }
@@ -104,5 +105,30 @@ impl VertexDescriptor for Vertex {
         Self {
             pos: pos.try_into().unwrap(),
         }
+    }
+}
+
+#[component]
+struct HideComponent {
+    #[default(true)]
+    showing: bool,
+    mat: v4::ecs::component::ComponentId,
+}
+
+#[async_trait::async_trait]
+impl ComponentSystem for HideComponent {
+
+    async fn update(
+        &mut self,
+        UpdateParams { input_manager, materials, .. }: UpdateParams<'_, '_>,
+    ) -> v4::ecs::actions::ActionQueue {
+        let mut materials = materials.lock().unwrap();
+        if input_manager.key_pressed(winit::keyboard::KeyCode::KeyT) {
+            self.showing = !self.showing;
+            if let Some(mat) = materials.iter_mut().filter(|mat| mat.id() == self.mat).next() {
+                mat.set_enabled_state(self.showing);
+            }
+        }
+        Vec::new()
     }
 }

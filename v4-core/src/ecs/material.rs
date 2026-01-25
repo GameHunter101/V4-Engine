@@ -116,6 +116,7 @@ pub struct Material {
     bind_group_layouts: Vec<BindGroupLayout>,
     bind_groups: Vec<BindGroup>,
     is_initialized: bool,
+    is_enabled: bool,
 }
 
 impl Material {
@@ -134,6 +135,7 @@ impl Material {
             bind_group_layouts: Vec::new(),
             bind_groups: Vec::new(),
             is_initialized: false,
+            is_enabled: true,
         }
     }
 
@@ -376,8 +378,10 @@ impl ComponentDetails for Material {
     fn set_parent_entity(&mut self, _parent_id: EntityId) {}
 
     fn is_enabled(&self) -> bool {
-        true
+        self.is_enabled
     }
 
-    fn set_enabled_state(&mut self, _enabled_state: bool) {}
+    fn set_enabled_state(&mut self, enabled_state: bool) {
+        self.is_enabled = enabled_state;
+    }
 }

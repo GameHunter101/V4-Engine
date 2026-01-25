@@ -8,7 +8,10 @@ use wgpu::{
 };
 
 use crate::{
-    ecs::{component::ComponentSystem, scene::Scene},
+    ecs::{
+        component::{ComponentDetails, ComponentSystem},
+        scene::Scene,
+    },
     engine_management::pipeline::{create_render_pipeline, PipelineId},
     engine_support::texture_support,
 };
@@ -352,14 +355,13 @@ fn main(input: VertexOutput) -> @location(0) vec4<f32> {
                 occlusion_query_set: None,
             });
 
-
             for (pipeline_id, pipeline) in pipelines {
                 if pipeline_id.is_screen_space {
                     continue;
                 }
                 render_pass.set_pipeline(pipeline);
                 let materials_for_pipeline = scene.get_pipeline_materials(pipeline_id);
-                for material in materials_for_pipeline {
+                for material in materials_for_pipeline.iter().filter(|mat| mat.is_enabled()) {
                     if material.uses_camera() {
                         render_pass.set_bind_group(
                             0,
@@ -375,7 +377,7 @@ fn main(input: VertexOutput) -> @location(0) vec4<f32> {
             }
         }
 
-        for material in scene.materials() {
+        for material in scene.materials().iter().filter(|mat| mat.is_enabled()) {
             material.command_encoder_operations(
                 &self.device,
                 &self.queue,
