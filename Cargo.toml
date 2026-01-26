@@ -7,15 +7,15 @@ members = [ "examples", "v4",
 resolver = "2"
 
 [workspace.package]
-version = "0.2.55"
+version = "0.2.56"
 authors = ["Lior Carmeli"]
 
 [workspace.dependencies]
 bytemuck = { version = "1.18.0", features = ["derive"] }
 env_logger = "0.10.0"
-wgpu = {version = "24.0.1", features = ["spirv"]}
+wgpu = {version = "28.0.0", features = ["spirv"]}
 nalgebra = "0.33.2"
-smaa = "0.16.0"
+smaa = { git = "https://github.com/GameHunter101/smaa-rs" } #"0.18.0"
 futures = "0.3.30"
 tokio = {version = "1.40.0", features = ["full"]}
 # imgui = {version = "0.12.0", features = ["tables-api"]}
@@ -27,7 +27,7 @@ async-trait = "0.1.83"
 winit = "=0.29.15"
 winit_input_helper = "0.16.0"
 # imgui-winit-support = "=0.13.0"
-glyphon = "=0.8.0"
+glyphon = "0.10.0"
 tobj = { version = "4.0.2", features = ["async"] }
 crossbeam-channel = "0.5.14"
 algoe = { git = "https://github.com/GameHunter101/Algoe" }

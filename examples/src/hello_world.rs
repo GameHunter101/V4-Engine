@@ -1,11 +1,14 @@
 use algoe::bivector::Bivector;
 use nalgebra::Vector3;
 use v4::{
-    V4, builtin_components::{
+    builtin_components::{
         camera_component::CameraComponent,
         mesh_component::{MeshComponent, VertexDescriptor},
         transform_component::TransformComponent,
-    }, component, ecs::component::{ComponentDetails, ComponentSystem, UpdateParams}, scene
+    },
+    component,
+    ecs::component::{ComponentDetails, ComponentId, ComponentSystem, UpdateParams},
+    scene, V4,
 };
 use wgpu::vertex_attr_array;
 
@@ -19,7 +22,11 @@ pub async fn main() {
             b: 0.2,
             a: 1.0,
         })
-        .features(wgpu::Features::POLYGON_MODE_LINE)
+        .features(wgpu::Features::POLYGON_MODE_LINE | wgpu::Features::IMMEDIATES)
+        .limits(wgpu::Limits {
+            max_immediate_size: 4,
+            ..Default::default()
+        })
         .hide_cursor(true)
         .build()
         .await;
@@ -46,7 +53,10 @@ pub async fn main() {
                     fragment_shader_path: "shaders/hello_world/fragment.wgsl",
                     vertex_layouts: [Vertex::vertex_layout(), TransformComponent::vertex_layout::<1>()],
                     uses_camera: true,
+                    immediate_size: 4,
                 },
+                immediate_data: bytemuck::cast_slice(&[0.5_f32]).to_vec(),
+                ident: "immediate_mat"
             },
             components: [
                 TransformComponent(position: Vector3::new(1.0, 1.0, 1.4), ident: "thing"),
@@ -71,6 +81,7 @@ pub async fn main() {
                         polygon_mode: wgpu::PolygonMode::Line,
                     }
                 },
+                is_enabled: false,
                 ident: "some_mat",
             },
             components: [
@@ -82,7 +93,7 @@ pub async fn main() {
                     vertices: vec![vec![Vertex{pos: [-0.7, 0.0, 0.0]}, Vertex{pos: [0.0, 0.2, 0.0]}, Vertex{pos: [0.9, 0.9, 0.0]}, Vertex { pos: [-0.3, -0.3, 0.0] }]],
                     enabled_models: vec![(0, None)]
                 ),
-                HideComponent(mat: ident("some_mat"))
+                HideComponent(mat: ident("some_mat"), immediate_mat: ident("immediate_mat"))
             ]
         }
     }
@@ -110,23 +121,43 @@ impl VertexDescriptor for Vertex {
 
 #[component]
 struct HideComponent {
-    #[default(true)]
+    #[default(false)]
     showing: bool,
-    mat: v4::ecs::component::ComponentId,
+    mat: ComponentId,
+    immediate_mat: ComponentId,
 }
 
 #[async_trait::async_trait]
 impl ComponentSystem for HideComponent {
-
     async fn update(
         &mut self,
-        UpdateParams { input_manager, materials, .. }: UpdateParams<'_, '_>,
+        UpdateParams {
+            input_manager,
+            materials,
+            ..
+        }: UpdateParams<'_, '_>,
     ) -> v4::ecs::actions::ActionQueue {
         let mut materials = materials.lock().unwrap();
+
         if input_manager.key_pressed(winit::keyboard::KeyCode::KeyT) {
             self.showing = !self.showing;
-            if let Some(mat) = materials.iter_mut().filter(|mat| mat.id() == self.mat).next() {
+            if let Some(mat) = materials
+                .iter_mut()
+                .filter(|mat| mat.id() == self.mat)
+                .next()
+            {
                 mat.set_enabled_state(self.showing);
+            }
+            if let Some(mat) = materials
+                .iter_mut()
+                .filter(|mat| mat.id() == self.immediate_mat)
+                .next()
+            {
+                mat.set_immediate_data(bytemuck::cast_slice(&[if self.showing {
+                    1.0_f32
+                } else {
+                    0.5
+                }]));
             }
         }
         Vec::new()

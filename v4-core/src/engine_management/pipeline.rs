@@ -25,10 +25,11 @@ pub struct PipelineId {
     pub uses_camera: bool,
     pub is_screen_space: bool,
     pub geometry_details: GeometryDetails,
+    pub immediate_size: u32,
 }
 
 impl PipelineId {
-    pub fn vertex_layouts(&self) -> &[VertexBufferLayout] {
+    pub fn vertex_layouts<'a>(&'a self) -> &'a [VertexBufferLayout<'a>] {
         &self.vertex_layouts
     }
 
@@ -141,7 +142,7 @@ pub fn create_render_pipeline(
     let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some(&format!("{id:?} Pipeline Layout")),
         bind_group_layouts: &bind_group_layouts,
-        push_constant_ranges: &[],
+        immediate_size: id.immediate_size,
     });
 
     let vertex_shader_module =
@@ -208,7 +209,7 @@ pub fn create_render_pipeline(
                 write_mask: wgpu::ColorWrites::ALL,
             })],
         }),
-        multiview: None,
+        multiview_mask: None,
         cache: None,
     })
 }

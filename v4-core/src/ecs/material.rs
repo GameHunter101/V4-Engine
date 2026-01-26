@@ -115,6 +115,7 @@ pub struct Material {
     attachments: Vec<ShaderAttachment>,
     bind_group_layouts: Vec<BindGroupLayout>,
     bind_groups: Vec<BindGroup>,
+    immediate_data: Vec<u8>,
     is_initialized: bool,
     is_enabled: bool,
 }
@@ -125,6 +126,8 @@ impl Material {
         pipeline_id: PipelineId,
         attachments: Vec<ShaderAttachment>,
         entities_attached: Vec<EntityId>,
+        immediate_data: Vec<u8>,
+        is_enabled: bool,
     ) -> Self {
         Self {
             id,
@@ -134,8 +137,9 @@ impl Material {
             pipeline_id,
             bind_group_layouts: Vec::new(),
             bind_groups: Vec::new(),
+            immediate_data,
             is_initialized: false,
-            is_enabled: true,
+            is_enabled,
         }
     }
 
@@ -220,6 +224,14 @@ impl Material {
     pub fn pipeline_id(&self) -> &PipelineId {
         &self.pipeline_id
     }
+
+    pub fn get_immediate_data<'a>(&'a self) -> &'a [u8] {
+        &self.immediate_data
+    }
+
+    pub fn set_immediate_data(&mut self, immediate_data: &[u8]) {
+        self.immediate_data = immediate_data.to_vec();
+    }
 }
 
 #[async_trait::async_trait]
@@ -278,7 +290,7 @@ impl ComponentSystem for Material {
                 address_mode_w: wgpu::AddressMode::ClampToEdge,
                 mag_filter: wgpu::FilterMode::Linear,
                 min_filter: wgpu::FilterMode::Linear,
-                mipmap_filter: wgpu::FilterMode::Nearest,
+                mipmap_filter: wgpu::MipmapFilterMode::Nearest,
                 ..Default::default()
             });
 

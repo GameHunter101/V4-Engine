@@ -344,6 +344,8 @@ impl Scene {
         mut pipeline_id: PipelineId,
         attachments: Vec<ShaderAttachment>,
         entities_attached: Vec<EntityId>,
+        immediate_data: Vec<u8>,
+        is_enabled: bool,
     ) -> ComponentId {
         let id = self.materials.len() as ComponentId;
 
@@ -381,7 +383,7 @@ fn main(input: VertexInput) -> VertexOutput {
             self.screen_space_materials.push(id);
         }
 
-        let new_material = Material::new(id, pipeline_id.clone(), attachments, entities_attached);
+        let new_material = Material::new(id, pipeline_id.clone(), attachments, entities_attached, immediate_data, is_enabled);
 
         if let Some(entry) = self
             .pipeline_to_corresponding_materials

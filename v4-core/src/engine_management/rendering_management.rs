@@ -68,16 +68,13 @@ impl RenderingManager {
             .unwrap();
 
         let (device, queue) = adapter
-            .request_device(
-                &wgpu::DeviceDescriptor {
-                    label: Some("Renderer device descriptor"),
-                    memory_hints: wgpu::MemoryHints::Performance,
-                    required_features: features,
-                    required_limits: limits,
-                    ..Default::default()
-                },
-                None,
-            )
+            .request_device(&wgpu::DeviceDescriptor {
+                label: Some("Renderer device descriptor"),
+                memory_hints: wgpu::MemoryHints::Performance,
+                required_features: features,
+                required_limits: limits,
+                ..Default::default()
+            })
             .await
             .unwrap();
 
@@ -148,7 +145,7 @@ impl RenderingManager {
             address_mode_w: wgpu::AddressMode::ClampToEdge,
             mag_filter: wgpu::FilterMode::Linear,
             min_filter: wgpu::FilterMode::Linear,
-            mipmap_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::MipmapFilterMode::Nearest,
             lod_min_clamp: 0.0,
             lod_max_clamp: 100.0,
             ..Default::default()
@@ -246,6 +243,7 @@ fn main(input: VertexOutput) -> @location(0) vec4<f32> {
             uses_camera: false,
             is_screen_space: true,
             geometry_details: Default::default(),
+            immediate_size: 0,
         };
 
         let screen_space_output_pipeline = create_render_pipeline(
@@ -342,6 +340,7 @@ fn main(input: VertexOutput) -> @location(0) vec4<f32> {
                         load: wgpu::LoadOp::Clear(self.clear_color),
                         store: wgpu::StoreOp::Store,
                     },
+                    depth_slice: None,
                 })],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                     view: self.depth_texture.view_ref(),
@@ -353,6 +352,7 @@ fn main(input: VertexOutput) -> @location(0) vec4<f32> {
                 }),
                 timestamp_writes: None,
                 occlusion_query_set: None,
+                multiview_mask: None,
             });
 
             for (pipeline_id, pipeline) in pipelines {
@@ -370,6 +370,10 @@ fn main(input: VertexOutput) -> @location(0) vec4<f32> {
                                 .expect("No active camera buffer set"),
                             &[],
                         );
+                    }
+
+                    if pipeline_id.immediate_size != 0 {
+                        render_pass.set_immediates(0, material.get_immediate_data());
                     }
 
                     material.render(&self.device, &self.queue, &mut render_pass, &all_components);
@@ -440,10 +444,12 @@ fn main(input: VertexOutput) -> @location(0) vec4<f32> {
                                 load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
                                 store: wgpu::StoreOp::Store,
                             },
+                            depth_slice: None,
                         })],
                         depth_stencil_attachment: None,
                         timestamp_writes: None,
                         occlusion_query_set: None,
+                        multiview_mask: None,
                     });
 
                     effect_pass.set_pipeline(pipeline);
@@ -478,10 +484,12 @@ fn main(input: VertexOutput) -> @location(0) vec4<f32> {
                             load: wgpu::LoadOp::Load,
                             store: wgpu::StoreOp::Store,
                         },
+                        depth_slice: None,
                     })],
                     depth_stencil_attachment: None,
                     timestamp_writes: None,
                     occlusion_query_set: None,
+                    multiview_mask: None,
                 });
 
             screen_space_application_render_pass.set_pipeline(&self.screen_space_output_pipeline);
@@ -534,10 +542,12 @@ fn main(input: VertexOutput) -> @location(0) vec4<f32> {
                         load: wgpu::LoadOp::Load,
                         store: wgpu::StoreOp::Store,
                     },
+                    depth_slice: None,
                 })],
                 depth_stencil_attachment: None,
                 timestamp_writes: None,
                 occlusion_query_set: None,
+                multiview_mask: None,
             });
             font_state
                 .text_renderer

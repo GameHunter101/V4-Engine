@@ -31,8 +31,9 @@ impl FontState {
         text_buffer.set_text(
             font_system,
             text,
-            text_attributes.into_glyphon_attrs(),
+            &text_attributes.into_glyphon_attrs(),
             glyphon::Shaping::Advanced,
+            None,
         );
 
         self.text_buffers.insert(
@@ -69,8 +70,9 @@ impl FontState {
                 text_buffer.buffer.set_text(
                     font_system,
                     &new_text,
-                    attrs.into_glyphon_attrs(),
+                    &attrs.into_glyphon_attrs(),
                     glyphon::Shaping::Advanced,
+                    None,
                 );
                 text_buffer.attributes = attrs.clone();
             }
@@ -134,7 +136,7 @@ impl<'a> From<glyphon::Attrs<'a>> for TextAttributes {
 
 #[allow(clippy::wrong_self_convention)]
 impl TextAttributes {
-    fn into_glyphon_attrs(&self) -> glyphon::Attrs {
+    fn into_glyphon_attrs<'a>(&'a self) -> glyphon::Attrs<'a> {
         glyphon::Attrs::new()
             .color(self.color)
             .family(self.family.into_glyphon_family())
@@ -169,7 +171,7 @@ impl<'a> From<glyphon::Family<'a>> for FontFamily {
 
 #[allow(clippy::wrong_self_convention)]
 impl FontFamily {
-    fn into_glyphon_family(&self) -> glyphon::Family {
+    fn into_glyphon_family<'a>(&'a self) -> glyphon::Family<'a> {
         match self {
             FontFamily::Name(name) => glyphon::Family::Name(name),
             FontFamily::Serif => glyphon::Family::Serif,

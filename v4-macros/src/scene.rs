@@ -223,11 +223,24 @@ impl quote::ToTokens for SceneDescriptor {
             let pipeline_id = &pipeline_id_initializations[pipeline_id_index];
             let attachments = &mat.attachments;
             let entities_attached = &mat.entities_attached;
+            let immediate_data = if let Some(data) = mat.immediate_data.as_ref() {
+                quote! {#data}
+            } else {
+                quote! {Vec::new()}
+            };
+            let is_enabled = if let Some(enabled_lit) = mat.is_enabled.as_ref() {
+                quote! {#enabled_lit}
+            } else {
+                quote! {true}
+            };
+
             quote! {
                 #scene_name.create_material(
                     #pipeline_id,
                     vec![#(#attachments),*],
-                    vec![#(#entities_attached),*]
+                    vec![#(#entities_attached),*],
+                    #immediate_data,
+                    #is_enabled,
                 );
             }
         });
@@ -723,9 +736,9 @@ impl Parse for ComputeDescriptor {
         if let Some((ident_index, _)) = &ident_and_index {
             params.remove(
                 *ident_index, /* params
-                             .iter()
-                             .position(|param| param.value == Some(SimpleFieldValue::Literal(ident.clone())))
-                             .unwrap(), */
+                              .iter()
+                              .position(|param| param.value == Some(SimpleFieldValue::Literal(ident.clone())))
+                              .unwrap(), */
             );
         }
 
@@ -816,6 +829,8 @@ impl quote::ToTokens for SimpleFieldValue {
 struct MaterialDescriptor {
     pipeline_id: PipelineIdVariants,
     attachments: Vec<ShaderAttachmentDescriptor>,
+    immediate_data: Option<Expr>,
+    is_enabled: Option<LitBool>,
     ident: Option<Lit>,
 }
 
@@ -827,6 +842,8 @@ impl MaterialDescriptor {
 
         let mut pipeline_id: Option<ScreenSpacePipelineIdDescriptor> = None;
         let mut attachments: Vec<ShaderAttachmentDescriptor> = Vec::new();
+        let mut is_enabled: Option<LitBool> = None;
+        let mut immediate_data: Option<Expr> = None;
         let mut ident: Option<Lit> = None;
 
         for param in params {
@@ -842,6 +859,8 @@ impl MaterialDescriptor {
                 MaterialParameters::Attachments(specified_attachments) => {
                     attachments = specified_attachments
                 }
+                MaterialParameters::IsEnabled(enabled_lit) => is_enabled = Some(enabled_lit),
+                MaterialParameters::ImmediateData(data) => immediate_data = Some(data),
                 MaterialParameters::Ident(lit) => ident = Some(lit),
             }
         }
@@ -863,6 +882,8 @@ impl MaterialDescriptor {
         Ok(MaterialDescriptor {
             pipeline_id: PipelineIdVariants::ScreenSpace(pipeline_id),
             attachments,
+            immediate_data,
+            is_enabled,
             ident,
         })
     }
@@ -887,6 +908,8 @@ impl MaterialDescriptor {
             pipeline_id,
             attachments: self.attachments,
             entities_attached: vec![entity_ident],
+            immediate_data: self.immediate_data,
+            is_enabled: self.is_enabled,
         });
 
         Ok(materials.len() as ComponentId - 1)
@@ -901,6 +924,8 @@ impl Parse for MaterialDescriptor {
 
         let mut pipeline_id: Option<PipelineIdVariants> = None;
         let mut attachments: Vec<ShaderAttachmentDescriptor> = Vec::new();
+        let mut immediate_data: Option<Expr> = None;
+        let mut is_enabled: Option<LitBool> = None;
         let mut ident: Option<Lit> = None;
 
         for param in params {
@@ -911,6 +936,8 @@ impl Parse for MaterialDescriptor {
                 MaterialParameters::Attachments(specified_attachments) => {
                     attachments = specified_attachments
                 }
+                MaterialParameters::ImmediateData(data) => immediate_data = Some(data),
+                MaterialParameters::IsEnabled(enabled_lit) => is_enabled = Some(enabled_lit),
                 MaterialParameters::Ident(lit) => ident = Some(lit),
             }
         }
@@ -934,6 +961,8 @@ impl Parse for MaterialDescriptor {
         Ok(MaterialDescriptor {
             pipeline_id,
             attachments,
+            immediate_data,
+            is_enabled,
             ident,
         })
     }
@@ -943,11 +972,15 @@ struct TransformedMaterialDescriptor {
     pipeline_id: usize,
     attachments: Vec<ShaderAttachmentDescriptor>,
     entities_attached: Vec<EntityId>,
+    immediate_data: Option<Expr>,
+    is_enabled: Option<LitBool>,
 }
 
 enum MaterialParameters {
     Pipeline(PipelineIdVariants),
     Attachments(Vec<ShaderAttachmentDescriptor>),
+    IsEnabled(LitBool),
+    ImmediateData(Expr),
     Ident(Lit),
 }
 
@@ -970,6 +1003,8 @@ impl MaterialParameters {
                         .collect(),
                 ))
             }
+            "immediate_data" => Ok(Self::ImmediateData(input.parse()?)),
+            "is_enabled" => Ok(Self::IsEnabled(input.parse()?)),
             "ident" => Ok(Self::Ident(input.parse()?)),
             _ => Err(syn::Error::new_spanned(
                 field_identifier,
@@ -996,6 +1031,8 @@ impl Parse for MaterialParameters {
                         .collect(),
                 ))
             }
+            "immediate_data" => Ok(Self::ImmediateData(input.parse()?)),
+            "is_enabled" => Ok(Self::IsEnabled(input.parse()?)),
             "ident" => Ok(Self::Ident(input.parse()?)),
             _ => Err(syn::Error::new_spanned(
                 field_identifier,
@@ -1189,6 +1226,7 @@ struct PipelineIdDescriptor {
     attachments: Vec<TokenStream2>,
     uses_camera: LitBool,
     geometry_details: Option<GeometryDetailsDescriptor>,
+    immediate_size: Option<Expr>,
     ident: Option<Lit>,
 }
 
@@ -1204,6 +1242,7 @@ impl Parse for PipelineIdDescriptor {
         let mut vertex_layouts: Vec<ExprCall> = Vec::new();
         let mut uses_camera: Option<LitBool> = None;
         let mut geometry_details: Option<GeometryDetailsDescriptor> = None;
+        let mut immediate_size: Option<Expr> = None;
         let mut ident: Option<Lit> = None;
 
         for field in fields {
@@ -1340,6 +1379,12 @@ impl Parse for PipelineIdDescriptor {
                         }
                     }
                 }
+                "immediate_size" => {
+                    if let Some(value) = field.value {
+                        let expr = quote! {#value};
+                        immediate_size = Some(parse2::<Expr>(expr)?);
+                    }
+                }
                 "ident" => {
                     if let Some(SimpleFieldValue::Literal(lit)) = field.value {
                         ident = Some(lit);
@@ -1374,6 +1419,7 @@ impl Parse for PipelineIdDescriptor {
             vertex_layouts,
             uses_camera,
             geometry_details,
+            immediate_size,
             ident,
         })
     }
@@ -1390,6 +1436,7 @@ impl quote::ToTokens for PipelineIdDescriptor {
             vertex_layouts,
             uses_camera,
             geometry_details,
+            immediate_size,
             ..
         } = self;
         let geometry_details = match geometry_details {
@@ -1407,6 +1454,12 @@ impl quote::ToTokens for PipelineIdDescriptor {
             quote! {false}
         };
 
+        let immediate_size = if let Some(expr) = immediate_size.as_ref() {
+            quote! {#expr}
+        } else {
+            quote! {0}
+        };
+
         tokens.extend(quote! {
             v4::engine_management::pipeline::PipelineId {
                 vertex_shader: v4::engine_management::pipeline::PipelineShader::Path(#vertex_shader_path),
@@ -1418,6 +1471,7 @@ impl quote::ToTokens for PipelineIdDescriptor {
                 uses_camera: #uses_camera,
                 is_screen_space: false,
                 geometry_details: #geometry_details,
+                immediate_size: #immediate_size
             }
         });
     }

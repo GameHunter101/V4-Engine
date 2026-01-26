@@ -116,7 +116,7 @@ impl Compute {
                                 address_mode_w: wgpu::AddressMode::ClampToEdge,
                                 mag_filter: wgpu::FilterMode::Linear,
                                 min_filter: wgpu::FilterMode::Linear,
-                                mipmap_filter: wgpu::FilterMode::Nearest,
+                                mipmap_filter: wgpu::MipmapFilterMode::Nearest,
                                 lod_min_clamp: 0.0,
                                 lod_max_clamp: 100.0,
                                 compare: Some(wgpu::CompareFunction::LessEqual),
@@ -162,7 +162,7 @@ impl Compute {
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some(&format!("Compute {compute_id} pipeline layout")),
             bind_group_layouts,
-            push_constant_ranges: &[],
+            immediate_size: 0,
         });
 
         let module =
