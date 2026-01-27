@@ -57,6 +57,7 @@ impl Entity {
         &self.children_ids
     }
 
+    /// If this returns 0 then the entity is top-level and does not have a parent
     pub fn parent_entity_id(&self) -> EntityId {
         self.parent_entity_id
     }

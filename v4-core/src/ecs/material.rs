@@ -348,6 +348,9 @@ impl ComponentSystem for Material {
 
         for range in &self.component_ranges {
             for component in &other_components[range.clone()] {
+                if !component.is_enabled() {
+                    continue;
+                }
                 component.render(device, queue, render_pass, other_components);
             }
         }

@@ -449,7 +449,7 @@ impl Parse for EntityParameters {
             }
             "material" => Ok(EntityParameters::Material(input.parse()?)),
             "parent" => Ok(EntityParameters::Parent(input.parse()?)),
-            "enabled" => {
+            "is_enabled" => {
                 let lit: Lit = input.parse()?;
                 if let Lit::Bool(lit_bool) = lit {
                     Ok(EntityParameters::Enabled(lit_bool.value))

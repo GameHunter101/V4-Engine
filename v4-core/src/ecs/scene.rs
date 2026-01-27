@@ -169,13 +169,16 @@ impl Scene {
 
         let active_camera = self.active_camera();
         let entities = &self.entities;
+
+        let enabled_components: Vec<usize> = (0..self.components.len())
+            .filter(|i| self.is_component_enabled(&*self.components[*i]))
+            .collect();
+
         let all_components: &mut Vec<Component> = &mut self.components;
 
-        let actions: Vec<_> = (0..all_components.len())
+        let actions: Vec<_> = enabled_components
+            .into_iter()
             .map(|i| {
-                if !all_components[i].is_enabled() {
-                    return Vec::new();
-                }
                 let (previous_components, rest_of_components) = all_components.split_at_mut(i);
                 let Some((current_component, later_components)) =
                     rest_of_components.split_first_mut()
@@ -267,6 +270,13 @@ impl Scene {
     ) {
         let active_camera = self.active_camera();
         let entities = &self.entities;
+        let entity_component_groupings: HashMap<EntityId, Range<usize>> = self
+            .entity_component_groupings
+            .clone()
+            .into_iter()
+            .filter(|(ent, _)| self.is_entity_enabled(*ent))
+            .collect();
+
         let all_materials: &mut Vec<Material> = &mut self.materials;
 
         let workload_outputs = &self.workload_outputs;
@@ -286,7 +296,7 @@ impl Scene {
                     .collect(),
             ));
             let computes = &self.computes;
-            let entity_component_groupings = self.entity_component_groupings.clone();
+            let entity_component_groupings = entity_component_groupings.clone();
 
             let all_components = all_components.clone();
             let other_materials = other_materials.clone();
@@ -383,7 +393,14 @@ fn main(input: VertexInput) -> VertexOutput {
             self.screen_space_materials.push(id);
         }
 
-        let new_material = Material::new(id, pipeline_id.clone(), attachments, entities_attached, immediate_data, is_enabled);
+        let new_material = Material::new(
+            id,
+            pipeline_id.clone(),
+            attachments,
+            entities_attached,
+            immediate_data,
+            is_enabled,
+        );
 
         if let Some(entry) = self
             .pipeline_to_corresponding_materials
@@ -604,5 +621,25 @@ fn main(input: VertexInput) -> VertexOutput {
 
     pub fn materials(&self) -> &[Material] {
         &self.materials
+    }
+
+    pub fn is_entity_enabled(&self, entity: EntityId) -> bool {
+        let mut predecessor_entity_id = entity;
+        while predecessor_entity_id != 0 {
+            let ent = &self.entities[&predecessor_entity_id];
+            if !ent.is_enabled() {
+                return false;
+            }
+            predecessor_entity_id = ent.parent_entity_id();
+        }
+
+        true
+    }
+    pub fn is_component_enabled(&self, component: &dyn ComponentSystem) -> bool {
+        if !component.is_enabled() {
+            false
+        } else {
+            self.is_entity_enabled(component.parent_entity_id())
+        }
     }
 }

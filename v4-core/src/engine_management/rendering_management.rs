@@ -361,7 +361,10 @@ fn main(input: VertexOutput) -> @location(0) vec4<f32> {
                 }
                 render_pass.set_pipeline(pipeline);
                 let materials_for_pipeline = scene.get_pipeline_materials(pipeline_id);
-                for material in materials_for_pipeline.iter().filter(|mat| mat.is_enabled()) {
+                for material in materials_for_pipeline
+                    .iter()
+                    .filter(|mat| scene.is_component_enabled(**mat))
+                {
                     if material.uses_camera() {
                         render_pass.set_bind_group(
                             0,

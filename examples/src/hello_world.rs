@@ -1,13 +1,17 @@
 use algoe::bivector::Bivector;
 use nalgebra::Vector3;
 use v4::{
+    builtin_actions::EntityToggleAction,
     builtin_components::{
         camera_component::CameraComponent,
         mesh_component::{MeshComponent, VertexDescriptor},
         transform_component::TransformComponent,
     },
     component,
-    ecs::component::{ComponentDetails, ComponentId, ComponentSystem, UpdateParams},
+    ecs::{
+        component::{ComponentDetails, ComponentId, ComponentSystem, UpdateParams},
+        entity::EntityId,
+    },
     scene, V4,
 };
 use wgpu::vertex_attr_array;
@@ -46,23 +50,6 @@ pub async fn main() {
                 }
             }
         ], */
-        _ = {
-            material: {
-                pipeline: {
-                    vertex_shader_path: "shaders/hello_world/vertex.wgsl",
-                    fragment_shader_path: "shaders/hello_world/fragment.wgsl",
-                    vertex_layouts: [Vertex::vertex_layout(), TransformComponent::vertex_layout::<1>()],
-                    uses_camera: true,
-                    immediate_size: 4,
-                },
-                immediate_data: bytemuck::cast_slice(&[0.5_f32]).to_vec(),
-                ident: "immediate_mat"
-            },
-            components: [
-                TransformComponent(position: Vector3::new(1.0, 1.0, 1.4), ident: "thing"),
-                MeshComponent<Vertex>::from_obj("assets/models/basic_cube.obj", true).ident("unused ident").await.unwrap(),
-            ]
-        },
         "cam_ent" = {
             components: [
                 CameraComponent(field_of_view: 80.0, aspect_ratio: 1.0, near_plane: 0.1, far_plane: 50.0, sensitivity: 0.002, movement_speed: 0.01, ident: "cam"),
@@ -81,8 +68,6 @@ pub async fn main() {
                         polygon_mode: wgpu::PolygonMode::Line,
                     }
                 },
-                is_enabled: false,
-                ident: "some_mat",
             },
             components: [
                 MeshComponent(
@@ -93,9 +78,27 @@ pub async fn main() {
                     vertices: vec![vec![Vertex{pos: [-0.7, 0.0, 0.0]}, Vertex{pos: [0.0, 0.2, 0.0]}, Vertex{pos: [0.9, 0.9, 0.0]}, Vertex { pos: [-0.3, -0.3, 0.0] }]],
                     enabled_models: vec![(0, None)]
                 ),
-                HideComponent(mat: ident("some_mat"), immediate_mat: ident("immediate_mat"))
+            ],
+            is_enabled: false,
+        },
+        _ = {
+            material: {
+                pipeline: {
+                    vertex_shader_path: "shaders/hello_world/vertex.wgsl",
+                    fragment_shader_path: "shaders/hello_world/fragment.wgsl",
+                    vertex_layouts: [Vertex::vertex_layout(), TransformComponent::vertex_layout::<1>()],
+                    uses_camera: true,
+                    immediate_size: 4,
+                },
+                immediate_data: bytemuck::cast_slice(&[0.5_f32]).to_vec(),
+                ident: "immediate_mat"
+            },
+            components: [
+                TransformComponent(position: Vector3::new(1.0, 1.0, 1.4), ident: "thing"),
+                MeshComponent<Vertex>::from_obj("assets/models/basic_cube.obj", true).ident("unused ident").await.unwrap(),
+                HideComponent(entity: ident("test_ent"), immediate_mat: ident("immediate_mat"))
             ]
-        }
+        },
     }
 
     engine.attach_scene(hello_scene);
@@ -123,7 +126,7 @@ impl VertexDescriptor for Vertex {
 struct HideComponent {
     #[default(false)]
     showing: bool,
-    mat: ComponentId,
+    entity: EntityId,
     immediate_mat: ComponentId,
 }
 
@@ -141,13 +144,13 @@ impl ComponentSystem for HideComponent {
 
         if input_manager.key_pressed(winit::keyboard::KeyCode::KeyT) {
             self.showing = !self.showing;
-            if let Some(mat) = materials
+            /* if let Some(mat) = materials
                 .iter_mut()
                 .filter(|mat| mat.id() == self.mat)
                 .next()
             {
                 mat.set_enabled_state(self.showing);
-            }
+            } */
             if let Some(mat) = materials
                 .iter_mut()
                 .filter(|mat| mat.id() == self.immediate_mat)
@@ -159,6 +162,7 @@ impl ComponentSystem for HideComponent {
                     0.5
                 }]));
             }
+            return vec![Box::new(EntityToggleAction(self.entity, None))];
         }
         Vec::new()
     }
