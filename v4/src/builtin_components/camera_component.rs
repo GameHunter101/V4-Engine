@@ -7,11 +7,11 @@ use crate::{
 use algoe::{bivector::Bivector, vector::GeometricOperations};
 use nalgebra::{Matrix4, Vector3, Vector4};
 use v4_core::{
+    EngineDetails,
     ecs::{
         actions::ActionQueue,
         component::{ComponentDetails, ComponentSystem, UpdateParams},
     },
-    EngineDetails,
 };
 use v4_macros::component;
 use winit::keyboard::KeyCode;
@@ -120,10 +120,7 @@ impl ComponentSystem for CameraComponent {
                 };
 
                 let raw_camera = RawCameraData::from_component(self, comp);
-                return vec![Box::new(UpdateCameraBufferAction(
-                    raw_camera.matrix,
-                    raw_camera.pos,
-                ))];
+                return vec![Box::new(UpdateCameraBufferAction(raw_camera))];
             }
         }
         Vec::new()
@@ -132,9 +129,11 @@ impl ComponentSystem for CameraComponent {
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-struct RawCameraData {
+pub struct RawCameraData {
     matrix: [[f32; 4]; 4],
+    inv_matrix: [[f32; 4]; 4],
     pos: [f32; 3],
+    padding: f32,
 }
 
 impl RawCameraData {
@@ -162,9 +161,13 @@ impl RawCameraData {
             Vector4::new(0.0, 0.0, -(far_plane * near_plane) / difference, 0.0),
         ]);
 
+        let matrix =projection_matrix * view_matrix;
+
         Self {
-            matrix: (projection_matrix * view_matrix).into(),
+            matrix: matrix.into(),
+            inv_matrix: matrix.try_inverse().unwrap().into(),
             pos: pos.into(),
+            padding: 0.0,
         }
     }
 }

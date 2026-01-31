@@ -1,6 +1,9 @@
 use algoe::bivector::Bivector;
 use nalgebra::Vector3;
+use v4::ecs::compute::Compute;
+use v4::ecs::material::{ShaderAttachment, ShaderTextureAttachment};
 use v4::{
+    V4,
     builtin_actions::EntityToggleAction,
     builtin_components::{
         camera_component::CameraComponent,
@@ -12,7 +15,8 @@ use v4::{
         component::{ComponentDetails, ComponentId, ComponentSystem, UpdateParams},
         entity::EntityId,
     },
-    scene, V4,
+    engine_support::texture_support::Texture,
+    scene,
 };
 use wgpu::vertex_attr_array;
 
@@ -34,6 +38,10 @@ pub async fn main() {
         .hide_cursor(true)
         .build()
         .await;
+
+    let rendering_manager = engine.rendering_manager();
+    let device = rendering_manager.device();
+    let queue = rendering_manager.queue();
 
     scene! {
         scene: hello_scene,
@@ -66,7 +74,7 @@ pub async fn main() {
                     geometry_details: {
                         topology: wgpu::PrimitiveTopology::LineList,
                         polygon_mode: wgpu::PolygonMode::Line,
-                    }
+                    },
                 },
             },
             components: [
@@ -80,6 +88,91 @@ pub async fn main() {
                 ),
             ],
             is_enabled: false,
+        },
+        "skybox" = {
+            material: {
+                pipeline: {
+                    vertex_shader_path: "shaders/hello_world/skybox_vertex.wgsl",
+                    fragment_shader_path: "shaders/hello_world/skybox_fragment.wgsl",
+                    vertex_layouts: [Vertex::vertex_layout()],
+                    uses_camera: true,
+                },
+                attachments: [
+                    Texture(
+                        texture: Texture::create_texture(
+                            device,
+                            1024,
+                            1024,
+                            wgpu::TextureFormat::Rgba32Float,
+                            None,
+                            true,
+                            true,
+                            false,
+                            wgpu::TextureUsages::COPY_DST,
+                        ),
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        extra_usages: wgpu::TextureUsages::empty(),
+                    )
+                ],
+                ident: "skybox_mat"
+            },
+            components: [
+
+                MeshComponent(
+                    vertices: vec![
+                        vec![
+                            Vertex {pos: [-1.0, 3.0, 1.0],},
+                            Vertex {pos: [-1.0, -1.0, 1.0]},
+                            Vertex {pos: [3.0, -1.0, 1.0],}
+                        ]
+                    ],
+                    indices: vec![
+                        vec![0, 1, 2],
+                    ],
+                    enabled_models: vec![(0, None)]
+                ),
+                SkyboxComponent(compute: ident("skybox_comp"), skybox_mat: ident("skybox_mat"))
+            ],
+            computes: [
+                Compute(
+                    shader_path: "./shaders/hello_world/skybox_compute.wgsl",
+                    input: vec![
+                    ShaderAttachment::Texture (
+                            ShaderTextureAttachment {
+                                texture: Texture::open_hdr(
+                                    "./assets/testing_textures/citrus_orchard_road_puresky_2k.hdr",
+                                    device,
+                                    queue,
+                                    wgpu::TextureFormat::Rgba32Float,
+                                    None,
+                                    wgpu::TextureUsages::empty(),
+                                ).await.unwrap(),
+                                visibility: wgpu::ShaderStages::FRAGMENT,
+                                extra_usages: wgpu::TextureUsages::empty(),
+                            }
+                        ),
+                    ],
+                    output: ShaderAttachment::Texture(
+                        ShaderTextureAttachment {
+                            texture: Texture::create_texture(
+                                device,
+                                1024,
+                                1024,
+                                wgpu::TextureFormat::Rgba32Float,
+                                Some(wgpu::StorageTextureAccess::WriteOnly),
+                                false,
+                                true,
+                                false,
+                                wgpu::TextureUsages::COPY_SRC,
+                            ),
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            extra_usages: wgpu::TextureUsages::empty(),
+                        }
+                    ),
+                    workgroup_counts: ((1024 + 15)/16, (1024 + 15)/16, 6),
+                    ident: "skybox_comp"
+                )
+            ]
         },
         _ = {
             material: {
@@ -97,7 +190,7 @@ pub async fn main() {
                 TransformComponent(position: Vector3::new(1.0, 1.0, 1.4), ident: "thing"),
                 MeshComponent<Vertex>::from_obj("assets/models/basic_cube.obj", true).ident("unused ident").await.unwrap(),
                 HideComponent(entity: ident("test_ent"), immediate_mat: ident("immediate_mat"))
-            ]
+            ],
         },
     }
 
@@ -165,5 +258,41 @@ impl ComponentSystem for HideComponent {
             return vec![Box::new(EntityToggleAction(self.entity, None))];
         }
         Vec::new()
+    }
+}
+
+#[component]
+struct SkyboxComponent {
+    compute: ComponentId,
+    skybox_mat: ComponentId,
+}
+
+impl ComponentSystem for SkyboxComponent {
+    fn command_encoder_operations(
+        &self,
+        _device: &wgpu::Device,
+        _queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        _other_components: &[&v4::ecs::component::Component],
+        materials: &[v4::ecs::material::Material],
+        computes: &[Compute],
+    ) {
+        if let Some(mat) = materials
+            .iter()
+            .filter(|mat| mat.id() == self.skybox_mat)
+            .next()
+            && let Some(compute) = computes
+                .iter()
+                .filter(|compute| compute.id() == self.compute)
+                .next()
+            && let Some(ShaderAttachment::Texture(src)) = &compute.output_attachments()
+            && let ShaderAttachment::Texture(dst) = &mat.attachments()[0]
+        {
+            encoder.copy_texture_to_texture(
+                src.texture.texture().as_image_copy(),
+                dst.texture.texture().as_image_copy(),
+                src.texture.texture().size(),
+            );
+        }
     }
 }

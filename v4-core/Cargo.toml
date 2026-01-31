@@ -2,7 +2,7 @@
 name = "v4-core"
 version.workspace = true
 authors.workspace = true
-edition = "2021"
+edition = "2024"
 
 [dependencies]
 bytemuck.workspace = true

@@ -6,7 +6,9 @@ use wgpu::{
 };
 
 use crate::{
-    ecs::compute::Compute, engine_management::pipeline::PipelineId, engine_support::texture_support::{StorageTexture, Texture}
+    ecs::compute::Compute,
+    engine_management::pipeline::PipelineId,
+    engine_support::texture_support::{StorageTexture, Texture},
 };
 
 use super::{
@@ -54,6 +56,27 @@ impl GeneralTexture {
         match self {
             GeneralTexture::Regular(texture) => texture.is_sampled(),
             GeneralTexture::Storage(_) => false,
+        }
+    }
+
+    pub fn is_storage(&self) -> bool {
+        match self {
+            GeneralTexture::Regular(_) => false,
+            GeneralTexture::Storage(_) => true,
+        }
+    }
+
+    pub fn is_cubemap(&self) -> bool {
+        match self {
+            GeneralTexture::Regular(tex) => tex.is_cubemap(),
+            GeneralTexture::Storage(tex) => tex.is_cubemap(),
+        }
+    }
+
+    pub fn is_filtered(&self) -> bool {
+        match self {
+            GeneralTexture::Regular(tex) => tex.is_filtered(),
+            GeneralTexture::Storage(tex) => tex.is_filtered(),
         }
     }
 }
@@ -157,8 +180,14 @@ impl Material {
                     binding: 0,
                     visibility: tex.visibility,
                     ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::D2,
+                        sample_type: wgpu::TextureSampleType::Float {
+                            filterable: tex.texture.is_filtered(),
+                        },
+                        view_dimension: if tex.texture.is_cubemap() {
+                            wgpu::TextureViewDimension::Cube
+                        } else {
+                            wgpu::TextureViewDimension::D2
+                        },
                         multisampled: false,
                     },
                     count: None,
@@ -252,25 +281,26 @@ impl ComponentSystem for Material {
                     (bind_group_layout, bind_group)
                 })
                 .unzip();
-        let (has_sampler, sampler_visibility) =
-            self.attachments()
-                .iter()
-                .fold((false, wgpu::ShaderStages::NONE), |acc, attachment| {
-                    if let ShaderAttachment::Texture(ShaderTextureAttachment {
-                        texture,
-                        visibility,
-                        ..
-                    }) = attachment
-                    {
-                        if texture.is_sampled() {
-                            (true, acc.1 | *visibility)
-                        } else {
-                            acc
-                        }
+        // TODO: detect if two different samplers are needed, filtering and non-filtering
+        let (has_sampler, sampler_visibility, filtering) = self.attachments().iter().fold(
+            (false, wgpu::ShaderStages::NONE, true),
+            |acc, attachment| {
+                if let ShaderAttachment::Texture(ShaderTextureAttachment {
+                    texture,
+                    visibility,
+                    ..
+                }) = attachment
+                {
+                    if texture.is_sampled() {
+                        (true, acc.1 | *visibility, texture.is_filtered())
                     } else {
                         acc
                     }
-                });
+                } else {
+                    acc
+                }
+            },
+        );
 
         if has_sampler {
             let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -278,7 +308,11 @@ impl ComponentSystem for Material {
                 entries: &[wgpu::BindGroupLayoutEntry {
                     binding: 0,
                     visibility: sampler_visibility,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    ty: wgpu::BindingType::Sampler(if filtering {
+                        wgpu::SamplerBindingType::Filtering
+                    } else {
+                        wgpu::SamplerBindingType::NonFiltering
+                    }),
                     count: None,
                 }],
             });
@@ -288,8 +322,8 @@ impl ComponentSystem for Material {
                 address_mode_u: wgpu::AddressMode::ClampToEdge,
                 address_mode_v: wgpu::AddressMode::ClampToEdge,
                 address_mode_w: wgpu::AddressMode::ClampToEdge,
-                mag_filter: wgpu::FilterMode::Linear,
-                min_filter: wgpu::FilterMode::Linear,
+                mag_filter: if filtering {wgpu::FilterMode::Linear} else {wgpu::FilterMode::Nearest},
+                min_filter: if filtering {wgpu::FilterMode::Linear} else {wgpu::FilterMode::Nearest},
                 mipmap_filter: wgpu::MipmapFilterMode::Nearest,
                 ..Default::default()
             });
@@ -367,7 +401,14 @@ impl ComponentSystem for Material {
     ) {
         for range in &self.component_ranges {
             for component in &other_components[range.clone()] {
-                component.command_encoder_operations(device, queue, encoder, other_components, materials, computes);
+                component.command_encoder_operations(
+                    device,
+                    queue,
+                    encoder,
+                    other_components,
+                    materials,
+                    computes,
+                );
             }
         }
     }

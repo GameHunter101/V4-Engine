@@ -34,7 +34,7 @@ algoe = { git = "https://github.com/GameHunter101/Algoe" }
 downcast-rs = "2.0.1"
 
 [workspace.dependencies.image]
-version = "0.25.2"
+version = "0.25.9"
 default-features = false
-features = ["png", "jpeg"]
+features = ["png", "jpeg", "hdr"]
 

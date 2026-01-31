@@ -1,8 +1,6 @@
 use std::hash::{DefaultHasher, Hash, Hasher};
 
-use wgpu::{
-    BindGroup, BindGroupLayout, ComputePass, ComputePipeline, Device,  ShaderStages,
-};
+use wgpu::{BindGroup, BindGroupLayout, ComputePass, ComputePipeline, Device, ShaderStages};
 
 use crate::engine_management::pipeline::{load_shader_module_descriptor, PipelineShader};
 
@@ -49,8 +47,14 @@ impl Compute {
                             binding: 0,
                             visibility: ShaderStages::COMPUTE,
                             ty: wgpu::BindingType::Texture {
-                                sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                                view_dimension: wgpu::TextureViewDimension::D2,
+                                sample_type: wgpu::TextureSampleType::Float {
+                                    filterable: tex.texture.is_filtered(),
+                                },
+                                view_dimension: if tex.texture.is_cubemap() {
+                                    wgpu::TextureViewDimension::D2Array
+                                } else {
+                                    wgpu::TextureViewDimension::D2
+                                },
                                 multisampled: false,
                             },
                             count: None,
@@ -66,7 +70,7 @@ impl Compute {
                         } else {
                             vec![texture]
                         }
-                    },
+                    }
                     super::material::GeneralTexture::Storage(storage_tex) => {
                         vec![wgpu::BindGroupLayoutEntry {
                             binding: 0,
@@ -74,7 +78,11 @@ impl Compute {
                             ty: wgpu::BindingType::StorageTexture {
                                 access: storage_tex.access(),
                                 format: storage_tex.format(),
-                                view_dimension: wgpu::TextureViewDimension::D2,
+                                view_dimension: if storage_tex.is_cubemap() {
+                                    wgpu::TextureViewDimension::D2Array
+                                } else {
+                                    wgpu::TextureViewDimension::D2
+                                },
                             },
                             count: None,
                         }]
@@ -333,7 +341,7 @@ impl Default for ComputeBuilder {
             workgroup_counts: (0, 0, 0),
             id: 0,
             enabled: true,
-            iterate_count: 1
+            iterate_count: 1,
         }
     }
 }

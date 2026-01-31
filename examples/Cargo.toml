@@ -1,6 +1,6 @@
 [package]
 name = "v4-examples"
-edition = "2021"
+edition = "2024"
 version.workspace = true
 authors.workspace = true
 

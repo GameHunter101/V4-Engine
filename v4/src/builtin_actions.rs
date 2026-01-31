@@ -18,6 +18,8 @@ use v4_core::{
 };
 use wgpu::{util::DeviceExt, Device, Queue};
 
+use crate::builtin_components::camera_component::RawCameraData;
+
 pub struct WorkloadAction(pub ComponentId, pub Workload);
 
 impl Debug for WorkloadAction {
@@ -174,16 +176,12 @@ impl Action for DisableCameraAction {
 }
 
 #[derive(Debug)]
-pub struct UpdateCameraBufferAction(pub [[f32; 4]; 4], pub [f32; 3]);
+pub struct UpdateCameraBufferAction(pub RawCameraData);
 
 impl Action for UpdateCameraBufferAction {
     fn execute(self: Box<Self>, scene: &mut Scene, device: &Device, queue: &Queue) {
-        let buf = bytemuck::cast_slice(&self.0)
-            .into_iter()
-            .chain(bytemuck::cast_slice(&self.1))
-            .copied()
-            .chain([0; 4])
-            .collect::<Vec<_>>();
+        let arr = [self.0];
+        let buf = bytemuck::cast_slice(&arr);
         if let Some(camera_buffer) = scene.active_camera_buffer() {
             queue.write_buffer(camera_buffer, 0, &buf);
         } else {
