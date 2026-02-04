@@ -2,9 +2,9 @@ use std::{collections::HashMap, fmt::Debug};
 
 use smaa::SmaaTarget;
 use wgpu::{
+    Device, Queue, RenderPipeline, TextureUsages,
     rwh::{HasDisplayHandle, HasWindowHandle},
     util::DeviceExt,
-    Device, Queue, RenderPipeline, TextureUsages,
 };
 
 use crate::{
@@ -12,7 +12,7 @@ use crate::{
         component::{ComponentDetails, ComponentSystem},
         scene::Scene,
     },
-    engine_management::pipeline::{create_render_pipeline, PipelineId},
+    engine_management::pipeline::{PipelineId, create_render_pipeline},
     engine_support::texture_support,
 };
 
@@ -244,6 +244,7 @@ fn main(input: VertexOutput) -> @location(0) vec4<f32> {
             is_screen_space: true,
             geometry_details: Default::default(),
             immediate_size: 0,
+            render_priority: i32::MAX,
         };
 
         let screen_space_output_pipeline = create_render_pipeline(
@@ -355,7 +356,11 @@ fn main(input: VertexOutput) -> @location(0) vec4<f32> {
                 multiview_mask: None,
             });
 
-            for (pipeline_id, pipeline) in pipelines {
+            let mut sorted_pipelines: Vec<(&PipelineId, &RenderPipeline)> =
+                Vec::from_iter(pipelines);
+            sorted_pipelines.sort_by(|(a, _), (b, _)| a.render_priority.cmp(&b.render_priority));
+
+            for (pipeline_id, pipeline) in sorted_pipelines {
                 if pipeline_id.is_screen_space {
                     continue;
                 }

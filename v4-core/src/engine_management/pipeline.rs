@@ -26,6 +26,7 @@ pub struct PipelineId {
     pub is_screen_space: bool,
     pub geometry_details: GeometryDetails,
     pub immediate_size: u32,
+    pub render_priority: i32,
 }
 
 impl PipelineId {

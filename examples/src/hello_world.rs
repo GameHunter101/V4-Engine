@@ -96,6 +96,7 @@ pub async fn main() {
                     fragment_shader_path: "shaders/hello_world/skybox_fragment.wgsl",
                     vertex_layouts: [Vertex::vertex_layout()],
                     uses_camera: true,
+                    render_priority: -1,
                 },
                 attachments: [
                     Texture(

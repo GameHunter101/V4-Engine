@@ -7,7 +7,7 @@ members = [ "examples", "v4",
 resolver = "2"
 
 [workspace.package]
-version = "0.2.58"
+version = "0.2.59"
 authors = ["Lior Carmeli"]
 
 [workspace.dependencies]

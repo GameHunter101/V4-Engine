@@ -1,14 +1,14 @@
 use std::collections::HashMap;
 
 use proc_macro2::{TokenStream as TokenStream2, TokenTree};
-use quote::{format_ident, quote, ToTokens};
+use quote::{ToTokens, format_ident, quote};
 use syn::{
-    braced, bracketed, parenthesized,
-    parse::{discouraged::Speculative, Parse, ParseStream},
+    AngleBracketedGenericArguments, Expr, ExprCall, ExprPath, Ident, Lit, LitBool, LitInt, LitStr,
+    Token, braced, bracketed, parenthesized,
+    parse::{Parse, ParseStream, discouraged::Speculative},
     parse2,
     punctuated::Punctuated,
     spanned::Spanned,
-    AngleBracketedGenericArguments, Expr, ExprCall, ExprPath, Ident, Lit, LitBool, LitStr, Token,
 };
 use v4_core::ecs::{component::ComponentId, entity::EntityId};
 
@@ -27,7 +27,10 @@ impl SceneDescriptor {
         if input.peek(Ident) && input.peek2(Token![:]) {
             let keyword: Ident = input.parse()?;
             if &keyword.to_string() != "scene" {
-                return Err(syn::Error::new(keyword.span(), "Invalid specifier found. If you meant to specify a scene name you can do so using 'scene: {name}'"));
+                return Err(syn::Error::new(
+                    keyword.span(),
+                    "Invalid specifier found. If you meant to specify a scene name you can do so using 'scene: {name}'",
+                ));
             }
             let _: Token![:] = input.parse()?;
             let ident: Ident = input.parse()?;
@@ -53,7 +56,10 @@ impl SceneDescriptor {
                     Ok(Some(entity_ident))
                 }
             } else {
-                Err(syn::Error::new(ident.span(), "Invalid specifier found. In order to specify the active camera, use the `active_camera` field"))
+                Err(syn::Error::new(
+                    ident.span(),
+                    "Invalid specifier found. In order to specify the active camera, use the `active_camera` field",
+                ))
             }
         } else {
             Ok(None)
@@ -72,7 +78,10 @@ impl SceneDescriptor {
                 let _: Token![,] = input.parse()?;
                 Ok(materials.into_iter().collect())
             } else {
-                Err(syn::Error::new(ident.span(), "Invalid specifier found. If you meant to specify screen-space materials, use the `screen_space_materials` field"))
+                Err(syn::Error::new(
+                    ident.span(),
+                    "Invalid specifier found. If you meant to specify screen-space materials, use the `screen_space_materials` field",
+                ))
             }
         } else {
             Ok(Vec::new())
@@ -164,7 +173,10 @@ impl Parse for SceneDescriptor {
 
         if let Some(active_camera_ident) = active_camera.as_ref() {
             if !idents.contains_key(active_camera_ident) {
-                return Err(syn::Error::new(active_camera_ident.span(), "The identifier was not found. Make sure to specify which the identifier on an entity"));
+                return Err(syn::Error::new(
+                    active_camera_ident.span(),
+                    "The identifier was not found. Make sure to specify which the identifier on an entity",
+                ));
             }
         }
 
@@ -1062,12 +1074,19 @@ impl PipelineIdVariants {
                     if let Id::Pipeline(id) = *id {
                         Ok(id)
                     } else {
-                        Err(syn::Error::new(pipeline_ident.span(), format!("Two objects share the same identifier: \"{pipeline_ident:?}\"")))
+                        Err(syn::Error::new(
+                            pipeline_ident.span(),
+                            format!(
+                                "Two objects share the same identifier: \"{pipeline_ident:?}\""
+                            ),
+                        ))
                     }
-                },
+                }
                 None => Err(syn::Error::new(
                     pipeline_ident.span(),
-                    format!("The pipeline \"{pipeline_ident:?}\" could not be found. If you declared it, make sure it is declared above the current entity")
+                    format!(
+                        "The pipeline \"{pipeline_ident:?}\" could not be found. If you declared it, make sure it is declared above the current entity"
+                    ),
                 )),
             },
             PipelineIdVariants::Specifier(pipeline_id_descriptor) => {
@@ -1078,8 +1097,10 @@ impl PipelineIdVariants {
                 pipelines.push(pipeline_id_descriptor.clone());
 
                 Ok(pipeline_id)
-            },
-            PipelineIdVariants::ScreenSpace(_) => Err(input.error("Screen-space materials are not valid here")),
+            }
+            PipelineIdVariants::ScreenSpace(_) => {
+                Err(input.error("Screen-space materials are not valid here"))
+            }
         }
     }
 }
@@ -1126,7 +1147,7 @@ impl Parse for ScreenSpacePipelineIdDescriptor {
                     return Err(syn::Error::new(
                         field.ident.span(),
                         "No vertex shader should be specified for a screen-space effect",
-                    ))
+                    ));
                 }
                 "fragment_shader_path" => {
                     if let Some(value) = field.value {
@@ -1145,7 +1166,7 @@ impl Parse for ScreenSpacePipelineIdDescriptor {
                                 return Err(syn::Error::new_spanned(
                                     rest,
                                     "Only string literals are valid paths",
-                                ))
+                                ));
                             }
                         }
                     }
@@ -1154,31 +1175,31 @@ impl Parse for ScreenSpacePipelineIdDescriptor {
                     return Err(syn::Error::new(
                         field.ident.span(),
                         "No vertex layouts should be specified for a screen-space effect",
-                    ))
+                    ));
                 }
                 "uses_camera" => {
                     return Err(syn::Error::new(
                         field.ident.span(),
                         "No camera usage should be specified for a screen-space effect",
-                    ))
+                    ));
                 }
                 "geometry_details" => {
                     return Err(syn::Error::new(
                         field.ident.span(),
                         "No camera usage should be specified for a screen-space effect",
-                    ))
+                    ));
                 }
                 "ident" => {
                     return Err(syn::Error::new(
                         field.ident.span(),
                         "Identifiers are not valid here, as they can not be safely checked",
-                    ))
+                    ));
                 }
                 _ => {
                     return Err(syn::Error::new_spanned(
                         field.ident,
                         "Invalid argument passed into the pipeline descriptor",
-                    ))
+                    ));
                 }
             }
         }
@@ -1211,6 +1232,7 @@ impl quote::ToTokens for ScreenSpacePipelineIdDescriptor {
                 uses_camera: false,
                 is_screen_space: true,
                 geometry_details: Default::default(),
+                render_priority: i32::MAX,
             }
         });
     }
@@ -1227,6 +1249,7 @@ struct PipelineIdDescriptor {
     uses_camera: LitBool,
     geometry_details: Option<GeometryDetailsDescriptor>,
     immediate_size: Option<Expr>,
+    render_priority: Option<LitInt>,
     ident: Option<Lit>,
 }
 
@@ -1243,6 +1266,7 @@ impl Parse for PipelineIdDescriptor {
         let mut uses_camera: Option<LitBool> = None;
         let mut geometry_details: Option<GeometryDetailsDescriptor> = None;
         let mut immediate_size: Option<Expr> = None;
+        let mut render_priority: Option<LitInt> = None;
         let mut ident: Option<Lit> = None;
 
         for field in fields {
@@ -1264,7 +1288,7 @@ impl Parse for PipelineIdDescriptor {
                                 return Err(syn::Error::new_spanned(
                                     rest,
                                     "Only string literals are valid paths",
-                                ))
+                                ));
                             }
                         }
                     }
@@ -1346,7 +1370,7 @@ impl Parse for PipelineIdDescriptor {
                                 return Err(syn::Error::new_spanned(
                                     rest,
                                     "Invalid value for vertex layout",
-                                ))
+                                ));
                             }
                         }
                     }
@@ -1368,13 +1392,13 @@ impl Parse for PipelineIdDescriptor {
                                 return Err(syn::Error::new(
                                     lit.span(),
                                     "Invalid value for geometry details",
-                                ))
+                                ));
                             }
                             SimpleFieldValue::Expression(expr) => {
                                 return Err(syn::Error::new(
                                     expr.span(),
                                     "Invalid value for geometry details",
-                                ))
+                                ));
                             }
                         }
                     }
@@ -1383,6 +1407,11 @@ impl Parse for PipelineIdDescriptor {
                     if let Some(value) = field.value {
                         let expr = quote! {#value};
                         immediate_size = Some(parse2::<Expr>(expr)?);
+                    }
+                }
+                "render_priority" => {
+                    if let Some(SimpleFieldValue::Literal(Lit::Int(prior))) = field.value {
+                        render_priority = Some(prior);
                     }
                 }
                 "ident" => {
@@ -1394,7 +1423,7 @@ impl Parse for PipelineIdDescriptor {
                     return Err(syn::Error::new_spanned(
                         field.ident,
                         "Invalid argument passed into the pipeline descriptor",
-                    ))
+                    ));
                 }
             }
         }
@@ -1420,6 +1449,7 @@ impl Parse for PipelineIdDescriptor {
             uses_camera,
             geometry_details,
             immediate_size,
+            render_priority,
             ident,
         })
     }
@@ -1437,6 +1467,7 @@ impl quote::ToTokens for PipelineIdDescriptor {
             uses_camera,
             geometry_details,
             immediate_size,
+            render_priority,
             ..
         } = self;
         let geometry_details = match geometry_details {
@@ -1460,6 +1491,12 @@ impl quote::ToTokens for PipelineIdDescriptor {
             quote! {0}
         };
 
+        let render_priority = if let Some(lit) = render_priority.as_ref() {
+            quote! {#lit}
+        } else {
+            quote! {0}
+        };
+
         tokens.extend(quote! {
             v4::engine_management::pipeline::PipelineId {
                 vertex_shader: v4::engine_management::pipeline::PipelineShader::Path(#vertex_shader_path),
@@ -1471,7 +1508,8 @@ impl quote::ToTokens for PipelineIdDescriptor {
                 uses_camera: #uses_camera,
                 is_screen_space: false,
                 geometry_details: #geometry_details,
-                immediate_size: #immediate_size
+                immediate_size: #immediate_size,
+                render_priority: #render_priority,
             }
         });
     }
@@ -1519,7 +1557,7 @@ impl Parse for GeometryDetailsDescriptor {
                         return Err(syn::Error::new_spanned(
                             rest,
                             "Invalid argument passed into geometry details topology field",
-                        ))
+                        ));
                     }
                 },
                 "strip_index_format" => match field.value.unwrap() {
@@ -1528,10 +1566,12 @@ impl Parse for GeometryDetailsDescriptor {
                             details.strip_index_format = Some(path);
                         }
                     }
-                    rest => return Err(syn::Error::new_spanned(
-                        rest,
-                        "Invalid argument passed into geometry details strip index format field",
-                    )),
+                    rest => {
+                        return Err(syn::Error::new_spanned(
+                            rest,
+                            "Invalid argument passed into geometry details strip index format field",
+                        ));
+                    }
                 },
                 "front_face" => match field.value.unwrap() {
                     SimpleFieldValue::Expression(expr) => {
@@ -1543,7 +1583,7 @@ impl Parse for GeometryDetailsDescriptor {
                         return Err(syn::Error::new_spanned(
                             rest,
                             "Invalid argument passed into geometry details front face field",
-                        ))
+                        ));
                     }
                 },
                 "cull_mode" => match field.value.unwrap() {
@@ -1556,7 +1596,7 @@ impl Parse for GeometryDetailsDescriptor {
                         return Err(syn::Error::new_spanned(
                             rest,
                             "Invalid argument passed into geometry details cull mode field",
-                        ))
+                        ));
                     }
                 },
                 "polygon_mode" => match field.value.unwrap() {
@@ -1569,14 +1609,14 @@ impl Parse for GeometryDetailsDescriptor {
                         return Err(syn::Error::new_spanned(
                             rest,
                             "Invalid argument passed into geometry details polygon mode field",
-                        ))
+                        ));
                     }
                 },
                 _ => {
                     return Err(syn::Error::new_spanned(
                         field.ident,
                         "Invalid argument passed into the pipeline geometry details descriptor",
-                    ))
+                    ));
                 }
             }
         }

@@ -258,7 +258,7 @@ impl V4 {
             let runtime = tokio::runtime::Runtime::new()
                 .expect("Failed to create tokio runtime for workloads.");
             runtime.block_on(async move {
-                TokioScope::scope_and_block(|async_scope| loop {
+                TokioScope::scope_and_block(|async_scope| {
                     if let Ok(workload_packet) = workload_receiver.try_recv() {
                         let sender = workload_output_sender.clone();
                         async_scope.spawn(async move {
