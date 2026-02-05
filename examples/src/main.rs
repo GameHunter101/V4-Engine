@@ -26,6 +26,6 @@ fn main() {
                 println!("Please select a valid example")
             }
         },
-        None => println!("Please select a example."),
+        None => hello_world::main() //println!("Please select a example."),
     }
 }

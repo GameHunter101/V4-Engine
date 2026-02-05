@@ -1,8 +1,11 @@
 use std::hash::{DefaultHasher, Hash, Hasher};
 
-use wgpu::{BindGroup, BindGroupLayout, ComputePass, ComputePipeline, Device, ShaderStages};
+use wgpu::{
+    BindGroup, BindGroupEntry, BindGroupLayout, BindGroupLayoutEntry, ComputePass, ComputePipeline,
+    Device, ShaderStages,
+};
 
-use crate::engine_management::pipeline::{load_shader_module_descriptor, PipelineShader};
+use crate::engine_management::pipeline::{PipelineShader, load_shader_module_descriptor};
 
 use super::{
     component::{ComponentDetails, ComponentId, ComponentSystem},
@@ -12,13 +15,12 @@ use super::{
 
 #[derive(Debug)]
 pub struct Compute {
-    input: Vec<ShaderAttachment>,
-    output: Option<ShaderAttachment>,
+    attachments: Vec<ShaderAttachment>,
     shader_path: &'static str,
     is_spirv: bool,
     workgroup_counts: (u32, u32, u32),
-    bind_group_layouts: Vec<BindGroupLayout>,
-    bind_groups: Vec<BindGroup>,
+    bind_group_layout: Option<BindGroupLayout>,
+    bind_group: Option<BindGroup>,
     pipeline: Option<ComputePipeline>,
     id: ComponentId,
     is_enabled: bool,
@@ -31,145 +33,80 @@ impl Compute {
     pub fn builder() -> ComputeBuilder {
         ComputeBuilder::default()
     }
-    fn create_bind_group_layout(
+    fn create_bind_group_layout_entry(
         attachment: &ShaderAttachment,
-        device: &Device,
-        compute_id: ComponentId,
-    ) -> BindGroupLayout {
-        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some(&format!(
-                "Compute {compute_id} | attachment {attachment:?} bind group layout"
-            )),
-            entries: &match attachment {
-                ShaderAttachment::Texture(tex) => match &tex.texture {
-                    super::material::GeneralTexture::Regular(_regular_tex) => {
-                        let texture = wgpu::BindGroupLayoutEntry {
-                            binding: 0,
-                            visibility: ShaderStages::COMPUTE,
-                            ty: wgpu::BindingType::Texture {
-                                sample_type: wgpu::TextureSampleType::Float {
-                                    filterable: tex.texture.is_filtered(),
-                                },
-                                view_dimension: if tex.texture.is_cubemap() {
-                                    wgpu::TextureViewDimension::D2Array
-                                } else {
-                                    wgpu::TextureViewDimension::D2
-                                },
-                                multisampled: false,
-                            },
-                            count: None,
-                        };
-                        let sampler = wgpu::BindGroupLayoutEntry {
-                            binding: 1,
-                            visibility: ShaderStages::COMPUTE,
-                            ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                            count: None,
-                        };
-                        if tex.texture.is_sampled() {
-                            vec![texture, sampler]
-                        } else {
-                            vec![texture]
-                        }
+        binding: u32,
+    ) -> BindGroupLayoutEntry {
+        match attachment {
+            ShaderAttachment::Texture(tex) => {
+                let props = tex.texture.properties();
+                let view_dimension = if props.is_cubemap {
+                    wgpu::TextureViewDimension::D2Array
+                } else {
+                    wgpu::TextureViewDimension::D2
+                };
+                if let Some(storage_tex_access) = props.storage_texture {
+                    BindGroupLayoutEntry {
+                        binding,
+                        visibility: ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::StorageTexture {
+                            access: storage_tex_access,
+                            format: props.format,
+                            view_dimension,
+                        },
+                        count: None,
                     }
-                    super::material::GeneralTexture::Storage(storage_tex) => {
-                        vec![wgpu::BindGroupLayoutEntry {
-                            binding: 0,
-                            visibility: ShaderStages::COMPUTE,
-                            ty: wgpu::BindingType::StorageTexture {
-                                access: storage_tex.access(),
-                                format: storage_tex.format(),
-                                view_dimension: if storage_tex.is_cubemap() {
-                                    wgpu::TextureViewDimension::D2Array
-                                } else {
-                                    wgpu::TextureViewDimension::D2
-                                },
+                } else {
+                    BindGroupLayoutEntry {
+                        binding,
+                        visibility: tex.visibility,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float {
+                                filterable: props.is_filtered,
                             },
-                            count: None,
-                        }]
-                    }
-                },
-                ShaderAttachment::Buffer(buf) => vec![wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: buf.buffer_type(),
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                }],
-            },
-        })
-    }
-
-    fn create_bind_group(
-        attachment: &ShaderAttachment,
-        layout: &BindGroupLayout,
-        device: &Device,
-        compute_id: ComponentId,
-    ) -> BindGroup {
-        let mut sampler = None;
-        device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some(&format!(
-                "Compute {compute_id} | attachment {attachment:?} bind group"
-            )),
-            layout,
-            entries: &match &attachment {
-                ShaderAttachment::Texture(tex) => {
-                    if tex.texture.is_sampled() {
-                        if sampler.is_none() {
-                            sampler = Some(device.create_sampler(&wgpu::SamplerDescriptor {
-                                address_mode_u: wgpu::AddressMode::ClampToEdge,
-                                address_mode_v: wgpu::AddressMode::ClampToEdge,
-                                address_mode_w: wgpu::AddressMode::ClampToEdge,
-                                mag_filter: wgpu::FilterMode::Linear,
-                                min_filter: wgpu::FilterMode::Linear,
-                                mipmap_filter: wgpu::MipmapFilterMode::Nearest,
-                                lod_min_clamp: 0.0,
-                                lod_max_clamp: 100.0,
-                                compare: Some(wgpu::CompareFunction::LessEqual),
-                                ..Default::default()
-                            }));
-                        }
-                        vec![
-                            wgpu::BindGroupEntry {
-                                binding: 0,
-                                resource: wgpu::BindingResource::TextureView(
-                                    tex.texture.view_ref(),
-                                ),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 1,
-                                resource: wgpu::BindingResource::Sampler(sampler.as_ref().unwrap()),
-                            },
-                        ]
-                    } else {
-                        vec![wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: wgpu::BindingResource::TextureView(tex.texture.view_ref()),
-                        }]
+                            view_dimension,
+                            multisampled: false,
+                        },
+                        count: None,
                     }
                 }
-                ShaderAttachment::Buffer(buf) => vec![wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::Buffer(
-                        buf.buffer().as_entire_buffer_binding(),
-                    ),
-                }],
+            }
+            ShaderAttachment::Buffer(buf) => BindGroupLayoutEntry {
+                binding,
+                visibility: ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: buf.buffer_type(),
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
             },
-        })
+        }
+    }
+
+    fn create_bind_group_entry<'a>(attachment: &'a ShaderAttachment, binding: u32) -> BindGroupEntry<'a> {
+        match attachment {
+            ShaderAttachment::Texture(tex) => BindGroupEntry {
+                binding,
+                resource: wgpu::BindingResource::TextureView(tex.texture.view()),
+            },
+            ShaderAttachment::Buffer(buf) => wgpu::BindGroupEntry {
+                binding,
+                resource: wgpu::BindingResource::Buffer(buf.buffer().as_entire_buffer_binding()),
+            },
+        }
     }
 
     pub fn create_compute_pipeline(
         device: &Device,
-        bind_group_layouts: &[&BindGroupLayout],
+        bind_group_layout: &BindGroupLayout,
         shader_path: &'static str,
         compute_id: ComponentId,
         is_spirv: bool,
     ) -> ComputePipeline {
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some(&format!("Compute {compute_id} pipeline layout")),
-            bind_group_layouts,
+            bind_group_layouts: &[bind_group_layout],
             immediate_size: 0,
         });
 
@@ -189,11 +126,9 @@ impl Compute {
 
     pub fn calculate(&self, compute_pass: &mut ComputePass) {
         compute_pass.set_pipeline(self.pipeline.as_ref().expect(
-            "The compute pipeline was not created while initializing the compute component",
+            "The compute pipeline was not created. Remember to initialize the compute before executing it.",
         ));
-        for (i, bind_group) in self.bind_groups.iter().enumerate() {
-            compute_pass.set_bind_group(i as u32, bind_group, &[]);
-        }
+        compute_pass.set_bind_group(0, self.bind_group.as_ref().expect("The compute bind group was not created. Remember to initialize the compute before executing it."), &[]);
         compute_pass.dispatch_workgroups(
             self.workgroup_counts.0,
             self.workgroup_counts.1,
@@ -246,12 +181,8 @@ impl Compute {
         }
     } */
 
-    pub fn input_attachments(&self) -> &[ShaderAttachment] {
-        &self.input
-    }
-
-    pub fn output_attachments(&self) -> Option<&ShaderAttachment> {
-        self.output.as_ref()
+    pub fn attachments(&self) -> &[ShaderAttachment] {
+        &self.attachments
     }
 
     pub fn iterate_count(&self) -> usize {
@@ -261,28 +192,42 @@ impl Compute {
 
 impl ComponentSystem for Compute {
     fn initialize(&mut self, device: &Device) -> super::actions::ActionQueue {
-        let (bind_group_layouts, bind_groups): (Vec<BindGroupLayout>, Vec<BindGroup>) = self
-            .input
+        let (bind_group_layout_entries, bind_group_entries): (
+            Vec<BindGroupLayoutEntry>,
+            Vec<BindGroupEntry>,
+        ) = self
+            .attachments
             .iter()
-            .chain(self.output.as_ref())
-            .map(|attachment| {
-                let bind_group_layout = Self::create_bind_group_layout(attachment, device, self.id);
-                let bind_group =
-                    Self::create_bind_group(attachment, &bind_group_layout, device, self.id);
-                (bind_group_layout, bind_group)
+            .enumerate()
+            .map(|(binding, attachment)| {
+                (
+                    Self::create_bind_group_layout_entry(attachment, binding as u32),
+                    Self::create_bind_group_entry(attachment, binding as u32),
+                )
             })
-            .collect();
+            .unzip();
+
+        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some(&format!("Compute {} bind group layout", self.id)),
+            entries: &bind_group_layout_entries,
+        });
+
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some(&format!("Compute {} bind group", self.id)),
+            layout: &bind_group_layout,
+            entries: &bind_group_entries,
+        });
 
         self.pipeline = Some(Self::create_compute_pipeline(
             device,
-            &bind_group_layouts.iter().collect::<Vec<_>>(),
+            &bind_group_layout,
             self.shader_path,
             self.id,
             self.is_spirv,
         ));
 
-        self.bind_group_layouts = bind_group_layouts;
-        self.bind_groups = bind_groups;
+        self.bind_group_layout = Some(bind_group_layout);
+        self.bind_group = Some(bind_group);
 
         self.set_initialized();
         vec![]
@@ -321,8 +266,7 @@ impl ComponentDetails for Compute {
 
 #[derive(Debug)]
 pub struct ComputeBuilder {
-    input: Vec<ShaderAttachment>,
-    output: Option<ShaderAttachment>,
+    attachments: Vec<ShaderAttachment>,
     shader_path: &'static str,
     is_spirv: bool,
     workgroup_counts: (u32, u32, u32),
@@ -334,8 +278,7 @@ pub struct ComputeBuilder {
 impl Default for ComputeBuilder {
     fn default() -> Self {
         Self {
-            input: Vec::new(),
-            output: None,
+            attachments: Vec::new(),
             shader_path: "",
             is_spirv: false,
             workgroup_counts: (0, 0, 0),
@@ -347,13 +290,8 @@ impl Default for ComputeBuilder {
 }
 
 impl ComputeBuilder {
-    pub fn input(mut self, input: Vec<ShaderAttachment>) -> Self {
-        self.input = input;
-        self
-    }
-
-    pub fn output(mut self, output: ShaderAttachment) -> Self {
-        self.output = Some(output);
+    pub fn attachments(mut self, attachments: Vec<ShaderAttachment>) -> Self {
+        self.attachments = attachments;
         self
     }
 
@@ -389,13 +327,12 @@ impl ComputeBuilder {
 
     pub fn build(self) -> Compute {
         Compute {
-            input: self.input,
-            output: self.output,
+            attachments: self.attachments,
             shader_path: self.shader_path,
             is_spirv: self.is_spirv,
             workgroup_counts: self.workgroup_counts,
-            bind_group_layouts: Vec::new(),
-            bind_groups: Vec::new(),
+            bind_group_layout: None,
+            bind_group: None,
             pipeline: None,
             id: if self.id == 0 {
                 let mut hasher = DefaultHasher::new();

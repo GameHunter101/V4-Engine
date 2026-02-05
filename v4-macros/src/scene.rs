@@ -877,19 +877,9 @@ impl MaterialDescriptor {
             }
         }
 
-        let Some(mut pipeline_id) = pipeline_id else {
+        let Some(pipeline_id) = pipeline_id else {
             return Err(input.error("A pipeline ID must be specified"));
         };
-
-        pipeline_id.attachments =  attachments.iter().map(|attachment| match attachment {
-            ShaderAttachmentDescriptor::Texture(ShaderTextureAttachmentDescriptor { is_storage, visibility, .. }) => match is_storage {
-                true => quote!{v4::engine_management::pipeline::PipelineAttachments::StorageTexture(#visibility)},
-                false => quote!{v4::engine_management::pipeline::PipelineAttachments::SampledTexture(#visibility)},
-            },
-            ShaderAttachmentDescriptor::Buffer(ShaderBufferAttachmentDescriptor {visibility, ..}) => {
-                quote!{v4::engine_management::pipeline::PipelineAttachments::Buffer(#visibility)}
-            }
-        }).collect();
 
         Ok(MaterialDescriptor {
             pipeline_id: PipelineIdVariants::ScreenSpace(pipeline_id),
@@ -954,21 +944,9 @@ impl Parse for MaterialDescriptor {
             }
         }
 
-        let Some(mut pipeline_id) = pipeline_id else {
+        let Some(pipeline_id) = pipeline_id else {
             return Err(input.error("A pipeline ID must be specified"));
         };
-
-        if let PipelineIdVariants::Specifier(pipeline_id) = &mut pipeline_id {
-            pipeline_id.attachments =  attachments.iter().map(|attachment| match attachment {
-            ShaderAttachmentDescriptor::Texture(ShaderTextureAttachmentDescriptor { is_storage, visibility, .. }) => match is_storage {
-                true => quote!{v4::engine_management::pipeline::PipelineAttachments::StorageTexture(#visibility)},
-                false => quote!{v4::engine_management::pipeline::PipelineAttachments::SampledTexture(#visibility)},
-            },
-            ShaderAttachmentDescriptor::Buffer(ShaderBufferAttachmentDescriptor {visibility, ..}) => {
-                quote!{v4::engine_management::pipeline::PipelineAttachments::Buffer(#visibility)}
-            }
-        }).collect();
-        }
 
         Ok(MaterialDescriptor {
             pipeline_id,
@@ -1131,7 +1109,6 @@ impl Parse for PipelineIdVariants {
 #[derive(Clone)]
 struct ScreenSpacePipelineIdDescriptor {
     fragment_shader_path: LitStr,
-    attachments: Vec<TokenStream2>,
 }
 
 impl Parse for ScreenSpacePipelineIdDescriptor {
@@ -1210,7 +1187,6 @@ impl Parse for ScreenSpacePipelineIdDescriptor {
 
         Ok(ScreenSpacePipelineIdDescriptor {
             fragment_shader_path,
-            attachments: Vec::new(),
         })
     }
 }
@@ -1219,7 +1195,6 @@ impl quote::ToTokens for ScreenSpacePipelineIdDescriptor {
     fn to_tokens(&self, tokens: &mut TokenStream2) {
         let ScreenSpacePipelineIdDescriptor {
             fragment_shader_path,
-            attachments,
         } = self;
         tokens.extend(quote! {
             v4::engine_management::pipeline::PipelineId {
@@ -1227,7 +1202,6 @@ impl quote::ToTokens for ScreenSpacePipelineIdDescriptor {
                 spirv_vertex_shader: false,
                 fragment_shader: v4::engine_management::pipeline::PipelineShader::Path(#fragment_shader_path),
                 spirv_fragment_shader: false,
-                attachments: vec![#(#attachments),*],
                 vertex_layouts: Vec::new(),
                 uses_camera: false,
                 is_screen_space: true,
@@ -1245,7 +1219,6 @@ struct PipelineIdDescriptor {
     fragment_shader_path: LitStr,
     spirv_fragment_shader: Option<LitBool>,
     vertex_layouts: Vec<ExprCall>,
-    attachments: Vec<TokenStream2>,
     uses_camera: LitBool,
     geometry_details: Option<GeometryDetailsDescriptor>,
     immediate_size: Option<Expr>,
@@ -1444,7 +1417,6 @@ impl Parse for PipelineIdDescriptor {
             spirv_vertex_shader,
             fragment_shader_path,
             spirv_fragment_shader,
-            attachments: Vec::new(),
             vertex_layouts,
             uses_camera,
             geometry_details,
@@ -1462,7 +1434,6 @@ impl quote::ToTokens for PipelineIdDescriptor {
             spirv_vertex_shader,
             fragment_shader_path,
             spirv_fragment_shader,
-            attachments,
             vertex_layouts,
             uses_camera,
             geometry_details,
@@ -1503,7 +1474,6 @@ impl quote::ToTokens for PipelineIdDescriptor {
                 spirv_vertex_shader: #spirv_vertex_shader,
                 fragment_shader: v4::engine_management::pipeline::PipelineShader::Path(#fragment_shader_path),
                 spirv_fragment_shader: #spirv_fragment_shader,
-                attachments: vec![#(#attachments),*],
                 vertex_layouts: vec![#(#vertex_layouts),*],
                 uses_camera: #uses_camera,
                 is_screen_space: false,
@@ -1688,11 +1658,6 @@ impl Parse for ShaderAttachmentDescriptor {
 
         match ident.to_string().as_str() {
             "Texture" => Ok(ShaderAttachmentDescriptor::Texture(input.parse()?)),
-            "StorageTexture" => {
-                let mut descriptor: ShaderTextureAttachmentDescriptor = input.parse()?;
-                descriptor.is_storage = true;
-                Ok(ShaderAttachmentDescriptor::Texture(descriptor))
-            }
             "Buffer" => Ok(ShaderAttachmentDescriptor::Buffer(input.parse()?)),
             _ => Err(syn::Error::new(ident.span(), "Invalid material attachment")),
         }
@@ -1705,22 +1670,12 @@ impl quote::ToTokens for ShaderAttachmentDescriptor {
             ShaderAttachmentDescriptor::Texture(ShaderTextureAttachmentDescriptor {
                 texture,
                 visibility,
-                extra_usages,
-                ..
             }) => {
-                let usages = if let Some(usages) = extra_usages {
-                    quote! {#usages}
-                } else {
-                    quote! {
-                        wgpu::TextureUsages::empty()
-                    }
-                };
                 tokens.extend(quote! {
                     v4::ecs::material::ShaderAttachment::Texture(
                         v4::ecs::material::ShaderTextureAttachment {
                             texture: #texture,
                             visibility: #visibility,
-                            extra_usages: #usages,
                         }
                     )
                 })
@@ -1728,20 +1683,11 @@ impl quote::ToTokens for ShaderAttachmentDescriptor {
             ShaderAttachmentDescriptor::Buffer(ShaderBufferAttachmentDescriptor {
                 buffer,
                 visibility,
-                extra_usages,
             }) => {
-                let usages = if let Some(usages) = extra_usages {
-                    quote! {#usages}
-                } else {
-                    quote! {
-                        wgpu::BufferUsages::empty()
-                    }
-                };
                 tokens.extend(quote! {
                     v4::ecs::material::ShaderBufferAttachment {
                         buffer: #buffer,
                         visibility: #visibility,
-                            extra_usages: #usages
                     }
                 })
             }
@@ -1751,9 +1697,7 @@ impl quote::ToTokens for ShaderAttachmentDescriptor {
 
 struct ShaderTextureAttachmentDescriptor {
     texture: Expr,
-    is_storage: bool,
     visibility: ExprPath,
-    extra_usages: Option<Expr>,
 }
 
 impl Parse for ShaderTextureAttachmentDescriptor {
@@ -1763,7 +1707,7 @@ impl Parse for ShaderTextureAttachmentDescriptor {
         let fields = content.parse_terminated(SimpleField::parse, Token![,])?;
         let mut texture: Option<Expr> = None;
         let mut visibility: Option<ExprPath> = None;
-        let mut extra_usages: Option<Expr> = None;
+
         for field in fields {
             match field.ident.to_string().as_str() {
                 "texture" => {
@@ -1796,23 +1740,12 @@ impl Parse for ShaderTextureAttachmentDescriptor {
                         None => None,
                     }
                 }
-                "extra_usages" => {
-                    extra_usages = match field.value {
-                        Some(value) => Some(match value {
-                            SimpleFieldValue::Expression(expr) => Ok(expr),
-                            rest => Err(syn::Error::new_spanned(rest, "Invalid extra usages")),
-                        }?),
-                        None => None,
-                    }
-                }
                 _ => {}
             }
         }
         Ok(ShaderTextureAttachmentDescriptor {
             texture: texture.unwrap(),
-            is_storage: false,
             visibility: visibility.unwrap(),
-            extra_usages,
         })
     }
 }
@@ -1820,7 +1753,6 @@ impl Parse for ShaderTextureAttachmentDescriptor {
 struct ShaderBufferAttachmentDescriptor {
     buffer: Expr,
     visibility: ExprPath,
-    extra_usages: Option<Expr>,
 }
 
 impl Parse for ShaderBufferAttachmentDescriptor {
@@ -1830,7 +1762,6 @@ impl Parse for ShaderBufferAttachmentDescriptor {
         let fields = content.parse_terminated(SimpleField::parse, Token![,])?;
         let mut buffer: Option<Expr> = None;
         let mut visibility: Option<ExprPath> = None;
-        let mut extra_usages: Option<Expr> = None;
         for field in fields {
             match field.ident.to_string().as_str() {
                 "buffer" => {
@@ -1863,22 +1794,12 @@ impl Parse for ShaderBufferAttachmentDescriptor {
                         None => None,
                     }
                 }
-                "extra_usages" => {
-                    extra_usages = match field.value {
-                        Some(value) => Some(match value {
-                            SimpleFieldValue::Expression(expr) => Ok(expr),
-                            rest => Err(syn::Error::new_spanned(rest, "Invalid extra usages")),
-                        }?),
-                        None => None,
-                    }
-                }
                 _ => {}
             }
         }
         Ok(ShaderBufferAttachmentDescriptor {
             buffer: buffer.unwrap(),
             visibility: visibility.unwrap(),
-            extra_usages,
         })
     }
 }

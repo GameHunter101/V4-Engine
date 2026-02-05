@@ -1,14 +1,14 @@
 use std::ops::Range;
 
 use wgpu::{
-    util::DeviceExt, BindGroup, BindGroupLayout, Buffer, CommandEncoder, Device, Queue,
-    ShaderStages,
+    BindGroup, BindGroupEntry, BindGroupLayout, BindGroupLayoutEntry, Buffer, CommandEncoder,
+    Device, Queue, Sampler, ShaderStages, util::DeviceExt,
 };
 
 use crate::{
     ecs::compute::Compute,
     engine_management::pipeline::PipelineId,
-    engine_support::texture_support::{StorageTexture, Texture},
+    engine_support::texture_support::{TextureBundle, TextureProperties},
 };
 
 use super::{
@@ -19,66 +19,8 @@ use super::{
 
 #[derive(Debug, Clone)]
 pub struct ShaderTextureAttachment {
-    pub texture: GeneralTexture,
+    pub texture: TextureBundle,
     pub visibility: ShaderStages,
-    pub extra_usages: wgpu::TextureUsages,
-}
-
-#[derive(Debug, Clone)]
-pub enum GeneralTexture {
-    Regular(Texture),
-    Storage(StorageTexture),
-}
-
-impl GeneralTexture {
-    pub fn texture(&self) -> &wgpu::Texture {
-        match self {
-            GeneralTexture::Regular(texture) => texture.texture_ref(),
-            GeneralTexture::Storage(storage_texture) => storage_texture.texture_ref(),
-        }
-    }
-
-    pub fn view_ref(&self) -> &wgpu::TextureView {
-        match self {
-            GeneralTexture::Regular(texture) => texture.view_ref(),
-            GeneralTexture::Storage(storage_texture) => storage_texture.view_ref(),
-        }
-    }
-
-    pub fn view_mut(&mut self) -> &mut wgpu::TextureView {
-        match self {
-            GeneralTexture::Regular(texture) => texture.view_mut(),
-            GeneralTexture::Storage(storage_texture) => storage_texture.view_mut(),
-        }
-    }
-
-    pub fn is_sampled(&self) -> bool {
-        match self {
-            GeneralTexture::Regular(texture) => texture.is_sampled(),
-            GeneralTexture::Storage(_) => false,
-        }
-    }
-
-    pub fn is_storage(&self) -> bool {
-        match self {
-            GeneralTexture::Regular(_) => false,
-            GeneralTexture::Storage(_) => true,
-        }
-    }
-
-    pub fn is_cubemap(&self) -> bool {
-        match self {
-            GeneralTexture::Regular(tex) => tex.is_cubemap(),
-            GeneralTexture::Storage(tex) => tex.is_cubemap(),
-        }
-    }
-
-    pub fn is_filtered(&self) -> bool {
-        match self {
-            GeneralTexture::Regular(tex) => tex.is_filtered(),
-            GeneralTexture::Storage(tex) => tex.is_filtered(),
-        }
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -136,8 +78,8 @@ pub struct Material {
     entities_attached: Vec<EntityId>,
     component_ranges: Vec<Range<usize>>,
     attachments: Vec<ShaderAttachment>,
-    bind_group_layouts: Vec<BindGroupLayout>,
-    bind_groups: Vec<BindGroup>,
+    bind_group_layout: Option<BindGroupLayout>,
+    bind_group: Option<BindGroup>,
     immediate_data: Vec<u8>,
     is_initialized: bool,
     is_enabled: bool,
@@ -158,88 +100,177 @@ impl Material {
             entities_attached,
             component_ranges: Vec::new(),
             pipeline_id,
-            bind_group_layouts: Vec::new(),
-            bind_groups: Vec::new(),
+            bind_group_layout: None,
+            bind_group: None,
             immediate_data,
             is_initialized: false,
             is_enabled,
         }
     }
 
-    pub fn create_attachment_bind_group_layout(
-        device: &Device,
-        material_id: ComponentId,
+    pub fn create_attachment_bind_group_layout_entry(
         attachment: &ShaderAttachment,
-    ) -> BindGroupLayout {
-        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some(&format!(
-                "Material {material_id} | attachment {attachment:?} Bind Group Layout"
-            )),
-            entries: &[match attachment {
-                ShaderAttachment::Texture(tex) => wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: tex.visibility,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float {
-                            filterable: tex.texture.is_filtered(),
-                        },
-                        view_dimension: if tex.texture.is_cubemap() {
-                            wgpu::TextureViewDimension::Cube
-                        } else {
-                            wgpu::TextureViewDimension::D2
-                        },
-                        multisampled: false,
+        binding: u32,
+    ) -> BindGroupLayoutEntry {
+        match attachment {
+            ShaderAttachment::Texture(tex) => wgpu::BindGroupLayoutEntry {
+                binding,
+                visibility: tex.visibility,
+                ty: wgpu::BindingType::Texture {
+                    sample_type: wgpu::TextureSampleType::Float {
+                        filterable: tex.texture.properties().is_filtered,
                     },
-                    count: None,
-                },
-                ShaderAttachment::Buffer(buf) => wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: buf.visibility,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
+                    view_dimension: if tex.texture.properties().is_cubemap {
+                        wgpu::TextureViewDimension::Cube
+                    } else {
+                        wgpu::TextureViewDimension::D2
                     },
-                    count: None,
+                    multisampled: false,
                 },
-            }],
-        })
+                count: None,
+            },
+            ShaderAttachment::Buffer(buf) => wgpu::BindGroupLayoutEntry {
+                binding,
+                visibility: buf.visibility,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
+        }
     }
 
-    fn create_attachment_bind_group(
-        device: &Device,
-        material_id: ComponentId,
-        attachment: &ShaderAttachment,
-        bind_group_layout: &BindGroupLayout,
-    ) -> BindGroup {
-        let label = format!("Material {material_id} | attachment {attachment:?} bind group");
+    fn create_attachment_bind_group_entry<'a>(
+        attachment: &'a ShaderAttachment,
+        binding: u32,
+    ) -> BindGroupEntry<'a> {
+        let resource = match attachment {
+            ShaderAttachment::Texture(tex) => {
+                wgpu::BindingResource::TextureView(tex.texture.view())
+            }
+            ShaderAttachment::Buffer(buf) => buf.buffer.as_entire_binding(),
+        };
 
-        device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some(&label),
-            layout: bind_group_layout,
-            entries: &[match attachment {
-                ShaderAttachment::Texture(tex) => wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(tex.texture.view_ref()),
-                },
-                ShaderAttachment::Buffer(buf) => wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: buf.buffer.as_entire_binding(),
-                },
-            }],
-        })
+        BindGroupEntry { binding, resource }
+    }
+
+    fn create_sampler_entries<'a>(
+        sampler: &'a wgpu::Sampler,
+        is_filtering: bool,
+        visibility: ShaderStages,
+        binding: u32,
+    ) -> (BindGroupLayoutEntry, BindGroupEntry<'a>) {
+        (
+            BindGroupLayoutEntry {
+                binding,
+                visibility,
+                ty: wgpu::BindingType::Sampler(if is_filtering {
+                    wgpu::SamplerBindingType::Filtering
+                } else {
+                    wgpu::SamplerBindingType::NonFiltering
+                }),
+                count: None,
+            },
+            BindGroupEntry {
+                binding,
+                resource: wgpu::BindingResource::Sampler(sampler),
+            },
+        )
+    }
+
+    /// Index 0: non-filtering, index 1: filtering
+    fn create_samplers(
+        &self,
+        device: &Device,
+        existing_bind_group_entries_count: u32,
+    ) -> Vec<(Sampler, bool, ShaderStages, u32)> {
+        let samplers_needed =
+            self.attachments
+                .iter()
+                .fold([(false, ShaderStages::empty()); 2], |acc, attachment| {
+                    if let ShaderAttachment::Texture(ShaderTextureAttachment {
+                        texture,
+                        visibility,
+                    }) = attachment
+                    {
+                        let TextureProperties {
+                            is_sampled,
+                            is_filtered,
+                            ..
+                        } = texture.properties();
+
+                        [
+                            (
+                                acc[0].0 | (is_sampled && !is_filtered),
+                                acc[0].1 | *visibility,
+                            ),
+                            (
+                                acc[1].0 | (is_sampled && !is_filtered),
+                                acc[1].1 | *visibility,
+                            ),
+                        ]
+                    } else {
+                        acc
+                    }
+                });
+
+        samplers_needed
+            .iter()
+            .enumerate()
+            .flat_map(|(filtering_as_index, (sampler_needed, visibility))| {
+                if *sampler_needed {
+                    let is_filtering = filtering_as_index == 1;
+                    let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+                        label: Some(&format!(
+                            "Material {} | {} sampler",
+                            self.id,
+                            if is_filtering {
+                                "filtering"
+                            } else {
+                                "non-filtering"
+                            }
+                        )),
+                        address_mode_u: wgpu::AddressMode::ClampToEdge,
+                        address_mode_v: wgpu::AddressMode::ClampToEdge,
+                        address_mode_w: wgpu::AddressMode::ClampToEdge,
+                        mag_filter: if is_filtering {
+                            wgpu::FilterMode::Linear
+                        } else {
+                            wgpu::FilterMode::Nearest
+                        },
+                        min_filter: if is_filtering {
+                            wgpu::FilterMode::Linear
+                        } else {
+                            wgpu::FilterMode::Nearest
+                        },
+                        mipmap_filter: wgpu::MipmapFilterMode::Nearest,
+                        ..Default::default()
+                    });
+                    Some((
+                        sampler,
+                        is_filtering,
+                        *visibility,
+                        existing_bind_group_entries_count + filtering_as_index as u32,
+                    ))
+                } else {
+                    None
+                }
+            })
+            .collect()
     }
 
     pub fn attach_entity(&mut self, entity_id: EntityId) {
         self.entities_attached.push(entity_id);
     }
 
-    pub fn bind_group_layouts(&self) -> &[BindGroupLayout] {
-        self.bind_group_layouts.as_ref()
+    pub fn bind_group_layout(&self) -> Option<&BindGroupLayout> {
+        self.bind_group_layout.as_ref()
     }
 
-    pub fn bind_groups(&self) -> &[BindGroup] {
-        self.bind_groups.as_ref()
+    pub fn bind_group(&self) -> Option<&BindGroup> {
+        self.bind_group.as_ref()
     }
 
     pub fn attachments(&self) -> &[ShaderAttachment] {
@@ -266,82 +297,56 @@ impl Material {
 #[async_trait::async_trait]
 impl ComponentSystem for Material {
     fn initialize(&mut self, device: &Device) -> ActionQueue {
-        let (mut bind_group_layouts, mut bind_groups): (Vec<BindGroupLayout>, Vec<BindGroup>) =
-            self.attachments
-                .iter()
-                .map(|attachment| {
-                    let bind_group_layout =
-                        Self::create_attachment_bind_group_layout(device, self.id, attachment);
-                    let bind_group = Self::create_attachment_bind_group(
-                        device,
-                        self.id,
-                        attachment,
-                        &bind_group_layout,
-                    );
-                    (bind_group_layout, bind_group)
-                })
-                .unzip();
-        // TODO: detect if two different samplers are needed, filtering and non-filtering
-        let (has_sampler, sampler_visibility, filtering) = self.attachments().iter().fold(
-            (false, wgpu::ShaderStages::NONE, true),
-            |acc, attachment| {
-                if let ShaderAttachment::Texture(ShaderTextureAttachment {
-                    texture,
-                    visibility,
-                    ..
-                }) = attachment
-                {
-                    if texture.is_sampled() {
-                        (true, acc.1 | *visibility, texture.is_filtered())
-                    } else {
-                        acc
-                    }
-                } else {
-                    acc
-                }
-            },
-        );
+        let (bind_group_layout_entries, bind_group_entries): (
+            Vec<BindGroupLayoutEntry>,
+            Vec<BindGroupEntry>,
+        ) = self
+            .attachments
+            .iter()
+            .enumerate()
+            .map(|(binding, attachment)| {
+                (
+                    Self::create_attachment_bind_group_layout_entry(attachment, binding as u32),
+                    Self::create_attachment_bind_group_entry(attachment, binding as u32),
+                )
+            })
+            .unzip();
 
-        if has_sampler {
-            let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some(&format!("Material {} | Sampler bind group layout", self.id)),
-                entries: &[wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: sampler_visibility,
-                    ty: wgpu::BindingType::Sampler(if filtering {
-                        wgpu::SamplerBindingType::Filtering
-                    } else {
-                        wgpu::SamplerBindingType::NonFiltering
-                    }),
-                    count: None,
-                }],
-            });
+        let samplers = self.create_samplers(device, bind_group_layout_entries.len() as u32);
 
-            let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-                label: Some(&format!("Material {} | Sampler", self.id)),
-                address_mode_u: wgpu::AddressMode::ClampToEdge,
-                address_mode_v: wgpu::AddressMode::ClampToEdge,
-                address_mode_w: wgpu::AddressMode::ClampToEdge,
-                mag_filter: if filtering {wgpu::FilterMode::Linear} else {wgpu::FilterMode::Nearest},
-                min_filter: if filtering {wgpu::FilterMode::Linear} else {wgpu::FilterMode::Nearest},
-                mipmap_filter: wgpu::MipmapFilterMode::Nearest,
-                ..Default::default()
-            });
+        let (samplers_bind_group_layout_entries, samplers_bind_group_entries): (
+            Vec<BindGroupLayoutEntry>,
+            Vec<BindGroupEntry>,
+        ) = samplers
+            .iter()
+            .map(|(sampler, is_filtering, visibility, binding)| {
+                Self::create_sampler_entries(sampler, *is_filtering, *visibility, *binding)
+            })
+            .unzip();
 
-            bind_groups.push(device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some(&format!("Material {} | Sampler bind group", self.id)),
-                layout: &layout,
-                entries: &[wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::Sampler(&sampler),
-                }],
-            }));
+        let all_bind_group_layout_entries: Vec<BindGroupLayoutEntry> = bind_group_layout_entries
+            .into_iter()
+            .chain(samplers_bind_group_layout_entries)
+            .collect();
 
-            bind_group_layouts.push(layout);
-        }
+        let all_bind_group_entries: Vec<BindGroupEntry> = bind_group_entries
+            .into_iter()
+            .chain(samplers_bind_group_entries)
+            .collect();
 
-        self.bind_group_layouts = bind_group_layouts;
-        self.bind_groups = bind_groups;
+        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some(&format!("Material {} | Bind group layout", self.id)),
+            entries: &all_bind_group_layout_entries,
+        });
+
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some(&format!("Material {} | Bind group", self.id)),
+            layout: &bind_group_layout,
+            entries: &all_bind_group_entries,
+        });
+
+        self.bind_group_layout = Some(bind_group_layout);
+        self.bind_group = Some(bind_group);
 
         self.is_initialized = true;
 
@@ -376,9 +381,7 @@ impl ComponentSystem for Material {
         other_components: &[&Component],
     ) {
         let bind_group_offset = if self.uses_camera() { 1 } else { 0 };
-        for (i, bind_group) in self.bind_groups.iter().enumerate() {
-            render_pass.set_bind_group(i as u32 + bind_group_offset, bind_group, &[]);
-        }
+        render_pass.set_bind_group(bind_group_offset, self.bind_group.as_ref().expect("The material bind group was not created. Remember to initialize the material before executing it."), &[]);
 
         for range in &self.component_ranges {
             for component in &other_components[range.clone()] {

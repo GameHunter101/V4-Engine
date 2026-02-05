@@ -241,26 +241,6 @@ impl Scene {
         self.execute_action_queue(action_queue, device, queue).await;
     }
 
-    pub fn execute_computes(&self, device: &Device, queue: &Queue) {
-        let mut command_encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("Compute command encoder"),
-        });
-        {
-            let mut compute_pass =
-                command_encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                    label: Some("Compute pass"),
-                    timestamp_writes: None,
-                });
-
-            for compute in &self.computes {
-                for _ in 0..compute.iterate_count() {
-                    compute.calculate(&mut compute_pass);
-                }
-            }
-        }
-        queue.submit(Some(command_encoder.finish()));
-    }
-
     pub async fn update_materials(
         &mut self,
         device: &Device,

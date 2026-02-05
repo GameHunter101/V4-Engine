@@ -5,12 +5,11 @@ use wgpu::{
     VertexBufferLayout,
 };
 
-use crate::engine_support::texture_support::Texture;
+use crate::engine_support::texture_support::TextureBundle;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum PipelineAttachments {
-    SampledTexture(ShaderStages),
-    StorageTexture(ShaderStages),
+    Texture(ShaderStages),
     Buffer(ShaderStages),
 }
 
@@ -20,7 +19,6 @@ pub struct PipelineId {
     pub spirv_vertex_shader: bool,
     pub fragment_shader: PipelineShader,
     pub spirv_fragment_shader: bool,
-    pub attachments: Vec<PipelineAttachments>,
     pub vertex_layouts: Vec<wgpu::VertexBufferLayout<'static>>,
     pub uses_camera: bool,
     pub is_screen_space: bool,
@@ -69,7 +67,7 @@ impl Default for GeometryDetails {
 pub fn create_render_pipeline(
     device: &Device,
     id: &PipelineId,
-    bind_group_layouts: &[BindGroupLayout],
+    attachment_bind_group_layout: Option<&BindGroupLayout>,
     render_format: TextureFormat,
     is_vert_spirv: bool,
     is_frag_spirv: bool,
@@ -126,17 +124,15 @@ pub fn create_render_pipeline(
         if let Some(camera_layout) = &camera_layout {
             vec![camera_layout]
                 .into_iter()
-                .chain(bind_group_layouts.iter())
+                .chain(attachment_bind_group_layout)
                 .collect()
         } else if let Some(screen_space_layout) = &screen_space_layout {
             vec![screen_space_layout]
                 .into_iter()
-                .chain(bind_group_layouts.iter())
+                .chain(attachment_bind_group_layout)
                 .collect()
         } else {
-            bind_group_layouts
-                .iter()
-                .collect()
+            attachment_bind_group_layout.as_ref().map_or_else(|| Vec::new(), |x| vec![*x])
         };
 
 
@@ -188,7 +184,7 @@ pub fn create_render_pipeline(
             None
         } else {
             Some(wgpu::DepthStencilState {
-                format: Texture::DEPTH_FORMAT,
+                format: TextureBundle::DEPTH_FORMAT,
                 depth_write_enabled: true,
                 depth_compare: wgpu::CompareFunction::LessEqual,
                 stencil: wgpu::StencilState::default(),

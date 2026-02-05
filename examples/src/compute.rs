@@ -16,7 +16,8 @@ pub async fn main() {
         scene: thing,
         "comp" = {
             computes: [
-                Compute(input:
+                Compute(
+                attachments:
                     vec![
                         ShaderAttachment::Buffer(ShaderBufferAttachment::new(
                             device,
@@ -24,9 +25,7 @@ pub async fn main() {
                             wgpu::BufferBindingType::Storage { read_only: true },
                             wgpu::ShaderStages::COMPUTE,
                             wgpu::BufferUsages::empty(),
-                        ))
-                    ],
-                    output:
+                        )),
                         ShaderAttachment::Buffer(ShaderBufferAttachment::new(
                             device,
                             bytemuck::cast_slice(&[0.0_f32,0.0,0.0,0.0, 0.0, 0.0, 0.0, 0.0]),
@@ -34,6 +33,7 @@ pub async fn main() {
                             wgpu::ShaderStages::COMPUTE,
                             wgpu::BufferUsages::empty(),
                         )),
+                    ],
                     shader_path: "shaders/compute/compute.wgsl",
                     workgroup_counts: (8, 1, 1),
                     ident: "temp"

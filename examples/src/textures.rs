@@ -1,7 +1,5 @@
 use v4::{
-    builtin_components::mesh_component::{MeshComponent, VertexDescriptor},
-    engine_support::texture_support::Texture,
-    scene, V4,
+    V4, builtin_components::mesh_component::{MeshComponent, VertexDescriptor}, engine_support::texture_support::{TextureBundle, TextureProperties}, scene
 };
 
 #[tokio::main]
@@ -25,15 +23,12 @@ pub async fn main() {
                 },
                 attachments: [Texture (
                     texture: 
-                        Texture::from_path(
+                        TextureBundle::from_path(
                             "./assets/testing_textures/dude.png",
                             device,
                             queue,
-                            wgpu::TextureFormat::Rgba8UnormSrgb,
-                            None,
-                            true,
-                            wgpu::TextureUsages::empty(),
-                        ).await.unwrap(),
+                            TextureProperties::default(),
+                        ).await.unwrap().1,
                     visibility: wgpu::ShaderStages::FRAGMENT,
                 )],
             },

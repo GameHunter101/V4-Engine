@@ -7,7 +7,7 @@ use ecs::{
 use engine_management::{
     engine_action::{EngineAction, V4Mutable},
     font_management::FontState,
-    pipeline::{create_render_pipeline, PipelineId},
+    pipeline::{PipelineId, create_render_pipeline},
     rendering_management::RenderingManager,
 };
 use glyphon::{FontSystem, SwashCache, TextAtlas, TextRenderer};
@@ -101,7 +101,6 @@ impl V4 {
             Receiver<_>,
         ) = crossbeam_channel::unbounded();
 
-
         self.event_loop
             .run(move |event, elwt| {
                 self.input_manager.update(&event);
@@ -136,12 +135,12 @@ impl V4 {
                         }
                         _ => {}
                     },
-                    Event::DeviceEvent { event, ..} => match event {
+                    Event::DeviceEvent { event, .. } => match event {
                         winit::event::DeviceEvent::MouseMotion { delta } => {
                             self.details.cursor_delta = (delta.0 as f32, delta.1 as f32);
-                        },
+                        }
                         _ => {}
-                    }
+                    },
                     Event::AboutToWait => {
                         if self.scenes.is_empty() {
                             return;
@@ -195,7 +194,7 @@ impl V4 {
                                         &self.details,
                                     )
                                     .await;
-                                scene.execute_computes(device, queue);
+                                self.rendering_manager.individual_compute_execution(scene.computes());
                             });
                         });
 
@@ -290,15 +289,15 @@ impl V4 {
             let active_scene_pipelines = active_scene.get_pipeline_ids();
             for pipeline_id in active_scene_pipelines {
                 if !pipelines.contains_key(pipeline_id) {
-                    let bind_group_layouts =
-                        active_scene.get_pipeline_materials(pipeline_id)[0].bind_group_layouts();
+                    let attachment_bind_group_layout =
+                        active_scene.get_pipeline_materials(pipeline_id)[0].bind_group_layout();
 
                     pipelines.insert(
                         pipeline_id.clone(),
                         create_render_pipeline(
                             device,
                             pipeline_id,
-                            bind_group_layouts,
+                            attachment_bind_group_layout,
                             render_format,
                             pipeline_id.spirv_vertex_shader,
                             pipeline_id.spirv_fragment_shader,
@@ -332,6 +331,7 @@ pub struct V4Builder {
     features: wgpu::Features,
     hide_cursor: bool,
     limits: wgpu::Limits,
+    backends: wgpu::Backends,
 }
 
 impl Default for V4Builder {
@@ -346,6 +346,7 @@ impl Default for V4Builder {
             features: wgpu::Features::default(),
             hide_cursor: false,
             limits: wgpu::Limits::default(),
+            backends: wgpu::Backends::all(),
         }
     }
 }
@@ -390,6 +391,11 @@ impl V4Builder {
         self
     }
 
+    pub fn backends(mut self, backends: wgpu::Backends) -> Self {
+        self.backends = backends;
+        self
+    }
+
     pub async fn build(self) -> V4 {
         let event_loop = EventLoop::new().expect("Failed to create event loop.");
         event_loop.set_control_flow(winit::event_loop::ControlFlow::Poll);
@@ -401,8 +407,15 @@ impl V4Builder {
             .expect("Failed to create window.");
         let input_manager = WinitInputHelper::new();
 
-        let rendering_manager =
-            RenderingManager::new(&window, self.antialiasing_enabled, self.clear_color, self.features, self.limits).await;
+        let rendering_manager = RenderingManager::new(
+            &window,
+            self.antialiasing_enabled,
+            self.clear_color,
+            self.features,
+            self.limits,
+            self.backends,
+        )
+        .await;
 
         let device = rendering_manager.device();
         let queue = rendering_manager.queue();
@@ -418,9 +431,13 @@ impl V4Builder {
 
         window.set_cursor_visible(!self.hide_cursor);
         if self.hide_cursor {
-            window.set_cursor_grab(winit::window::CursorGrabMode::Locked).unwrap_or_else(|_| {
-                window.set_cursor_grab(winit::window::CursorGrabMode::Confined).unwrap();
-            });
+            window
+                .set_cursor_grab(winit::window::CursorGrabMode::Locked)
+                .unwrap_or_else(|_| {
+                    window
+                        .set_cursor_grab(winit::window::CursorGrabMode::Confined)
+                        .unwrap();
+                });
         }
 
         let font_state = FontState {

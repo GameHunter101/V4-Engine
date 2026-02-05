@@ -1,5 +1,5 @@
 @group(1) @binding(0) var env_map: texture_cube<f32>;
-@group(2) @binding(0) var env_sampler: sampler;
+@group(1) @binding(1) var env_sampler: sampler;
 
 struct Camera {
     view_proj: mat4x4<f32>,

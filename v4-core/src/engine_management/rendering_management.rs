@@ -10,6 +10,7 @@ use wgpu::{
 use crate::{
     ecs::{
         component::{ComponentDetails, ComponentSystem},
+        compute::Compute,
         scene::Scene,
     },
     engine_management::pipeline::{PipelineId, create_render_pipeline},
@@ -26,7 +27,7 @@ pub struct RenderingManager {
     config: wgpu::SurfaceConfiguration,
     width: u32,
     height: u32,
-    depth_texture: texture_support::Texture,
+    depth_texture: texture_support::CompleteTexture,
     clear_color: wgpu::Color,
     smaa_target: SmaaTarget,
     screen_space_input_texture: wgpu::Texture,
@@ -42,9 +43,10 @@ impl RenderingManager {
         clear_color: wgpu::Color,
         features: wgpu::Features,
         limits: wgpu::Limits,
+        backends: wgpu::Backends,
     ) -> Self {
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::all(),
+            backends,
             ..Default::default()
         });
 
@@ -100,7 +102,7 @@ impl RenderingManager {
 
         surface.configure(&device, &config);
 
-        let depth_texture = texture_support::Texture::create_depth_texture(&device, &config);
+        let depth_texture = texture_support::TextureBundle::create_depth_texture(&device, &config);
 
         let smaa_target = SmaaTarget::new(
             &device,
@@ -234,7 +236,6 @@ fn main(input: VertexOutput) -> @location(0) vec4<f32> {
                 ),
             ),
             spirv_fragment_shader: false,
-            attachments: Vec::new(),
             vertex_layouts: vec![wgpu::VertexBufferLayout {
                 array_stride: 4 * 5,
                 step_mode: wgpu::VertexStepMode::Vertex,
@@ -250,7 +251,7 @@ fn main(input: VertexOutput) -> @location(0) vec4<f32> {
         let screen_space_output_pipeline = create_render_pipeline(
             &device,
             &screen_space_output_pipeline_id,
-            &[],
+            None,
             format,
             false,
             false,
@@ -344,7 +345,7 @@ fn main(input: VertexOutput) -> @location(0) vec4<f32> {
                     depth_slice: None,
                 })],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: self.depth_texture.view_ref(),
+                    view: self.depth_texture.1.view(),
                     depth_ops: Some(wgpu::Operations {
                         load: wgpu::LoadOp::Clear(1.0),
                         store: wgpu::StoreOp::Store,
@@ -464,9 +465,7 @@ fn main(input: VertexOutput) -> @location(0) vec4<f32> {
 
                     effect_pass.set_bind_group(0, &self.screen_space_bind_group, &[]);
 
-                    for (i, bind_group) in material.bind_groups().iter().enumerate() {
-                        effect_pass.set_bind_group(i as u32 + 1, bind_group, &[]);
-                    }
+                    effect_pass.set_bind_group(1, material.bind_group().unwrap(), &[]);
 
                     effect_pass.set_vertex_buffer(0, self.screen_triangle_buffer.slice(..));
                     effect_pass.draw(0..3, 0..1);
@@ -574,7 +573,7 @@ fn main(input: VertexOutput) -> @location(0) vec4<f32> {
         self.config.height = height;
         self.surface.configure(&self.device, &self.config);
         self.depth_texture =
-            texture_support::Texture::create_depth_texture(&self.device, &self.config);
+            texture_support::TextureBundle::create_depth_texture(&self.device, &self.config);
         self.smaa_target.resize(&self.device, width, height);
     }
 
@@ -596,6 +595,29 @@ fn main(input: VertexOutput) -> @location(0) vec4<f32> {
 
     pub fn smaa_target_mut(&mut self) -> &mut SmaaTarget {
         &mut self.smaa_target
+    }
+
+    pub fn individual_compute_execution(&self, computes: &[Compute]) {
+        let mut encoder =
+            self.device
+                .create_command_encoder(&wgpu::wgt::CommandEncoderDescriptor {
+                    label: Some("Individual compute encoder"),
+                });
+
+        {
+            let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("Compute pass"),
+                timestamp_writes: None,
+            });
+
+            for compute in computes {
+                for _ in 0..compute.iterate_count() {
+                    compute.calculate(&mut compute_pass);
+                }
+            }
+        }
+
+        self.queue.submit(Some(encoder.finish()));
     }
 }
 
