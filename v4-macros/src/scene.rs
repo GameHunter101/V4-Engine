@@ -1669,12 +1669,12 @@ impl quote::ToTokens for ShaderAttachmentDescriptor {
     fn to_tokens(&self, tokens: &mut TokenStream2) {
         match self {
             ShaderAttachmentDescriptor::Texture(ShaderTextureAttachmentDescriptor {
-                texture,
+                texture_bundle,
                 visibility,
             }) => tokens.extend(quote! {
                 v4::ecs::material::ShaderAttachment::Texture(
                     v4::ecs::material::ShaderTextureAttachment {
-                        texture: #texture,
+                        texture_bundle: #texture_bundle,
                         visibility: #visibility,
                     }
                 )
@@ -1693,7 +1693,7 @@ impl quote::ToTokens for ShaderAttachmentDescriptor {
 }
 
 struct ShaderTextureAttachmentDescriptor {
-    texture: Expr,
+    texture_bundle: Expr,
     visibility: ExprPath,
 }
 
@@ -1702,13 +1702,13 @@ impl Parse for ShaderTextureAttachmentDescriptor {
         let content;
         parenthesized!(content in input);
         let fields = content.parse_terminated(SimpleField::parse, Token![,])?;
-        let mut texture: Option<Expr> = None;
+        let mut texture_bundle: Option<Expr> = None;
         let mut visibility: Option<ExprPath> = None;
 
         for field in fields {
             match field.ident.to_string().as_str() {
-                "texture" => {
-                    texture = match field.value {
+                "texture_bundle" => {
+                    texture_bundle = match field.value {
                         Some(value) => Some(match value {
                             SimpleFieldValue::Expression(expr) => Ok(expr),
                             rest => Err(syn::Error::new_spanned(rest, "Invalid texture value")),
@@ -1741,7 +1741,7 @@ impl Parse for ShaderTextureAttachmentDescriptor {
             }
         }
         Ok(ShaderTextureAttachmentDescriptor {
-            texture: texture.unwrap(),
+            texture_bundle: texture_bundle.unwrap(),
             visibility: visibility.unwrap(),
         })
     }

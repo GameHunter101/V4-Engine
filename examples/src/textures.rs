@@ -1,5 +1,8 @@
 use v4::{
-    V4, builtin_components::mesh_component::{MeshComponent, VertexDescriptor}, engine_support::texture_support::{TextureBundle, TextureProperties}, scene
+    V4,
+    builtin_components::mesh_component::{MeshComponent, VertexDescriptor},
+    engine_support::texture_support::{TextureBundle, TextureProperties},
+    scene,
 };
 
 #[tokio::main]
@@ -22,7 +25,7 @@ pub async fn main() {
                     }
                 },
                 attachments: [Texture (
-                    texture: 
+                    texture_bundle:
                         TextureBundle::from_path(
                             "./assets/testing_textures/dude.png",
                             device,

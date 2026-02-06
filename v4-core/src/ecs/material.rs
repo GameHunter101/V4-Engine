@@ -19,7 +19,7 @@ use super::{
 
 #[derive(Debug, Clone)]
 pub struct ShaderTextureAttachment {
-    pub texture: TextureBundle,
+    pub texture_bundle: TextureBundle,
     pub visibility: ShaderStages,
 }
 
@@ -118,9 +118,9 @@ impl Material {
                 visibility: tex.visibility,
                 ty: wgpu::BindingType::Texture {
                     sample_type: wgpu::TextureSampleType::Float {
-                        filterable: tex.texture.properties().is_filtered,
+                        filterable: tex.texture_bundle.properties().is_filtered,
                     },
-                    view_dimension: if tex.texture.properties().is_cubemap {
+                    view_dimension: if tex.texture_bundle.properties().is_cubemap {
                         wgpu::TextureViewDimension::Cube
                     } else {
                         wgpu::TextureViewDimension::D2
@@ -148,7 +148,7 @@ impl Material {
     ) -> BindGroupEntry<'a> {
         let resource = match attachment {
             ShaderAttachment::Texture(tex) => {
-                wgpu::BindingResource::TextureView(tex.texture.view())
+                wgpu::BindingResource::TextureView(tex.texture_bundle.view())
             }
             ShaderAttachment::Buffer(buf) => buf.buffer.as_entire_binding(),
         };
@@ -181,17 +181,13 @@ impl Material {
     }
 
     /// Index 0: non-filtering, index 1: filtering
-    fn create_samplers(
-        &self,
-        device: &Device,
-        existing_bind_group_entries_count: u32,
-    ) -> Vec<(Sampler, bool, ShaderStages, u32)> {
+    fn create_samplers(&self, device: &Device) -> Vec<(Sampler, bool, ShaderStages)> {
         let samplers_needed =
             self.attachments
                 .iter()
                 .fold([(false, ShaderStages::empty()); 2], |acc, attachment| {
                     if let ShaderAttachment::Texture(ShaderTextureAttachment {
-                        texture,
+                        texture_bundle: texture,
                         visibility,
                     }) = attachment
                     {
@@ -207,7 +203,7 @@ impl Material {
                                 acc[0].1 | *visibility,
                             ),
                             (
-                                acc[1].0 | (is_sampled && !is_filtered),
+                                acc[1].0 | (is_sampled && is_filtered),
                                 acc[1].1 | *visibility,
                             ),
                         ]
@@ -248,12 +244,7 @@ impl Material {
                         mipmap_filter: wgpu::MipmapFilterMode::Nearest,
                         ..Default::default()
                     });
-                    Some((
-                        sampler,
-                        is_filtering,
-                        *visibility,
-                        existing_bind_group_entries_count + filtering_as_index as u32,
-                    ))
+                    Some((sampler, is_filtering, *visibility))
                 } else {
                     None
                 }
@@ -312,15 +303,21 @@ impl ComponentSystem for Material {
             })
             .unzip();
 
-        let samplers = self.create_samplers(device, bind_group_layout_entries.len() as u32);
+        let samplers = self.create_samplers(device);
 
         let (samplers_bind_group_layout_entries, samplers_bind_group_entries): (
             Vec<BindGroupLayoutEntry>,
             Vec<BindGroupEntry>,
         ) = samplers
             .iter()
-            .map(|(sampler, is_filtering, visibility, binding)| {
-                Self::create_sampler_entries(sampler, *is_filtering, *visibility, *binding)
+            .enumerate()
+            .map(|(i, (sampler, is_filtering, visibility))| {
+                Self::create_sampler_entries(
+                    sampler,
+                    *is_filtering,
+                    *visibility,
+                    (i + bind_group_layout_entries.len()) as u32,
+                )
             })
             .unzip();
 

@@ -76,7 +76,7 @@ pub async fn main() {
         .shader_path("./shaders/hello_world/skybox_compute.wgsl")
         .attachments(vec![
             ShaderAttachment::Texture(ShaderTextureAttachment {
-                texture: TextureBundle::from_path(
+                texture_bundle: TextureBundle::from_path(
                     "./assets/testing_textures/citrus_orchard_road_puresky_2k.hdr",
                     device,
                     queue,
@@ -94,7 +94,7 @@ pub async fn main() {
                 visibility: wgpu::ShaderStages::COMPUTE,
             }),
             ShaderAttachment::Texture(ShaderTextureAttachment {
-                texture: skybox_cubemap_output_bundle,
+                texture_bundle: skybox_cubemap_output_bundle,
                 visibility: wgpu::ShaderStages::COMPUTE,
             }),
         ])
@@ -162,7 +162,7 @@ pub async fn main() {
                 },
                 attachments: [
                     Texture(
-                        texture: skybox_display_bundle,
+                        texture_bundle: skybox_display_bundle,
                         visibility: wgpu::ShaderStages::FRAGMENT,
                     )
                 ],

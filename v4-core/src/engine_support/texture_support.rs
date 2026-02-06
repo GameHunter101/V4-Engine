@@ -26,7 +26,7 @@ impl Default for TextureProperties {
             is_filtered: true,
             is_sampled: true,
             is_hdr: false,
-            extra_usages: TextureUsages::empty(),
+            extra_usages: TextureUsages::TEXTURE_BINDING,
         }
     }
 }

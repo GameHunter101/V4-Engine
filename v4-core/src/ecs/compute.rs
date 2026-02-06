@@ -39,7 +39,7 @@ impl Compute {
     ) -> BindGroupLayoutEntry {
         match attachment {
             ShaderAttachment::Texture(tex) => {
-                let props = tex.texture.properties();
+                let props = tex.texture_bundle.properties();
                 let view_dimension = if props.is_cubemap {
                     wgpu::TextureViewDimension::D2Array
                 } else {
@@ -88,7 +88,7 @@ impl Compute {
         match attachment {
             ShaderAttachment::Texture(tex) => BindGroupEntry {
                 binding,
-                resource: wgpu::BindingResource::TextureView(tex.texture.view()),
+                resource: wgpu::BindingResource::TextureView(tex.texture_bundle.view()),
             },
             ShaderAttachment::Buffer(buf) => wgpu::BindGroupEntry {
                 binding,
