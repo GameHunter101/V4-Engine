@@ -181,22 +181,12 @@ impl V4 {
                         let device = self.rendering_manager.device();
                         let queue = self.rendering_manager.queue();
 
-                        TokioScope::scope_and_block(|scope| {
-                            scope.spawn(async {
-                                scene
-                                    .update(device, queue, &self.input_manager, &self.details)
-                                    .await;
-                                scene
-                                    .update_materials(
-                                        device,
-                                        queue,
-                                        &self.input_manager,
-                                        &self.details,
-                                    )
-                                    .await;
-                                self.rendering_manager.individual_compute_execution(scene.computes());
-                            });
-                        });
+                        let action_queue = scene.update(device, queue, &self.input_manager, &self.details);
+                        pollster::block_on(scene.execute_action_queue(action_queue, device, queue));
+
+                        scene.update_materials(device, queue, &self.input_manager, &self.details);
+                        self.rendering_manager
+                            .individual_compute_execution(scene.computes());
 
                         Self::create_new_pipelines(
                             device,
@@ -205,13 +195,11 @@ impl V4 {
                             &mut self.pipelines,
                         );
 
-                        async_scoped::TokioScope::scope_and_block(|scope| {
-                            scope.spawn(self.rendering_manager.render(
-                                scene,
-                                &self.pipelines,
-                                &mut self.font_state,
-                            ))
-                        });
+                        pollster::block_on(self.rendering_manager.render(
+                            scene,
+                            &self.pipelines,
+                            &mut self.font_state,
+                        ));
 
                         self.details.frames_elapsed += 1;
                         self.details.last_frame_instant = Instant::now();

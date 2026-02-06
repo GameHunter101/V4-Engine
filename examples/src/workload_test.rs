@@ -41,7 +41,6 @@ impl WorkloadTesterComponent {
     }
 }
 
-#[async_trait::async_trait]
 impl ComponentSystem for WorkloadTesterComponent {
     fn initialize(&mut self, _device: &wgpu::Device) -> v4::ecs::actions::ActionQueue {
         self.initialized_time = std::time::Instant::now();
@@ -50,7 +49,7 @@ impl ComponentSystem for WorkloadTesterComponent {
         Vec::new()
     }
 
-    async fn update(
+    fn update(
         &mut self,
         UpdateParams { workload_outputs, .. }: UpdateParams<'_, '_>,
     ) -> v4::ecs::actions::ActionQueue {
@@ -93,9 +92,8 @@ impl ComponentSystem for WorkloadTesterComponent {
 #[component]
 struct TempComponent {}
 
-#[async_trait::async_trait]
 impl ComponentSystem for TempComponent {
-    async fn update(
+    fn update(
         &mut self,
         UpdateParams { engine_details, .. }: UpdateParams<'_, '_>,
     ) -> v4::ecs::actions::ActionQueue {

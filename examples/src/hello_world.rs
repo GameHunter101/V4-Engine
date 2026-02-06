@@ -184,37 +184,6 @@ pub async fn main() {
                     enabled_models: vec![(0, None)]
                 ),
             ],
-            /* computes: [
-                Compute(
-                    shader_path: "./shaders/hello_world/skybox_compute.wgsl",
-                    attachments: vec![
-                    ShaderAttachment::Texture (
-                        ShaderTextureAttachment {
-                            texture: TextureBundle::from_path(
-                                "./assets/testing_textures/citrus_orchard_road_puresky_2k.hdr",
-                                device,
-                                queue,
-                                TextureProperties {
-                                    format: wgpu::TextureFormat::Rgba32Float,
-                                    is_filtered: false,
-                                    is_sampled: false,
-                                    is_hdr: true,
-                                    ..Default::default()
-                                }
-                            ).await.unwrap().1,
-                            visibility: wgpu::ShaderStages::COMPUTE,
-                        }
-                    ),
-                    ShaderAttachment::Texture(
-                        ShaderTextureAttachment {
-                            texture: skybox_cubemap_output_bundle,
-                            visibility: wgpu::ShaderStages::COMPUTE,
-                        })
-                    ],
-                    workgroup_counts: ((1024 + 15)/16, (1024 + 15)/16, 6),
-                    ident: "skybox_comp"
-                )
-            ] */
         },
         _ = {
             material: {
@@ -265,9 +234,8 @@ struct HideComponent {
     immediate_mat: ComponentId,
 }
 
-#[async_trait::async_trait]
 impl ComponentSystem for HideComponent {
-    async fn update(
+    fn update(
         &mut self,
         UpdateParams {
             input_manager,
@@ -275,8 +243,6 @@ impl ComponentSystem for HideComponent {
             ..
         }: UpdateParams<'_, '_>,
     ) -> v4::ecs::actions::ActionQueue {
-        let mut materials = materials.lock().unwrap();
-
         if input_manager.key_pressed(winit::keyboard::KeyCode::KeyT) {
             self.showing = !self.showing;
             /* if let Some(mat) = materials

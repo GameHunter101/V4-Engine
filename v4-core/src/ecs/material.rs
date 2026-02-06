@@ -294,7 +294,7 @@ impl Material {
     }
 }
 
-#[async_trait::async_trait]
+// #[async_trait::async_trait]
 impl ComponentSystem for Material {
     fn initialize(&mut self, device: &Device) -> ActionQueue {
         let (bind_group_layout_entries, bind_group_entries): (
@@ -353,7 +353,7 @@ impl ComponentSystem for Material {
         Vec::new()
     }
 
-    async fn update(
+    fn update(
         &mut self,
         UpdateParams {
             entity_component_groupings,

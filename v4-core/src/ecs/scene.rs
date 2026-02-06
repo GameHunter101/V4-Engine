@@ -5,7 +5,6 @@ use std::{
     future::Future,
     ops::Range,
     pin::Pin,
-    sync::{Arc, Mutex},
 };
 
 use crossbeam_channel::{Receiver, Sender};
@@ -146,13 +145,13 @@ impl Scene {
         Box::pin(self.execute_action_queue(action_queue, device, queue)).await;
     }
 
-    pub async fn update(
+    pub fn update(
         &mut self,
         device: &Device,
         queue: &Queue,
         input_manager: &WinitInputHelper,
         engine_details: &EngineDetails,
-    ) {
+    ) -> ActionQueue {
         while let Ok((component_id, workload_output)) = self
             .workload_output_receiver
             .as_ref()
@@ -176,23 +175,21 @@ impl Scene {
 
         let all_components: &mut Vec<Component> = &mut self.components;
 
-        let actions: Vec<_> = enabled_components
+        enabled_components
             .into_iter()
-            .map(|i| {
+            .flat_map(|i| {
                 let (previous_components, rest_of_components) = all_components.split_at_mut(i);
                 let Some((current_component, later_components)) =
                     rest_of_components.split_first_mut()
                 else {
                     return Vec::new();
                 };
-                let other_components: Arc<Mutex<Vec<&mut Component>>> = Arc::new(Mutex::new(
+                let mut other_components: Vec<&mut Component> = 
                     previous_components
                         .iter_mut()
                         .chain(later_components.iter_mut())
-                        .collect::<Vec<_>>(),
-                ));
-                let all_materials: Arc<Mutex<Vec<&mut Material>>> =
-                    Arc::new(Mutex::new(self.materials.iter_mut().collect()));
+                        .collect::<Vec<_>>();
+                let mut all_materials: Vec<&mut Material> = self.materials.iter_mut().collect();
 
                 let mut entity_component_groupings = self.entity_component_groupings.clone();
                 for grouping in entity_component_groupings.values_mut() {
@@ -206,42 +203,25 @@ impl Scene {
                 let workload_outputs = &self.workload_outputs;
                 let computes = &self.computes;
 
-                let other_components = other_components.clone();
-                let materials = all_materials.clone();
-
-                let (_, outputs) = async_scoped::TokioScope::scope_and_block(|scope| {
-                    scope.spawn(async {
-                        current_component
-                            .update(super::component::UpdateParams {
-                                device,
-                                queue,
-                                input_manager,
-                                other_components,
-                                computes,
-                                materials,
-                                engine_details,
-                                workload_outputs,
-                                entities,
-                                entity_component_groupings,
-                                active_camera,
-                            })
-                            .await
-                    });
-                });
-                outputs
+                current_component
+                    .update(super::component::UpdateParams {
+                        device,
+                        queue,
+                        input_manager,
+                        other_components: &mut other_components,
+                        computes,
+                        materials: &mut all_materials,
+                        engine_details,
+                        workload_outputs,
+                        entities,
+                        entity_component_groupings,
+                        active_camera,
+                    })
             })
-            .collect();
-
-        let action_queue: ActionQueue = actions
-            .into_iter()
-            .flatten()
-            .flat_map(|queue| queue.unwrap_or_default())
-            .collect();
-
-        self.execute_action_queue(action_queue, device, queue).await;
+            .collect()
     }
 
-    pub async fn update_materials(
+    pub fn update_materials(
         &mut self,
         device: &Device,
         queue: &Queue,
@@ -263,43 +243,34 @@ impl Scene {
 
         for i in 0..all_materials.len() {
             let (previous_materials, all_other_materials) = all_materials.split_at_mut(i);
-            let all_components: Arc<Mutex<Vec<&mut Component>>> =
-                Arc::new(Mutex::new(self.components.iter_mut().collect::<Vec<_>>()));
+            let mut all_components: Vec<&mut Component> =
+                self.components.iter_mut().collect::<Vec<_>>();
 
             let (current_material, later_materials) =
                 all_other_materials.split_first_mut().unwrap();
 
-            let other_materials: Arc<Mutex<Vec<&mut Material>>> = Arc::new(Mutex::new(
+            let mut other_materials: Vec<&mut Material> = 
                 previous_materials
                     .iter_mut()
                     .chain(later_materials.iter_mut())
-                    .collect(),
-            ));
+                    .collect();
             let computes = &self.computes;
             let entity_component_groupings = entity_component_groupings.clone();
 
-            let all_components = all_components.clone();
-            let other_materials = other_materials.clone();
-
-            let _ = async_scoped::TokioScope::scope_and_block(|scope| {
-                scope.spawn(async {
-                    current_material
-                        .update(super::component::UpdateParams {
-                            device,
-                            queue,
-                            input_manager,
-                            other_components: all_components,
-                            computes,
-                            materials: other_materials,
-                            engine_details,
-                            workload_outputs,
-                            entities,
-                            entity_component_groupings,
-                            active_camera,
-                        })
-                        .await
+            current_material
+                .update(super::component::UpdateParams {
+                    device,
+                    queue,
+                    input_manager,
+                    other_components: &mut all_components,
+                    computes,
+                    materials: &mut other_materials,
+                    engine_details,
+                    workload_outputs,
+                    entities,
+                    entity_component_groupings,
+                    active_camera,
                 });
-            });
         }
     }
 

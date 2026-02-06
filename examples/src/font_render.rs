@@ -38,7 +38,6 @@ pub async fn main() {
     engine.main_loop().await;
 }
 
-#[async_trait::async_trait]
 impl ComponentSystem for TextComponent {
     fn initialize(&mut self, _device: &wgpu::Device) -> v4::ecs::actions::ActionQueue {
         self.is_initialized = true;
@@ -65,7 +64,7 @@ impl ComponentSystem for TextComponent {
         })]
     }
 
-    async fn update(
+    fn update(
         &mut self,
         UpdateParams { input_manager, .. }: UpdateParams<'_, '_>,
     ) -> v4::ecs::actions::ActionQueue {
@@ -73,7 +72,7 @@ impl ComponentSystem for TextComponent {
 
         if input_manager.key_held(winit::keyboard::KeyCode::Backspace) {
             self.text.pop();
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            std::thread::sleep(std::time::Duration::from_millis(100));
             return vec![Box::new(UpdateTextComponentAction {
                 component_id: self.id(),
                 text: Some(self.text.clone()),
@@ -106,9 +105,8 @@ impl ComponentSystem for TextComponent {
     }
 }
 
-#[async_trait::async_trait]
 impl ComponentSystem for ToggleComponent {
-    async fn update(
+    fn update(
         &mut self,
         UpdateParams { input_manager, .. }: UpdateParams<'_, '_>,
     ) -> v4::ecs::actions::ActionQueue {

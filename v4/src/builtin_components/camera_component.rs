@@ -36,9 +36,9 @@ pub struct CameraComponent {
     yaw: f32,
 }
 
-#[async_trait::async_trait]
+// #[async_trait::async_trait]
 impl ComponentSystem for CameraComponent {
-    async fn update(
+    fn update(
         &mut self,
         UpdateParams {
             other_components,
@@ -55,8 +55,7 @@ impl ComponentSystem for CameraComponent {
                 return vec![Box::new(SetCursorLockAction(self.frozen))];
             }
             if active == self.id() && !self.frozen {
-                let sibling_components = &mut other_components.lock().unwrap()
-                    [entity_component_groupings[&self.parent_entity_id].clone()];
+                let sibling_components = &mut other_components[entity_component_groupings[&self.parent_entity_id].clone()];
 
                 let transform_component: Option<&mut TransformComponent> = sibling_components
                     .into_iter()

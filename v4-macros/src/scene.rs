@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use proc_macro2::{TokenStream as TokenStream2, TokenTree};
 use quote::{ToTokens, format_ident, quote};
 use syn::{
-    AngleBracketedGenericArguments, Expr, ExprCall, ExprPath, Ident, Lit, LitBool, LitInt, LitStr,
-    Token, braced, bracketed, parenthesized,
+    AngleBracketedGenericArguments, Expr, ExprCall, ExprPath, Ident, Lit, LitBool,
+    LitStr, Token, braced, bracketed, parenthesized,
     parse::{Parse, ParseStream, discouraged::Speculative},
     parse2,
     punctuated::Punctuated,
@@ -1222,7 +1222,7 @@ struct PipelineIdDescriptor {
     uses_camera: LitBool,
     geometry_details: Option<GeometryDetailsDescriptor>,
     immediate_size: Option<Expr>,
-    render_priority: Option<LitInt>,
+    render_priority: Option<Expr>,
     ident: Option<Lit>,
 }
 
@@ -1239,7 +1239,7 @@ impl Parse for PipelineIdDescriptor {
         let mut uses_camera: Option<LitBool> = None;
         let mut geometry_details: Option<GeometryDetailsDescriptor> = None;
         let mut immediate_size: Option<Expr> = None;
-        let mut render_priority: Option<LitInt> = None;
+        let mut render_priority: Option<Expr> = None;
         let mut ident: Option<Lit> = None;
 
         for field in fields {
@@ -1383,8 +1383,9 @@ impl Parse for PipelineIdDescriptor {
                     }
                 }
                 "render_priority" => {
-                    if let Some(SimpleFieldValue::Literal(Lit::Int(prior))) = field.value {
-                        render_priority = Some(prior);
+                    if let Some(SimpleFieldValue::Expression(priority)) = field.value {
+                        render_priority = Some(priority);
+
                     }
                 }
                 "ident" => {
@@ -1670,27 +1671,23 @@ impl quote::ToTokens for ShaderAttachmentDescriptor {
             ShaderAttachmentDescriptor::Texture(ShaderTextureAttachmentDescriptor {
                 texture,
                 visibility,
-            }) => {
-                tokens.extend(quote! {
-                    v4::ecs::material::ShaderAttachment::Texture(
-                        v4::ecs::material::ShaderTextureAttachment {
-                            texture: #texture,
-                            visibility: #visibility,
-                        }
-                    )
-                })
-            }
+            }) => tokens.extend(quote! {
+                v4::ecs::material::ShaderAttachment::Texture(
+                    v4::ecs::material::ShaderTextureAttachment {
+                        texture: #texture,
+                        visibility: #visibility,
+                    }
+                )
+            }),
             ShaderAttachmentDescriptor::Buffer(ShaderBufferAttachmentDescriptor {
                 buffer,
                 visibility,
-            }) => {
-                tokens.extend(quote! {
-                    v4::ecs::material::ShaderBufferAttachment {
-                        buffer: #buffer,
-                        visibility: #visibility,
-                    }
-                })
-            }
+            }) => tokens.extend(quote! {
+                v4::ecs::material::ShaderBufferAttachment {
+                    buffer: #buffer,
+                    visibility: #visibility,
+                }
+            }),
         };
     }
 }

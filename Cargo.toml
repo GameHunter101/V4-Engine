@@ -6,8 +6,12 @@ members = [ "examples", "v4",
 ]
 resolver = "2"
 
+[profile.release]
+debug = true
+strip = false
+
 [workspace.package]
-version = "0.2.60"
+version = "0.2.61"
 authors = ["Lior Carmeli"]
 
 [workspace.dependencies]

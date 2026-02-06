@@ -1,5 +1,5 @@
 use downcast_rs::{impl_downcast, DowncastSync};
-use std::{collections::HashMap, fmt::Debug, ops::Range, sync::{Arc, Mutex}};
+use std::{collections::HashMap, fmt::Debug, ops::Range};
 use wgpu::{CommandEncoder, Device, Queue, RenderPass};
 use winit_input_helper::WinitInputHelper;
 
@@ -21,9 +21,9 @@ pub struct UpdateParams<'a: 'b, 'b> {
     pub device: &'a Device,
     pub queue: &'a Queue,
     pub input_manager: &'a WinitInputHelper,
-    pub other_components: Arc<Mutex<Vec<&'b mut Component>>>,
+    pub other_components: &'a mut[&'b mut Component],
     pub computes: &'a [Compute],
-    pub materials: Arc<Mutex<Vec<&'b mut Material>>>,
+    pub materials: &'a mut [&'b mut Material],
     pub engine_details: &'a EngineDetails,
     pub workload_outputs: &'a HashMap<ComponentId, Vec<WorkloadOutput>>,
     pub entities: &'a HashMap<EntityId, Entity>,
@@ -32,15 +32,13 @@ pub struct UpdateParams<'a: 'b, 'b> {
 }
 
 #[allow(unused)]
-#[async_trait::async_trait]
 pub trait ComponentSystem: ComponentDetails + Debug + DowncastSync + Send + Sync {
     fn initialize(&mut self, device: &Device) -> ActionQueue {
         self.set_initialized();
         Vec::new()
     }
 
-    #[allow(clippy::too_many_arguments)]
-    async fn update(&mut self, params: UpdateParams<'_, '_>) -> ActionQueue {
+    fn update(&mut self, params: UpdateParams<'_, '_>) -> ActionQueue {
         Vec::new()
     }
 
