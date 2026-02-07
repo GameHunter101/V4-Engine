@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use proc_macro2::{TokenStream as TokenStream2, TokenTree};
 use quote::{ToTokens, format_ident, quote};
 use syn::{
-    AngleBracketedGenericArguments, Expr, ExprCall, ExprPath, Ident, Lit, LitBool,
-    LitStr, Token, braced, bracketed, parenthesized,
+    AngleBracketedGenericArguments, Expr, ExprCall, ExprPath, Ident, Lit, LitBool, LitStr, Token,
+    braced, bracketed, parenthesized,
     parse::{Parse, ParseStream, discouraged::Speculative},
     parse2,
     punctuated::Punctuated,
@@ -1385,7 +1385,6 @@ impl Parse for PipelineIdDescriptor {
                 "render_priority" => {
                     if let Some(SimpleFieldValue::Expression(priority)) = field.value {
                         render_priority = Some(priority);
-
                     }
                 }
                 "ident" => {
@@ -1680,13 +1679,21 @@ impl quote::ToTokens for ShaderAttachmentDescriptor {
                 )
             }),
             ShaderAttachmentDescriptor::Buffer(ShaderBufferAttachmentDescriptor {
-                buffer,
+                device,
+                data,
+                buffer_type,
                 visibility,
+                extra_usages,
             }) => tokens.extend(quote! {
-                v4::ecs::material::ShaderBufferAttachment {
-                    buffer: #buffer,
-                    visibility: #visibility,
-                }
+                v4::ecs::material::ShaderAttachment::Buffer(
+                    v4::ecs::material::ShaderBufferAttachment::new(
+                        #device,
+                        #data,
+                        #buffer_type,
+                        #visibility,
+                        #extra_usages,
+                    )
+                )
             }),
         };
     }
@@ -1740,16 +1747,32 @@ impl Parse for ShaderTextureAttachmentDescriptor {
                 _ => {}
             }
         }
-        Ok(ShaderTextureAttachmentDescriptor {
-            texture_bundle: texture_bundle.unwrap(),
-            visibility: visibility.unwrap(),
-        })
+
+        let error_message = if texture_bundle.is_none() {
+            "No texture bundle provided"
+        } else {
+            "No attachment visibility provided"
+        };
+
+        if let Some(texture_bundle) = texture_bundle
+            && let Some(visibility) = visibility
+        {
+            Ok(ShaderTextureAttachmentDescriptor {
+                texture_bundle,
+                visibility,
+            })
+        } else {
+            Err(input.error(error_message))
+        }
     }
 }
 
 struct ShaderBufferAttachmentDescriptor {
-    buffer: Expr,
+    device: Expr,
+    data: Expr,
+    buffer_type: ExprPath,
     visibility: ExprPath,
+    extra_usages: Expr,
 }
 
 impl Parse for ShaderBufferAttachmentDescriptor {
@@ -1757,15 +1780,37 @@ impl Parse for ShaderBufferAttachmentDescriptor {
         let content;
         parenthesized!(content in input);
         let fields = content.parse_terminated(SimpleField::parse, Token![,])?;
-        let mut buffer: Option<Expr> = None;
+        let mut device: Option<Expr> = None;
+        let mut data: Option<Expr> = None;
+        let mut buffer_type: Option<ExprPath> = None;
         let mut visibility: Option<ExprPath> = None;
+        let mut extra_usages: Option<Expr> = None;
+
         for field in fields {
             match field.ident.to_string().as_str() {
-                "buffer" => {
-                    buffer = match field.value {
+                "device" => {
+                    device = match field.value {
                         Some(value) => Some(match value {
                             SimpleFieldValue::Expression(expr) => Ok(expr),
-                            rest => Err(syn::Error::new_spanned(rest, "Invalid buffer value")),
+                            rest => Err(syn::Error::new_spanned(rest, "Invalid device expression")),
+                        }?),
+                        None => None,
+                    }
+                }
+                "data" => {
+                    data = match field.value {
+                        Some(value) => Some(match value {
+                            SimpleFieldValue::Expression(expr) => Ok(expr),
+                            rest => Err(syn::Error::new_spanned(rest, "Invalid data expression")),
+                        }?),
+                        None => None,
+                    }
+                }
+                "buffer_type" => {
+                    buffer_type = match field.value {
+                        Some(value) => Some(match value {
+                            SimpleFieldValue::Expression(Expr::Path(path)) => Ok(path),
+                            rest => Err(syn::Error::new_spanned(rest, "Invalid buffer type value")),
                         }?),
                         None => None,
                     }
@@ -1773,16 +1818,7 @@ impl Parse for ShaderBufferAttachmentDescriptor {
                 "visibility" => {
                     visibility = match field.value {
                         Some(value) => Some(match value {
-                            SimpleFieldValue::Expression(expr) => {
-                                if let Expr::Path(path) = expr {
-                                    Ok(path)
-                                } else {
-                                    Err(syn::Error::new(
-                                        expr.span(),
-                                        "Invalid texture visibility value",
-                                    ))
-                                }
-                            }
+                            SimpleFieldValue::Expression(Expr::Path(path)) => Ok(path),
                             rest => Err(syn::Error::new_spanned(
                                 rest,
                                 "Invalid buffer visibility value",
@@ -1791,12 +1827,46 @@ impl Parse for ShaderBufferAttachmentDescriptor {
                         None => None,
                     }
                 }
+                "extra_usages" => {
+                    extra_usages = match field.value {
+                        Some(value) => Some(match value {
+                            SimpleFieldValue::Expression(expr) => Ok(expr),
+                            rest => Err(syn::Error::new_spanned(rest, "Invalid usages expression")),
+                        }?),
+                        None => None,
+                    }
+                }
                 _ => {}
             }
         }
-        Ok(ShaderBufferAttachmentDescriptor {
-            buffer: buffer.unwrap(),
-            visibility: visibility.unwrap(),
-        })
+
+        let error_message = if device.is_none() {
+            "No device provided"
+        } else if data.is_none() {
+            "No data provided"
+        } else if buffer_type.is_none() {
+            "No buffer type provided"
+        } else if visibility.is_none() {
+            "No attachment visibility provided"
+        } else {
+            "No extra usages provided"
+        };
+
+        if let Some(device) = device
+            && let Some(data) = data
+            && let Some(buffer_type) = buffer_type
+            && let Some(visibility) = visibility
+            && let Some(extra_usages) = extra_usages
+        {
+            Ok(ShaderBufferAttachmentDescriptor {
+                device,
+                data,
+                buffer_type,
+                visibility,
+                extra_usages,
+            })
+        } else {
+            Err(input.error(error_message))
+        }
     }
 }

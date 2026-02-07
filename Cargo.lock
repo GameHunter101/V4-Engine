@@ -2303,7 +2303,7 @@ dependencies = [
 
 [[package]]
 name = "v4-core"
-version = "0.2.62"
+version = "0.2.63"
 dependencies = [
  "async-scoped",
  "async-trait",
@@ -2326,7 +2326,7 @@ dependencies = [
 
 [[package]]
 name = "v4-examples"
-version = "0.2.62"
+version = "0.2.63"
 dependencies = [
  "algoe",
  "async-scoped",
@@ -2343,7 +2343,7 @@ dependencies = [
 
 [[package]]
 name = "v4-macros"
-version = "0.1.0"
+version = "0.2.63"
 dependencies = [
  "darling",
  "proc-macro2",

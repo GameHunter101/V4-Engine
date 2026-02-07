@@ -11,7 +11,8 @@ struct TransformData {
 
 struct Camera {
     mat: mat4x4<f32>,
-    pos: vec3<f32>,
+    inv_view_proj: mat4x4<f32>,
+    pos: vec4<f32>,
 }
 
 @group(0) @binding(0)

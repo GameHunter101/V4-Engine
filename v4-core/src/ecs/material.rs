@@ -25,9 +25,9 @@ pub struct ShaderTextureAttachment {
 
 #[derive(Debug, Clone)]
 pub struct ShaderBufferAttachment {
-    buffer: Buffer,
-    visibility: ShaderStages,
-    buffer_type: wgpu::BufferBindingType,
+    pub buffer: Buffer,
+    pub visibility: ShaderStages,
+    pub buffer_type: wgpu::BufferBindingType,
 }
 
 impl ShaderBufferAttachment {
