@@ -2,9 +2,18 @@ use std::{fmt::Debug, ops::Range};
 
 use crate::v4;
 use bytemuck::{Pod, Zeroable};
+use nalgebra::{Vector2, Vector3};
 use v4_core::ecs::component::{Component, ComponentDetails, ComponentSystem};
 use v4_macros::component;
-use wgpu::{util::DeviceExt, Buffer, Device, Queue, RenderPass, VertexAttribute};
+use wgpu::{Buffer, Device, Queue, RenderPass, VertexAttribute, util::DeviceExt};
+
+pub struct VertexData {
+    pub pos: [f32; 3],
+    pub normal: [f32; 3],
+    pub tex_coords: [f32; 2],
+    pub tangent: [f32; 3],
+    pub bitangent: [f32; 3],
+}
 
 pub trait VertexDescriptor: Debug + Pod + Zeroable {
     const ATTRIBUTES: &[VertexAttribute];
@@ -20,7 +29,7 @@ pub trait VertexDescriptor: Debug + Pod + Zeroable {
         Self::ATTRIBUTES.len() as u64
     }
 
-    fn from_pos_normal_coords(pos: Vec<f32>, normal: Vec<f32>, tex_coords: Vec<f32>) -> Self;
+    fn from_data(data: VertexData) -> Self;
 }
 
 /// When specifying `enabled_models`, it is possible to specify the vertex range in the vertex buffer
@@ -55,28 +64,58 @@ impl<V: VertexDescriptor> MeshComponent<V> {
         let (vertices, indices): (Vec<Vec<V>>, Vec<Vec<u32>>) = models
             .into_iter()
             .map(|model| {
+                let mut verts: Vec<VertexData> = (0..model.mesh.positions.len() / 3)
+                    .map(|i| VertexData {
+                        pos: [
+                            *model.mesh.positions.get(i * 3).unwrap_or(&0.0),
+                            *model.mesh.positions.get(i * 3 + 1).unwrap_or(&0.0),
+                            *model.mesh.positions.get(i * 3 + 2).unwrap_or(&0.0),
+                        ],
+                        normal: [
+                            *model.mesh.normals.get(i * 3).unwrap_or(&0.0),
+                            *model.mesh.normals.get(i * 3 + 1).unwrap_or(&0.0),
+                            *model.mesh.normals.get(i * 3 + 2).unwrap_or(&0.0),
+                        ],
+                        tex_coords: [
+                            *model.mesh.texcoords.get(i * 2).unwrap_or(&0.0),
+                            *model.mesh.texcoords.get(i * 2 + 1).unwrap_or(&0.0),
+                        ],
+                        tangent: [0.0; 3],
+                        bitangent: [0.0; 3],
+                    })
+                    .collect();
+
+                let mut total_vertex_uses = vec![0.0_f32; verts.len()];
+
+                for chunk in model.mesh.indices.chunks(3) {
+                    let indices = [chunk[0] as usize, chunk[1] as usize, chunk[2] as usize];
+                    let tri_verts = indices.map(|i| &verts[i]);
+                    let [pos0, pos1, pos2] = tri_verts.map(|vert| Vector3::from(vert.pos));
+                    let [tex0, tex1, tex2] = tri_verts.map(|vert| Vector2::from(vert.tex_coords));
+
+                    let delta_pos_1 = pos1 - pos0;
+                    let delta_pos_2 = pos2 - pos0;
+
+                    let delta_tex_1 = tex1 - tex0;
+                    let delta_tex_2 = tex2 - tex0;
+
+                    let inv = 1.0 / (delta_tex_1.x * delta_tex_2.y - delta_tex_1.y * delta_tex_2.x);
+                    let tangent = inv * (delta_tex_2.y * delta_pos_1 - delta_tex_1.y * delta_pos_2);
+                    let bitangent = inv * (-delta_tex_2.x * delta_pos_1 + delta_tex_1.x * delta_pos_2);
+                    for i in indices {
+                        verts[i].tangent = (tangent + Vector3::from(verts[i].tangent)).into();
+                        verts[i].bitangent = (bitangent + Vector3::from(verts[i].bitangent)).into();
+                        total_vertex_uses[i] += 1.0;
+                    }
+                }
+
+                for (i, vert) in verts.iter_mut().enumerate() {
+                    vert.tangent = (Vector3::from(vert.tangent) / total_vertex_uses[i]).into();
+                    vert.bitangent = (Vector3::from(vert.bitangent) / total_vertex_uses[i]).into();
+                }
+
                 (
-                    (0..model.mesh.positions.len() / 3)
-                        .map(|i| {
-                            let vert: V = VertexDescriptor::from_pos_normal_coords(
-                                vec![
-                                    *model.mesh.positions.get(i * 3).unwrap_or(&0.0),
-                                    *model.mesh.positions.get(i * 3 + 1).unwrap_or(&0.0),
-                                    *model.mesh.positions.get(i * 3 + 2).unwrap_or(&0.0),
-                                ],
-                                vec![
-                                    *model.mesh.normals.get(i * 3).unwrap_or(&0.0),
-                                    *model.mesh.normals.get(i * 3 + 1).unwrap_or(&0.0),
-                                    *model.mesh.normals.get(i * 3 + 2).unwrap_or(&0.0),
-                                ],
-                                vec![
-                                    *model.mesh.texcoords.get(i * 2).unwrap_or(&0.0),
-                                    *model.mesh.texcoords.get(i * 2 + 1).unwrap_or(&0.0),
-                                ],
-                            );
-                            vert
-                        })
-                        .collect::<Vec<V>>(),
+                    verts.into_iter().map(|data| V::from_data(data)).collect(),
                     model.mesh.indices,
                 )
             })

@@ -1,6 +1,6 @@
 use v4::{
     V4,
-    builtin_components::mesh_component::{MeshComponent, VertexDescriptor},
+    builtin_components::mesh_component::{MeshComponent, VertexData, VertexDescriptor},
     engine_support::texture_support::{TextureBundle, TextureProperties},
     scene,
 };
@@ -78,10 +78,10 @@ impl VertexDescriptor for Vertex {
     const ATTRIBUTES: &[wgpu::VertexAttribute] =
         &wgpu::vertex_attr_array![0=>Float32x3, 1=>Float32x2];
 
-    fn from_pos_normal_coords(pos: Vec<f32>, _normal: Vec<f32>, tex_coords: Vec<f32>) -> Self {
+    fn from_data(VertexData {pos, tex_coords, ..}: VertexData) -> Self {
         Self {
-            pos: pos.try_into().unwrap(),
-            tex_coords: tex_coords.try_into().unwrap(),
+            pos,
+            tex_coords,
         }
     }
 }
