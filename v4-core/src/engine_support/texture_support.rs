@@ -1,6 +1,6 @@
 use std::io::Cursor;
 
-use image::{GenericImageView, ImageDecoder, codecs::hdr::HdrDecoder};
+use image::{EncodableLayout, GenericImageView, ImageDecoder, codecs::hdr::HdrDecoder};
 use wgpu::{
     Device, Queue, StorageTextureAccess, Texture as WgpuTexture, TextureFormat, TextureUsages,
     TextureView,
@@ -67,10 +67,16 @@ impl TextureBundle {
             )
         } else {
             // TODO: Implement actual error handling
-            let raw = image::load_from_memory(&raw_image).expect("Failed to create image");
-            let bytes = raw.as_bytes();
+            let img = image::load_from_memory(&raw_image).expect("Failed to create image");
+            let dims = img.dimensions();
+            let bytes = if props.format.components() == 4 {
+                let rgba8 = img.into_rgba8();
+                rgba8.as_bytes().to_vec()
+            } else {
+                img.as_bytes().to_vec()
+            };
 
-            (bytes.to_vec(), props, raw.dimensions())
+            (bytes , props, dims)
         };
 
         Ok(Self::from_bytes(&bytes, dimensions, device, queue, props))
@@ -113,25 +119,9 @@ impl TextureBundle {
             complete_texture
         } else {
             let texture_bundle = Self::create_texture(device, dimensions.0, dimensions.1, props);
-            let src_components = bytes.len() / (dimensions.0 * dimensions.1) as usize;
-            let dst_components = props.format.components() as usize;
-            let bytes = if src_components < dst_components {
-                (0..(dimensions.0 * dimensions.1) as usize)
-                    .flat_map(|pix_idx| {
-                        let mut new_pixel = vec![0_u8; dst_components];
-                        new_pixel[..src_components].copy_from_slice(
-                            &bytes[(pix_idx * src_components)..(pix_idx + 1) * src_components],
-                        );
-                        new_pixel
-                    })
-                    .collect()
-            } else {
-                bytes.to_vec()
-            };
-
             queue.write_texture(
                 texture_bundle.0.as_image_copy(),
-                &bytes,
+                bytes,
                 wgpu::TexelCopyBufferLayout {
                     offset: 0,
                     bytes_per_row: Some(props.format.components() as u32 * dimensions.0),

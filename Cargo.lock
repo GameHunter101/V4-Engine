@@ -2303,7 +2303,7 @@ dependencies = [
 
 [[package]]
 name = "v4-core"
-version = "0.2.64"
+version = "0.2.66"
 dependencies = [
  "async-scoped",
  "async-trait",
@@ -2326,7 +2326,7 @@ dependencies = [
 
 [[package]]
 name = "v4-examples"
-version = "0.2.64"
+version = "0.2.65"
 dependencies = [
  "algoe",
  "async-scoped",
