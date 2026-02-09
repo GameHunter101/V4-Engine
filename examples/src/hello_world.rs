@@ -209,7 +209,7 @@ pub async fn main() {
                     attachments: [
                         Texture(
                             texture_bundle: TextureBundle::from_path(
-                                "./assets/testing_textures/cobble-diffuse.png",
+                                "./assets/testing_textures/cube-diffuse.jpg",
                                 device,
                                 queue,
                                 TextureProperties {
@@ -221,7 +221,7 @@ pub async fn main() {
                         ),
                         Texture(
                             texture_bundle: TextureBundle::from_path(
-                                "./assets/testing_textures/cobble-normal.png",
+                                "./assets/testing_textures/cube-normal.png",
                                 device,
                                 queue,
                                 TextureProperties {

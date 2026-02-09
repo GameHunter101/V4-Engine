@@ -47,9 +47,9 @@ fn main(input: VertexInput, transform: TransformData) -> VertexOutput {
     out.world_pos = world_pos.xyz;
     out.tex_coords = input.tex_coords;
     out.normal = input.normal;
-    out.world_tangent = (mat * vec4f(input.tangent, 1.0)).xyz;
-    out.world_bitangent = (mat * vec4f(input.bitangent, 1.0)).xyz;
-    out.world_normal = (mat * vec4f(input.normal , 1.0)).xyz;
+    out.world_tangent = normalize((mat * vec4f(input.tangent, 1.0)).xyz);
+    out.world_bitangent = normalize((mat * vec4f(input.bitangent, 1.0)).xyz);
+    out.world_normal = normalize((mat * vec4f(input.normal , 1.0)).xyz);
 
     return out;
 }

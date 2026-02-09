@@ -29,28 +29,29 @@ var<uniform> camera: Camera;
 @fragment
 fn main(in: VertexOutput) -> @location(0) vec4<f32> {
     let light_pos = vec3f(3.0);
-    let tangent_matrix = mat3x3(
+    let tbn = mat3x3(
         in.world_tangent,
         in.world_bitangent,
         in.world_normal,
     );
-    let tangent_light_pos = tangent_matrix * light_pos;
-    let tangent_pos = tangent_matrix * in.world_pos;
-    let tangent_view_pos = tangent_matrix * camera.pos.xyz;
 
     let color = textureSample(diffuse, sample, in.tex_coords).xyz;
-    let normal = textureSample(normal, sample, in.tex_coords).xyz;
+    let sampled_normal = textureSample(normal, sample, in.tex_coords).xyz;
 
-    let tangent_normal = normal * 2.0 - 1.0;
-    let light_dir = normalize(tangent_light_pos - tangent_pos);
-    let view_dir = normalize(tangent_view_pos - tangent_pos);
+    let strength = 0.2;
+
+    let tangent_normal = (sampled_normal * 2.0 - 1.0) * vec3f(strength, strength, 1.0);
+    let world_normal = normalize(tbn * tangent_normal);
+
+    let light_dir = normalize(light_pos - in.world_pos);
+    let view_dir = normalize(camera.pos.xyz - in.world_pos);
     let half_dir = normalize(light_dir + view_dir);
 
-    let diffuse_strength = max(dot(tangent_normal, light_dir), 0.0);
+    let diffuse_strength = max(dot(world_normal, light_dir), 0.0);
 
-    let specular_strength = pow(max(dot(tangent_normal, half_dir), 0.0), 32.0);
+    let specular_strength = pow(max(dot(world_normal, half_dir), 0.0), 20.0);
 
-    let res = (color + specular_strength) * color;
+    let res = vec3f(specular_strength) + color * dot(world_normal, normalize(light_pos - in.world_pos));
 
     return vec4f(res, scale.val);
 }
