@@ -1,7 +1,7 @@
 [package]
 name = "v4"
 edition = "2024"
-version = "0.2.64"
+version = "0.2.67"
 authors.workspace = true
 
 [dependencies]
@@ -27,3 +27,4 @@ algoe.workspace = true
 downcast-rs.workspace = true
 v4-core = { path = "../v4-core" }
 v4-macros = { path = "../v4-macros" }
+bevy_mikktspace = "0.16.1"
