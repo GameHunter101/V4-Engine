@@ -99,36 +99,6 @@ impl<V: VertexDescriptor> MeshComponent<V> {
                     bitangent: mikkt_mesh.bitangents[i],
                 });
 
-                /* let mut total_vertex_uses = vec![0.0_f32; verts.len()];
-
-                for chunk in model.mesh.indices.chunks(3) {
-                    let indices = [chunk[0] as usize, chunk[1] as usize, chunk[2] as usize];
-                    let tri_verts = indices.map(|i| &verts[i]);
-                    let [pos0, pos1, pos2] = tri_verts.map(|vert| Vector3::from(vert.pos));
-                    let [tex0, tex1, tex2] = tri_verts.map(|vert| Vector2::from(vert.tex_coords));
-
-                    let delta_pos_1 = pos1 - pos0;
-                    let delta_pos_2 = pos2 - pos0;
-
-                    let delta_tex_1 = tex1 - tex0;
-                    let delta_tex_2 = tex2 - tex0;
-
-                    let inv = 1.0 / (delta_tex_1.x * delta_tex_2.y - delta_tex_1.y * delta_tex_2.x);
-                    let tangent = inv * (delta_tex_2.y * delta_pos_1 - delta_tex_1.y * delta_pos_2);
-                    let bitangent =
-                        inv * (-delta_tex_2.x * delta_pos_1 + delta_tex_1.x * delta_pos_2);
-                    for i in indices {
-                        verts[i].tangent = (tangent + Vector3::from(verts[i].tangent)).into();
-                        verts[i].bitangent = (bitangent + Vector3::from(verts[i].bitangent)).into();
-                        total_vertex_uses[i] += 1.0;
-                    }
-                }
-
-                for (i, vert) in verts.iter_mut().enumerate() {
-                    vert.tangent = (Vector3::from(vert.tangent) / total_vertex_uses[i]).into();
-                    vert.bitangent = (Vector3::from(vert.bitangent) / total_vertex_uses[i]).into();
-                } */
-
                 (
                     verts.map(|data| V::from_data(data)).collect(),
                     model.mesh.indices,

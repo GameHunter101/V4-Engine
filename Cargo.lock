@@ -1966,7 +1966,8 @@ dependencies = [
 [[package]]
 name = "smaa"
 version = "0.19.0"
-source = "git+https://github.com/GameHunter101/smaa-rs#28f68ce58c9b099257057d69933128b1f278be31"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1566e58c44b4042856b4586ef1d58647a0e4b823320001b7e451b0f765cdaa04"
 dependencies = [
  "wgpu",
 ]
@@ -2300,7 +2301,7 @@ checksum = "ebc1c04c71510c7f702b52b7c350734c9ff1295c464a03335b00bb84fc54f853"
 
 [[package]]
 name = "v4"
-version = "0.2.67"
+version = "0.2.68"
 dependencies = [
  "algoe",
  "async-trait",
