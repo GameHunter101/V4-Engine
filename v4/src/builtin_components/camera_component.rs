@@ -131,7 +131,7 @@ impl ComponentSystem for CameraComponent {
 pub struct RawCameraData {
     matrix: [[f32; 4]; 4],
     inv_matrix: [[f32; 4]; 4],
-    pos: [f32; 3],
+    pos: [f32; 4],
     padding: f32,
 }
 
@@ -143,14 +143,15 @@ impl RawCameraData {
         let near_plane = comp.near_plane;
         let difference = far_plane - near_plane;
 
-        let (view_matrix, pos) = if let Some(transform) = transform {
-            if let Some(inverted) = transform.create_matrix().try_inverse() {
-                (inverted, transform.get_position())
+        let (view_matrix, inverted_view_matrix, pos) = if let Some(transform) = transform {
+            let mat = transform.create_matrix();
+            if let Some(inverted) = mat.try_inverse() {
+                (inverted, mat, transform.get_position())
             } else {
-                (Matrix4::identity(), Vector3::zeros())
+                (Matrix4::identity(), Matrix4::identity(), Vector3::zeros())
             }
         } else {
-            (Matrix4::identity(), Vector3::zeros())
+            (Matrix4::identity(), Matrix4::identity(), Vector3::zeros())
         };
 
         let projection_matrix = Matrix4::from_columns(&[
@@ -162,9 +163,11 @@ impl RawCameraData {
 
         let matrix =projection_matrix * view_matrix;
 
+        let pos = Vector4::new(pos.x, pos.y, pos.z, 1.0);
+
         Self {
             matrix: matrix.into(),
-            inv_matrix: matrix.try_inverse().unwrap().into(),
+            inv_matrix: inverted_view_matrix.into(),
             pos: pos.into(),
             padding: 0.0,
         }

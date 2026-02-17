@@ -221,7 +221,7 @@ pub async fn main() {
                         ),
                         Texture(
                             texture_bundle: TextureBundle::from_path(
-                                "./assets/testing_textures/cube-normal.png",
+                                "C:/Users/liors/CodingProjects/shaderbox/assets/shaderball_normal.jpg",
                                 device,
                                 queue,
                                 TextureProperties {
@@ -235,8 +235,9 @@ pub async fn main() {
                     ident: "immediate_mat"
                 },
                 components: [
-                    TransformComponent(position: Vector3::new(1.0, 1.0, 1.4), ident: "thing"),
-                    MeshComponent<Vertex>::from_obj("assets/models/basic_cube.obj", true).ident("unused ident").await.unwrap(),
+                    TransformComponent(position: Vector3::new(0.0, 0.0, 0.0), ident: "thing"),
+                    // MeshComponent<Vertex>::from_obj("assets/models/basic_cube.obj", true).ident("unused ident").await.unwrap(),
+                    MeshComponent<Vertex>::from_obj("C:/Users/liors/CodingProjects/shaderbox/assets/shaderball.obj", true).ident("unused ident").await.unwrap(),
                     HideComponent(entity: ident("test_ent"), immediate_mat: ident("immediate_mat"))
                 ],
             },

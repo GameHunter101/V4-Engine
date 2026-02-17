@@ -53,5 +53,5 @@ fn main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     let res = vec3f(specular_strength) + color * dot(world_normal, normalize(light_pos - in.world_pos));
 
-    return vec4f(res, scale.val);
+    return vec4f(world_normal, scale.val);
 }
