@@ -76,7 +76,7 @@ impl TextureBundle {
                 img.as_bytes().to_vec()
             };
 
-            (bytes , props, dims)
+            (bytes, props, dims)
         };
 
         Ok(Self::from_bytes(&bytes, dimensions, device, queue, props))
@@ -119,12 +119,18 @@ impl TextureBundle {
             complete_texture
         } else {
             let texture_bundle = Self::create_texture(device, dimensions.0, dimensions.1, props);
+            let size = props.format.theoretical_memory_footprint(wgpu::Extent3d {
+                width: dimensions.0,
+                height: dimensions.1,
+                depth_or_array_layers: 1,
+            });
+            let row_size = size / dimensions.1 as u64;
             queue.write_texture(
                 texture_bundle.0.as_image_copy(),
                 bytes,
                 wgpu::TexelCopyBufferLayout {
                     offset: 0,
-                    bytes_per_row: Some(props.format.components() as u32 * dimensions.0),
+                    bytes_per_row: Some(row_size as u32),
                     rows_per_image: Some(dimensions.1),
                 },
                 wgpu::Extent3d {
