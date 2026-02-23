@@ -5,7 +5,10 @@ use bytemuck::{Pod, Zeroable};
 use nalgebra::Vector3;
 use v4_core::ecs::component::{Component, ComponentDetails, ComponentSystem};
 use v4_macros::component;
-use wgpu::{Buffer, Device, Queue, RenderPass, VertexAttribute, util::DeviceExt};
+use wgpu::{
+    Buffer, Device, Queue, RenderPass, VertexAttribute,
+    util::{BufferInitDescriptor, DeviceExt},
+};
 
 #[derive(Debug, Clone, Copy)]
 pub struct VertexData {
@@ -124,6 +127,82 @@ impl<V: VertexDescriptor> MeshComponent<V> {
         })
     }
 
+    pub fn update_vertices(
+        &mut self,
+        vertices: Vec<V>,
+        model_index: Option<usize>,
+        device: &Device,
+        queue: &Queue,
+    ) {
+        let comp_id = self.id();
+        if let Some(index) = model_index {
+            self.vertices[index].extend(vertices);
+            if let Some(buffers) = &mut self.vertex_buffers {
+                let buf = &mut buffers[index];
+                let contents = bytemuck::cast_slice(&self.vertices[index]);
+                if (buf.size() as usize) < (std::mem::size_of::<V>() * self.vertices[index].len()) {
+                    *buf = device.create_buffer_init(&BufferInitDescriptor {
+                        label: Some(&format!("Component {} | Vertex Buffer", comp_id)),
+                        contents,
+                        usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                    });
+                } else {
+                    queue.write_buffer(&buf, 0, contents);
+                }
+            }
+        } else {
+            self.vertices.push(vertices);
+            let contents = bytemuck::cast_slice(self.vertices.last().as_ref().unwrap());
+
+            if let Some(buffers) = &mut self.vertex_buffers {
+                buffers.push(device.create_buffer_init(&BufferInitDescriptor {
+                    label: Some(&format!("Component {} | Vertex Buffer", comp_id)),
+                    contents,
+                    usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                }));
+            }
+            self.enabled_models
+                .push((self.vertices.len() - 1, None));
+        }
+    }
+
+    pub fn update_indices(
+        &mut self,
+        indices: Vec<u32>,
+        model_index: Option<usize>,
+        device: &Device,
+        queue: &Queue,
+    ) {
+        let comp_id = self.id();
+        if let Some(index) = model_index {
+            self.indices[index].extend(indices);
+            if let Some(buffers) = &mut self.index_buffers {
+                let buf = &mut buffers[index];
+                let contents = bytemuck::cast_slice(&self.indices[index]);
+                if (buf.size() as usize) < (std::mem::size_of::<V>() * self.indices[index].len()) {
+                    *buf = device.create_buffer_init(&BufferInitDescriptor {
+                        label: Some(&format!("Component {} | Index Buffer", comp_id)),
+                        contents,
+                        usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
+                    });
+                } else {
+                    queue.write_buffer(&buf, 0, contents);
+                }
+            }
+        } else {
+            self.indices.push(indices);
+            let contents = bytemuck::cast_slice(self.indices.last().as_ref().unwrap());
+
+            if let Some(buffers) = &mut self.index_buffers {
+                buffers.push(device.create_buffer_init(&BufferInitDescriptor {
+                    label: Some(&format!("Component {} | Index Buffer", comp_id)),
+                    contents,
+                    usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
+                }));
+            }
+        }
+    }
+
     pub fn vertex_buffers(&self) -> Option<&Vec<Buffer>> {
         self.vertex_buffers.as_ref()
     }
@@ -147,7 +226,7 @@ impl<V: VertexDescriptor + Send + Sync> ComponentSystem for MeshComponent<V> {
             self.enabled_models
                 .iter()
                 .map(|(index, _)| {
-                    device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    device.create_buffer_init(&BufferInitDescriptor {
                         label: Some(&format!("Component {} | Vertex Buffer", self.id())),
                         contents: bytemuck::cast_slice(&self.vertices[*index]),
                         usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
@@ -160,7 +239,7 @@ impl<V: VertexDescriptor + Send + Sync> ComponentSystem for MeshComponent<V> {
                 self.enabled_models
                     .iter()
                     .map(|(index, _)| {
-                        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        device.create_buffer_init(&BufferInitDescriptor {
                             label: Some(&format!("Component {} | Index Buffer", self.id())),
                             contents: bytemuck::cast_slice(&self.indices[*index]),
                             usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
