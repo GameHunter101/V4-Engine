@@ -2320,7 +2320,7 @@ dependencies = [
 
 [[package]]
 name = "v4-core"
-version = "0.2.73"
+version = "0.2.75"
 dependencies = [
  "async-scoped",
  "async-trait",

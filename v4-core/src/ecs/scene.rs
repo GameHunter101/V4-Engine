@@ -201,7 +201,6 @@ impl Scene {
                     }
                 }
                 let workload_outputs = &self.workload_outputs;
-                let computes = &self.computes;
 
                 current_component
                     .update(super::component::UpdateParams {
@@ -209,7 +208,7 @@ impl Scene {
                         queue,
                         input_manager,
                         other_components: &mut other_components,
-                        computes,
+                        computes: &mut self.computes,
                         materials: &mut all_materials,
                         engine_details,
                         workload_outputs,
