@@ -22,7 +22,7 @@ pub struct UpdateParams<'a: 'b, 'b> {
     pub queue: &'a Queue,
     pub input_manager: &'a WinitInputHelper,
     pub other_components: &'a mut[&'b mut Component],
-    pub computes: &'a [Compute],
+    pub computes: &'a mut [Compute],
     pub materials: &'a mut [&'b mut Material],
     pub engine_details: &'a EngineDetails,
     pub workload_outputs: &'a HashMap<ComponentId, Vec<WorkloadOutput>>,
