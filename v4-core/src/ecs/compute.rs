@@ -136,57 +136,24 @@ impl Compute {
         );
     }
 
-    /* pub fn copy_after_calculate(&self, encoder: &mut CommandEncoder) {
-        if let Some(output_copy_attachment) = self.output_copy_target.as_ref() {
-            if let Some(output) = self.output.as_ref() {
-                match output_copy_attachment {
-                    ShaderAttachment::Texture(copy_tex) => match output {
-                        ShaderAttachment::Buffer(_output_buf) => {
-                            panic!("Buffer to texture copies are not yet supported!")
-                        }
-                        ShaderAttachment::Texture(output_tex) => {
-                            let output_tex = output_tex.texture.texture();
-                            let copy_tex = copy_tex.texture.texture();
-                            encoder.copy_texture_to_texture(
-                                output_tex.as_image_copy(),
-                                copy_tex.as_image_copy(),
-                                Extent3d {
-                                    width: copy_tex.width().min(output_tex.width()),
-                                    height: copy_tex.height().min(output_tex.height()),
-                                    depth_or_array_layers: copy_tex
-                                        .depth_or_array_layers()
-                                        .min(output_tex.depth_or_array_layers()),
-                                },
-                            );
-                        }
-                    },
-                    ShaderAttachment::Buffer(copy_buf) => match output {
-                        ShaderAttachment::Buffer(output_buf) => {
-                            let output_buf = output_buf.buffer();
-                            let copy_buf = copy_buf.buffer();
-                            encoder.copy_buffer_to_buffer(
-                                output_buf,
-                                0,
-                                copy_buf,
-                                0,
-                                copy_buf.size().min(output_buf.size()),
-                            );
-                        }
-                        ShaderAttachment::Texture(_output_tex) => {
-                            panic!("Texture to buffer copies are not yet supported!")
-                        }
-                    },
-                }
-            }
-        }
-    } */
-
     pub fn attachments(&self) -> &[ShaderAttachment] {
         &self.attachments
     }
 
+    pub fn attachments_mut(&mut self) -> &mut [ShaderAttachment] {
+        &mut self.attachments
+    }
+
     pub fn iterate_count(&self) -> usize {
         self.iterate_count
+    }
+
+    pub fn set_iterate_count(&mut self, new_iterate_count: usize) {
+        self.iterate_count = new_iterate_count;
+    }
+
+    pub fn workgroup_counts(&self) -> (u32, u32, u32) {
+        self.workgroup_counts
     }
 }
 
