@@ -140,15 +140,13 @@ impl<V: VertexDescriptor> MeshComponent<V> {
             if let Some(buffers) = &mut self.vertex_buffers {
                 let buf = &mut buffers[index];
                 let contents = bytemuck::cast_slice(&self.vertices[index]);
-                if (buf.size() as usize) < (std::mem::size_of::<V>() * self.vertices[index].len()) {
-                    *buf = device.create_buffer_init(&BufferInitDescriptor {
-                        label: Some(&format!("Component {} | Vertex Buffer", comp_id)),
-                        contents,
-                        usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-                    });
-                } else {
-                    queue.write_buffer(&buf, 0, contents);
-                }
+                v4::engine_support::misc_utils::update_buffer(
+                    buf,
+                    contents,
+                    device,
+                    queue,
+                    Some(&format!("Component {} | Vertex Buffer", comp_id)),
+                );
             }
         } else {
             self.vertices.push(vertices);
@@ -161,8 +159,7 @@ impl<V: VertexDescriptor> MeshComponent<V> {
                     usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
                 }));
             }
-            self.enabled_models
-                .push((self.vertices.len() - 1, None));
+            self.enabled_models.push((self.vertices.len() - 1, None));
         }
     }
 
@@ -179,15 +176,13 @@ impl<V: VertexDescriptor> MeshComponent<V> {
             if let Some(buffers) = &mut self.index_buffers {
                 let buf = &mut buffers[index];
                 let contents = bytemuck::cast_slice(&self.indices[index]);
-                if (buf.size() as usize) < (std::mem::size_of::<V>() * self.indices[index].len()) {
-                    *buf = device.create_buffer_init(&BufferInitDescriptor {
-                        label: Some(&format!("Component {} | Index Buffer", comp_id)),
-                        contents,
-                        usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
-                    });
-                } else {
-                    queue.write_buffer(&buf, 0, contents);
-                }
+                v4::engine_support::misc_utils::update_buffer(
+                    buf,
+                    contents,
+                    device,
+                    queue,
+                    Some(&format!("Component {} | Index Buffer", comp_id)),
+                );
             }
         } else {
             self.indices.push(indices);
@@ -217,6 +212,14 @@ impl<V: VertexDescriptor> MeshComponent<V> {
 
     pub fn enabled_models_mut(&mut self) -> &mut Vec<(usize, Option<Range<u64>>)> {
         &mut self.enabled_models
+    }
+
+    pub fn vertices(&self) -> &[Vec<V>] {
+        &self.vertices
+    }
+
+    pub fn indices(&self) -> &[Vec<u32>] {
+        &self.indices
     }
 }
 

@@ -40,7 +40,7 @@ impl ShaderBufferAttachment {
     ) -> Self {
         Self {
             buffer: device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some(&format!("Shader Buffer | {data:?}")),
+                label: Some(&format!("{:?} Shader Buffer", visibility)),
                 contents: data,
                 usage: match buffer_type {
                     wgpu::BufferBindingType::Uniform => wgpu::BufferUsages::UNIFORM,
@@ -50,6 +50,16 @@ impl ShaderBufferAttachment {
             buffer_type,
             visibility,
         }
+    }
+
+    pub fn update_buffer(&mut self, contents: &[u8], device: &Device, queue: &Queue) {
+        crate::engine_support::misc_utils::update_buffer(
+            &mut self.buffer,
+            contents,
+            device,
+            queue,
+            Some(&format!("{:?} Shader Buffer", self.visibility)),
+        );
     }
 
     pub fn buffer(&self) -> &Buffer {

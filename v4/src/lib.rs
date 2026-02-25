@@ -9,6 +9,9 @@ pub(crate) mod v4 {
     pub(crate) mod ecs {
         pub(crate) use v4_core::ecs::*;
     }
+    pub(crate) mod engine_support {
+        pub(crate) use v4_core::engine_support::*;
+    }
 }
 
 pub mod builtin_actions;

@@ -35,6 +35,7 @@ pub mod engine_management {
 
 pub mod engine_support {
     pub mod texture_support;
+    pub mod misc_utils;
 }
 
 pub mod ecs {
