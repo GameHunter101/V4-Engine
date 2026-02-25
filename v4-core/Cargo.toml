@@ -1,6 +1,6 @@
 [package]
 name = "v4-core"
-version = "0.2.75"
+version = "0.2.76"
 authors.workspace = true
 edition = "2024"
 

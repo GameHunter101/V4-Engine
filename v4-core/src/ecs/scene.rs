@@ -253,7 +253,6 @@ impl Scene {
                     .iter_mut()
                     .chain(later_materials.iter_mut())
                     .collect();
-            let computes = &self.computes;
             let entity_component_groupings = entity_component_groupings.clone();
 
             current_material
@@ -262,7 +261,7 @@ impl Scene {
                     queue,
                     input_manager,
                     other_components: &mut all_components,
-                    computes,
+                    computes: &mut self.computes,
                     materials: &mut other_materials,
                     engine_details,
                     workload_outputs,
