@@ -1,11 +1,7 @@
 use async_scoped::TokioScope;
-use crossbeam_channel::{Receiver, Sender};
-use ecs::{
-    component::ComponentId,
-    scene::{Scene, WorkloadOutput, WorkloadPacket},
-};
+use ecs::scene::Scene;
 use engine_management::{
-    engine_action::{EngineAction, V4Mutable},
+    engine_action::V4Mutable,
     font_management::FontState,
     pipeline::{PipelineId, create_render_pipeline},
     rendering_management::RenderingManager,
@@ -20,45 +16,45 @@ use wgpu::Device;
 use wgpu::{RenderPipeline, TextureFormat};
 
 use winit::{
-    event::{Event, MouseButton},
-    event_loop::EventLoop,
-    window::{Fullscreen, Window, WindowBuilder},
+    application::ApplicationHandler,
+    event::{DeviceEvent, MouseButton},
+    event_loop::{ActiveEventLoop, EventLoop},
+    window::{Window, WindowAttributes},
 };
 use winit_input_helper::WinitInputHelper;
 
-pub mod engine_management {
-    pub mod engine_action;
-    pub mod font_management;
-    pub mod pipeline;
-    pub mod rendering_management;
-}
+use crate::{
+    engine_management::rendering_management::RenderingManagerDetails,
+    engine_support::core_communication_support::CoreCommunication,
+};
 
-pub mod engine_support {
-    pub mod texture_support;
-    pub mod misc_utils;
-}
+pub mod engine_management;
 
-pub mod ecs {
-    pub mod actions;
-    pub mod component;
-    pub mod compute;
-    pub mod entity;
-    pub mod material;
-    pub mod scene;
-}
+pub mod engine_support;
+
+pub mod ecs;
 
 /// The main engine struct. Contains the state for the whole engine.
+#[derive(Debug)]
 pub struct V4 {
     event_loop: EventLoop<()>,
+    app: V4App,
+}
+
+struct V4App {
+    window_attributes: WindowAttributes,
     input_manager: WinitInputHelper,
     rendering_manager: RenderingManager,
     scenes: Vec<Scene>,
+    last_active_scene_index: usize,
     active_scene: usize,
     initialized_scene: bool,
-    window: Window,
+    window: Option<Window>,
     details: EngineDetails,
     pipelines: HashMap<PipelineId, RenderPipeline>,
-    font_state: FontState,
+    font_state: Option<FontState>,
+    hide_cursor: bool,
+    core_communication: CoreCommunication,
 }
 
 #[derive(Debug)]
@@ -92,180 +88,26 @@ impl V4 {
     }
 
     pub async fn main_loop(mut self) {
-        let mut last_active_scene_index = self.active_scene;
-        self.details.initialization_time = Instant::now();
-
-        let (workload_sender, workload_output_receiver, _handle) = Self::launch_workload_executor();
-
-        let (engine_action_sender, engine_action_receiver): (
-            Sender<Box<dyn EngineAction>>,
-            Receiver<_>,
-        ) = crossbeam_channel::unbounded();
+        self.app.details.initialization_time = Instant::now();
 
         self.event_loop
-            .run(move |event, elwt| {
-                self.input_manager.update(&event);
-                match &event {
-                    Event::WindowEvent { event, .. } => match event {
-                        winit::event::WindowEvent::Resized(new_size) => {
-                            self.rendering_manager
-                                .resize(new_size.width, new_size.height);
-
-                            self.font_state.viewport.update(
-                                self.rendering_manager.queue(),
-                                glyphon::Resolution {
-                                    width: new_size.width,
-                                    height: new_size.height,
-                                },
-                            );
-
-                            self.details.window_resolution = (new_size.width, new_size.height);
-                        }
-                        winit::event::WindowEvent::CloseRequested => {
-                            elwt.exit();
-                        }
-                        winit::event::WindowEvent::CursorMoved { position, .. } => {
-                            self.details.cursor_position = (position.x as u32, position.y as u32);
-                        }
-                        winit::event::WindowEvent::MouseInput { button, .. } => {
-                            if self.details.mouse_state.contains(button) {
-                                self.details.mouse_state.remove(button);
-                            } else {
-                                self.details.mouse_state.insert(*button);
-                            }
-                        }
-                        _ => {}
-                    },
-                    Event::DeviceEvent { event, .. } => match event {
-                        winit::event::DeviceEvent::MouseMotion { delta } => {
-                            self.details.cursor_delta = (delta.0 as f32, delta.1 as f32);
-                        }
-                        _ => {}
-                    },
-                    Event::AboutToWait => {
-                        if self.scenes.is_empty() {
-                            return;
-                        }
-                        if !self.initialized_scene {
-                            let device = self.rendering_manager.device();
-                            let queue = self.rendering_manager.queue();
-                            let workload_output_receiver = workload_output_receiver.clone();
-                            TokioScope::scope_and_block(|scope| {
-                                let proc = self.scenes[self.active_scene].initialize(
-                                    device,
-                                    queue,
-                                    workload_sender.clone(),
-                                    workload_output_receiver,
-                                    engine_action_sender.clone(),
-                                );
-
-                                scope.spawn(proc);
-                            });
-                            self.initialized_scene = true;
-                        }
-                        if self.active_scene != last_active_scene_index {
-                            self.initialized_scene = false;
-                            last_active_scene_index = self.active_scene;
-                            return;
-                        }
-
-                        while let Ok(engine_action) = engine_action_receiver.try_recv() {
-                            engine_action.execute(V4Mutable {
-                                window: &self.window,
-                                active_scene: &mut self.active_scene,
-                                initialized_scene: &mut self.initialized_scene,
-                                font_state: &mut self.font_state,
-                            });
-                        }
-
-                        let scene = &mut self.scenes[self.active_scene];
-                        let device = self.rendering_manager.device();
-                        let queue = self.rendering_manager.queue();
-
-                        let action_queue = scene.update(device, queue, &self.input_manager, &self.details);
-                        pollster::block_on(scene.execute_action_queue(action_queue, device, queue));
-
-                        scene.update_materials(device, queue, &self.input_manager, &self.details);
-                        self.rendering_manager
-                            .individual_compute_execution(scene.computes());
-
-                        Self::create_new_pipelines(
-                            device,
-                            self.rendering_manager.format(),
-                            scene,
-                            &mut self.pipelines,
-                        );
-
-                        pollster::block_on(self.rendering_manager.render(
-                            scene,
-                            &self.pipelines,
-                            &mut self.font_state,
-                        ));
-
-                        self.details.frames_elapsed += 1;
-                        self.details.last_frame_instant = Instant::now();
-                        self.details.cursor_delta = (0.0, 0.0);
-                    }
-                    _ => {}
-                }
-            })
+            .run_app(&mut self.app)
             .expect("An error occured in the main loop.");
     }
 
     pub fn attach_scene(&mut self, scene: Scene) -> usize {
-        let index = self.scenes.len();
-        self.scenes.push(scene);
+        let index = self.app.scenes.len();
+        self.app.scenes.push(scene);
 
         index
     }
 
     pub fn scene_count(&self) -> usize {
-        self.scenes.len()
+        self.app.scenes.len()
     }
 
     pub fn rendering_manager(&self) -> &RenderingManager {
-        &self.rendering_manager
-    }
-
-    pub fn launch_workload_executor() -> (
-        Sender<WorkloadPacket>,
-        Receiver<(ComponentId, WorkloadOutput)>,
-        std::thread::JoinHandle<()>,
-    ) {
-        let (workload_sender, workload_receiver): (
-            Sender<WorkloadPacket>,
-            Receiver<WorkloadPacket>,
-        ) = crossbeam_channel::unbounded();
-
-        let (workload_output_sender, workload_output_receiver): (
-            Sender<(ComponentId, WorkloadOutput)>,
-            Receiver<_>,
-        ) = crossbeam_channel::unbounded();
-
-        let handle = std::thread::spawn(move || {
-            let runtime = tokio::runtime::Runtime::new()
-                .expect("Failed to create tokio runtime for workloads.");
-            runtime.block_on(async move {
-                TokioScope::scope_and_block(|async_scope| {
-                    if let Ok(workload_packet) = workload_receiver.try_recv() {
-                        let sender = workload_output_sender.clone();
-                        async_scope.spawn(async move {
-                            let workload_result = workload_packet.workload.await;
-                            sender
-                                .send((workload_packet.component_id, workload_result))
-                                .unwrap_or_else(|_| {
-                                    panic!(
-                                        "Failed to send workload output for component {}",
-                                        workload_packet.component_id
-                                    )
-                                });
-                        });
-                    }
-                });
-            });
-        });
-
-        (workload_sender, workload_output_receiver, handle)
+        &self.app.rendering_manager
     }
 
     fn create_new_pipelines(
@@ -299,22 +141,208 @@ impl V4 {
     }
 }
 
-impl Debug for V4 {
+impl ApplicationHandler for V4App {
+    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        let Ok(window) = event_loop.create_window(self.window_attributes.clone()) else {
+            panic!("Failed to create window.")
+        };
+
+        self.rendering_manager.initialize_surface_data(&window);
+
+        let device = self.rendering_manager.device();
+        let queue = self.rendering_manager.queue();
+        let format = self.rendering_manager.format().unwrap();
+
+        let font_system = FontSystem::new();
+        let swash_cache = SwashCache::new();
+        let cache = glyphon::Cache::new(device);
+        let viewport = glyphon::Viewport::new(device, &cache);
+        let mut atlas = TextAtlas::new(device, queue, &cache, format);
+        let text_renderer =
+            TextRenderer::new(&mut atlas, device, wgpu::MultisampleState::default(), None);
+
+        window.set_cursor_visible(!self.hide_cursor);
+        if self.hide_cursor {
+            window
+                .set_cursor_grab(winit::window::CursorGrabMode::Locked)
+                .unwrap_or_else(|_| {
+                    window
+                        .set_cursor_grab(winit::window::CursorGrabMode::Confined)
+                        .unwrap();
+                });
+        }
+
+        let font_state = FontState {
+            font_system,
+            swash_cache,
+            viewport,
+            atlas,
+            text_renderer,
+            text_buffers: HashMap::new(),
+        };
+
+        self.window = Some(window);
+        self.font_state = Some(font_state);
+    }
+
+    fn window_event(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        _window_id: winit::window::WindowId,
+        event: winit::event::WindowEvent,
+    ) {
+        self.input_manager.process_window_event(&event);
+        let rendering_manager = &mut self.rendering_manager;
+        if self.input_manager.close_requested() || self.input_manager.destroyed() {
+            event_loop.exit();
+            return;
+        }
+        match event {
+            winit::event::WindowEvent::Resized(new_size) => {
+                rendering_manager.resize(new_size.width, new_size.height);
+
+                self.font_state.as_mut().unwrap().viewport.update(
+                    rendering_manager.queue(),
+                    glyphon::Resolution {
+                        width: new_size.width,
+                        height: new_size.height,
+                    },
+                );
+
+                self.details.window_resolution = (new_size.width, new_size.height);
+            }
+            winit::event::WindowEvent::CloseRequested => {
+                event_loop.exit();
+            }
+            winit::event::WindowEvent::CursorMoved { position, .. } => {
+                self.details.cursor_position = (position.x as u32, position.y as u32);
+            }
+            winit::event::WindowEvent::MouseInput { button, .. } => {
+                if self.details.mouse_state.contains(&button) {
+                    self.details.mouse_state.remove(&button);
+                } else {
+                    self.details.mouse_state.insert(button);
+                }
+            }
+            winit::event::WindowEvent::RedrawRequested => {
+                if self.scenes.is_empty() {
+                    return;
+                }
+                let rendering_manager = &mut self.rendering_manager;
+                if !self.initialized_scene {
+                    let device = rendering_manager.device();
+                    let queue = rendering_manager.queue();
+                    let workload_output_receiver =
+                        self.core_communication.workload_output_receiver();
+                    TokioScope::scope_and_block(|scope| {
+                        let proc = self.scenes[self.active_scene].initialize(
+                            device,
+                            queue,
+                            self.core_communication.workload_sender(),
+                            workload_output_receiver,
+                            self.core_communication.engine_action_sender(),
+                        );
+
+                        scope.spawn(proc);
+                    });
+                    self.initialized_scene = true;
+                }
+                if self.active_scene != self.last_active_scene_index {
+                    self.initialized_scene = false;
+                    self.last_active_scene_index = self.active_scene;
+                    return;
+                }
+
+                while let Ok(engine_action) =
+                    self.core_communication.engine_action_receiver().try_recv()
+                {
+                    engine_action.execute(V4Mutable {
+                        window: self.window.as_ref().unwrap(),
+                        active_scene: &mut self.active_scene,
+                        initialized_scene: &mut self.initialized_scene,
+                        font_state: self.font_state.as_mut().unwrap(),
+                    });
+                }
+
+                let scene = &mut self.scenes[self.active_scene];
+                let device = rendering_manager.device();
+                let queue = rendering_manager.queue();
+
+                let action_queue = scene.update(device, queue, &self.input_manager, &self.details);
+                pollster::block_on(scene.execute_action_queue(action_queue, device, queue));
+
+                scene.update_materials(device, queue, &self.input_manager, &self.details);
+                rendering_manager.individual_compute_execution(scene.computes());
+
+                V4::create_new_pipelines(
+                    device,
+                    rendering_manager.format().unwrap(),
+                    scene,
+                    &mut self.pipelines,
+                );
+
+                pollster::block_on(rendering_manager.render(
+                    scene,
+                    &self.pipelines,
+                    self.font_state.as_mut().unwrap(),
+                ));
+
+                self.details.frames_elapsed += 1;
+                self.details.last_frame_instant = Instant::now();
+                self.details.cursor_delta = (0.0, 0.0);
+            }
+            _ => {}
+        }
+    }
+
+    fn device_event(
+        &mut self,
+        _event_loop: &ActiveEventLoop,
+        _device_id: winit::event::DeviceId,
+        event: DeviceEvent,
+    ) {
+        self.input_manager.process_device_event(&event);
+        match event {
+            DeviceEvent::MouseMotion { delta } => {
+                self.details.cursor_delta = (delta.0 as f32, delta.1 as f32);
+            }
+            _ => {}
+        }
+    }
+
+    fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
+        self.input_manager.end_step();
+        if let Some(window) = self.window.as_ref() {
+            window.request_redraw();
+        }
+    }
+
+    fn new_events(&mut self, _event_loop: &ActiveEventLoop, _cause: winit::event::StartCause) {
+        self.input_manager.step();
+    }
+}
+
+impl Debug for V4App {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("WindowAndEventManager")
-            .field("event_loop", &self.event_loop)
+        f.debug_struct("V4App")
+            .field("window_attributes", &self.window_attributes)
+            .field("rendering_manager", &self.rendering_manager)
+            .field("scenes", &self.scenes)
+            .field("active_scene", &self.active_scene)
+            .field("initialized_scene", &self.initialized_scene)
             .field("window", &self.window)
-            .field("input_manager", &"Input Manager")
+            .field("details", &self.details)
+            .field("pipelines", &self.pipelines)
+            .field("font_state", &self.font_state)
+            .field("hide_cursor", &self.hide_cursor)
+            .field("core_communication", &self.core_communication)
             .finish()
     }
 }
 
 #[derive(Debug)]
 pub struct V4Builder {
-    width: u32,
-    height: u32,
-    title: &'static str,
-    fullscreen: Option<Fullscreen>,
+    window_attributes: WindowAttributes,
     antialiasing_enabled: bool,
     clear_color: wgpu::Color,
     features: wgpu::Features,
@@ -326,10 +354,9 @@ pub struct V4Builder {
 impl Default for V4Builder {
     fn default() -> Self {
         Self {
-            width: 800,
-            height: 600,
-            title: "V4 Program",
-            fullscreen: None,
+            window_attributes: WindowAttributes::default().with_inner_size(
+                winit::dpi::Size::Physical(winit::dpi::PhysicalSize::new(800, 800)),
+            ),
             antialiasing_enabled: false,
             clear_color: wgpu::Color::BLACK,
             features: wgpu::Features::default(),
@@ -341,17 +368,8 @@ impl Default for V4Builder {
 }
 
 impl V4Builder {
-    pub fn window_settings(
-        mut self,
-        width: u32,
-        height: u32,
-        title: &'static str,
-        fullscreen: Option<Fullscreen>,
-    ) -> Self {
-        self.width = width;
-        self.height = height;
-        self.title = title;
-        self.fullscreen = fullscreen;
+    pub fn window_attributes(mut self, window_attributes: WindowAttributes) -> Self {
+        self.window_attributes = window_attributes;
         self
     }
 
@@ -388,67 +406,37 @@ impl V4Builder {
     pub async fn build(self) -> V4 {
         let event_loop = EventLoop::new().expect("Failed to create event loop.");
         event_loop.set_control_flow(winit::event_loop::ControlFlow::Poll);
-        let window = WindowBuilder::new()
-            .with_inner_size(winit::dpi::LogicalSize::new(self.width, self.height))
-            .with_title(self.title)
-            .with_fullscreen(self.fullscreen)
-            .build(&event_loop)
-            .expect("Failed to create window.");
         let input_manager = WinitInputHelper::new();
+        let window_attributes = self.window_attributes;
 
         let rendering_manager = RenderingManager::new(
-            &window,
-            self.antialiasing_enabled,
-            self.clear_color,
-            self.features,
-            self.limits,
-            self.backends,
+            window_attributes.inner_size.unwrap().to_physical(1.0),
+            RenderingManagerDetails {
+                antialiasing_enabled: self.antialiasing_enabled,
+                clear_color: self.clear_color,
+                features: self.features,
+                limits: self.limits,
+                backends: self.backends,
+            },
         )
         .await;
 
-        let device = rendering_manager.device();
-        let queue = rendering_manager.queue();
-        let format = rendering_manager.format();
-
-        let font_system = FontSystem::new();
-        let swash_cache = SwashCache::new();
-        let cache = glyphon::Cache::new(device);
-        let viewport = glyphon::Viewport::new(device, &cache);
-        let mut atlas = TextAtlas::new(device, queue, &cache, format);
-        let text_renderer =
-            TextRenderer::new(&mut atlas, device, wgpu::MultisampleState::default(), None);
-
-        window.set_cursor_visible(!self.hide_cursor);
-        if self.hide_cursor {
-            window
-                .set_cursor_grab(winit::window::CursorGrabMode::Locked)
-                .unwrap_or_else(|_| {
-                    window
-                        .set_cursor_grab(winit::window::CursorGrabMode::Confined)
-                        .unwrap();
-                });
-        }
-
-        let font_state = FontState {
-            font_system,
-            swash_cache,
-            viewport,
-            atlas,
-            text_renderer,
-            text_buffers: HashMap::new(),
-        };
-
-        V4 {
-            rendering_manager,
-            event_loop,
+        let app = V4App {
+            window_attributes,
             input_manager,
+            rendering_manager,
             scenes: Vec::new(),
+            last_active_scene_index: usize::MAX,
             active_scene: 0,
             initialized_scene: false,
-            window,
+            window: None,
             details: Default::default(),
             pipelines: HashMap::new(),
-            font_state,
-        }
+            font_state: None,
+            hide_cursor: self.hide_cursor,
+            core_communication: CoreCommunication::default(),
+        };
+
+        V4 { event_loop, app }
     }
 }

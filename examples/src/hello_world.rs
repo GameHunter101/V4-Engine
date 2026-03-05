@@ -21,11 +21,16 @@ use v4::{
     scene,
 };
 use wgpu::vertex_attr_array;
+use winit::window::WindowAttributes;
 
 #[tokio::main]
 pub async fn main() {
     let mut engine = V4::builder()
-        .window_settings(600, 600, "Example V4 Project", None)
+        .window_attributes(
+            WindowAttributes::default()
+                .with_inner_size(winit::dpi::PhysicalSize::new(800, 800))
+                .with_title("Example V4 Project")
+        )
         .clear_color(wgpu::Color {
             r: 0.8,
             g: 0.15,
@@ -107,141 +112,141 @@ pub async fn main() {
     rendering_manager.individual_compute_execution(&[skybox_compute]);
 
     scene! {
-            scene: hello_scene,
-            active_camera: "cam",
-            /* screen_space_materials: [
-                {
-                    pipeline: {
-                        fragment_shader_path: "shaders/hello_world/screen_space.wgsl",
-                    }
-                },
-                {
-                    pipeline: {
-                        fragment_shader_path: "shaders/hello_world/screen_space_blur.wgsl"
-                    }
+        scene: hello_scene,
+        active_camera: "cam",
+        /* screen_space_materials: [
+            {
+                pipeline: {
+                    fragment_shader_path: "shaders/hello_world/screen_space.wgsl",
                 }
-            ], */
-            "cam_ent" = {
-                components: [
-                    CameraComponent(field_of_view: 80.0, aspect_ratio: 1.0, near_plane: 0.1, far_plane: 50.0, sensitivity: 0.002, movement_speed: 0.01, ident: "cam"),
-                    TransformComponent(position: Vector3::new(0.0, 5.0, -5.0), rotation: Bivector::new(0.0, -std::f32::consts::FRAC_PI_4 / 2.0, 0.0).exponentiate(), uses_buffer: false),
-                ]
             },
-            "test_ent" = {
-                material: {
-                    pipeline: {
-                        vertex_shader_path: "shaders/hello_world/point_vert.wgsl",
-                        fragment_shader_path: "shaders/hello_world/point_frag.wgsl",
-                        vertex_layouts: [Vertex::vertex_layout()],
-                        uses_camera: false,
-                        geometry_details: {
-                            topology: wgpu::PrimitiveTopology::LineList,
-                            polygon_mode: wgpu::PolygonMode::Line,
-                        },
+            {
+                pipeline: {
+                    fragment_shader_path: "shaders/hello_world/screen_space_blur.wgsl"
+                }
+            }
+        ], */
+        "cam_ent" = {
+            components: [
+                CameraComponent(field_of_view: 80.0, aspect_ratio: 1.0, near_plane: 0.1, far_plane: 50.0, sensitivity: 0.002, movement_speed: 0.01, ident: "cam"),
+                TransformComponent(position: Vector3::new(0.0, 5.0, -5.0), rotation: Bivector::new(0.0, -std::f32::consts::FRAC_PI_4 / 2.0, 0.0).exponentiate(), uses_buffer: false),
+            ]
+        },
+        "test_ent" = {
+            material: {
+                pipeline: {
+                    vertex_shader_path: "shaders/hello_world/point_vert.wgsl",
+                    fragment_shader_path: "shaders/hello_world/point_frag.wgsl",
+                    vertex_layouts: [Vertex::vertex_layout()],
+                    uses_camera: false,
+                    geometry_details: {
+                        topology: wgpu::PrimitiveTopology::LineList,
+                        polygon_mode: wgpu::PolygonMode::Line,
                     },
                 },
-                components: [
-                    MeshComponent(
-                        vertices: vec![vec![
-                            Vertex::blank([0.0, 0.0, 0.0]),
-                            Vertex::blank([0.0, 0.5, 0.0]),
-                            Vertex::blank([0.3, -0.9, 0.0]),
-                            Vertex::blank([-0.3, -0.3, 0.0])
-                        ]],
-                        enabled_models: vec![(0, None)]
-                    ),
-                    MeshComponent(
-                        vertices: vec![vec![
-                            Vertex::blank([-0.7, 0.0, 0.0]),
-                            Vertex::blank([0.0, 0.2, 0.0]),
-                            Vertex::blank([0.9, 0.9, 0.0]),
-                            Vertex::blank([-0.3, -0.3, 0.0])
-                        ]],
-                        enabled_models: vec![(0, None)]
-                    ),
+            },
+            components: [
+                MeshComponent(
+                    vertices: vec![vec![
+                        Vertex::blank([0.0, 0.0, 0.0]),
+                        Vertex::blank([0.0, 0.5, 0.0]),
+                        Vertex::blank([0.3, -0.9, 0.0]),
+                        Vertex::blank([-0.3, -0.3, 0.0])
+                    ]],
+                    enabled_models: vec![(0, None)]
+                ),
+                MeshComponent(
+                    vertices: vec![vec![
+                        Vertex::blank([-0.7, 0.0, 0.0]),
+                        Vertex::blank([0.0, 0.2, 0.0]),
+                        Vertex::blank([0.9, 0.9, 0.0]),
+                        Vertex::blank([-0.3, -0.3, 0.0])
+                    ]],
+                    enabled_models: vec![(0, None)]
+                ),
+            ],
+            is_enabled: false,
+        },
+        "skybox" = {
+            material: {
+                pipeline: {
+                    vertex_shader_path: "shaders/hello_world/skybox_vertex.wgsl",
+                    fragment_shader_path: "shaders/hello_world/skybox_fragment.wgsl",
+                    vertex_layouts: [Vertex::vertex_layout()],
+                    uses_camera: true,
+                    render_priority: -1,
+                },
+                attachments: [
+                    Texture(
+                        texture_bundle: skybox_display_bundle,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                    )
                 ],
-                is_enabled: false,
+                ident: "skybox_mat"
             },
-            "skybox" = {
-                material: {
-                    pipeline: {
-                        vertex_shader_path: "shaders/hello_world/skybox_vertex.wgsl",
-                        fragment_shader_path: "shaders/hello_world/skybox_fragment.wgsl",
-                        vertex_layouts: [Vertex::vertex_layout()],
-                        uses_camera: true,
-                        render_priority: -1,
-                    },
-                    attachments: [
-                        Texture(
-                            texture_bundle: skybox_display_bundle,
-                            visibility: wgpu::ShaderStages::FRAGMENT,
-                        )
-                    ],
-                    ident: "skybox_mat"
-                },
-                components: [
+            components: [
 
-                    MeshComponent(
-                        vertices: vec![
-                            vec![
-                                Vertex::blank([-1.0, 3.0, 1.0]),
-                                Vertex::blank([-1.0, -1.0, 1.0]),
-                                Vertex::blank([3.0, -1.0, 1.0])
-                            ]
-                        ],
-                        indices: vec![
-                            vec![0, 1, 2],
-                        ],
-                        enabled_models: vec![(0, None)]
-                    ),
-                ],
-            },
-            _ = {
-                material: {
-                    pipeline: {
-                        vertex_shader_path: "shaders/hello_world/vertex.wgsl",
-                        fragment_shader_path: "shaders/hello_world/fragment.wgsl",
-                        vertex_layouts: [Vertex::vertex_layout(), TransformComponent::vertex_layout::<5>()],
-                        uses_camera: true,
-                        immediate_size: 4,
-                    },
-                    immediate_data: bytemuck::cast_slice(&[0.5_f32]).to_vec(),
-                    attachments: [
-                        Texture(
-                            texture_bundle: TextureBundle::from_path(
-                                "./assets/testing_textures/cube-diffuse.jpg",
-                                device,
-                                queue,
-                                TextureProperties {
-                                    format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                                    ..Default::default()
-                                }
-                            ).await.unwrap().1,
-                            visibility: wgpu::ShaderStages::FRAGMENT,
-                        ),
-                        Texture(
-                            texture_bundle: TextureBundle::from_path(
-                                "C:/Users/liors/CodingProjects/shaderbox/assets/shaderball_normal.jpg",
-                                device,
-                                queue,
-                                TextureProperties {
-                                    format: wgpu::TextureFormat::Rgba8Unorm,
-                                    ..Default::default()
-                                }
-                            ).await.unwrap().1,
-                            visibility: wgpu::ShaderStages::FRAGMENT,
-                        )
+                MeshComponent(
+                    vertices: vec![
+                        vec![
+                            Vertex::blank([-1.0, 3.0, 1.0]),
+                            Vertex::blank([-1.0, -1.0, 1.0]),
+                            Vertex::blank([3.0, -1.0, 1.0])
+                        ]
                     ],
-                    ident: "immediate_mat"
+                    indices: vec![
+                        vec![0, 1, 2],
+                    ],
+                    enabled_models: vec![(0, None)]
+                ),
+            ],
+        },
+        _ = {
+            material: {
+                pipeline: {
+                    vertex_shader_path: "shaders/hello_world/vertex.wgsl",
+                    fragment_shader_path: "shaders/hello_world/fragment.wgsl",
+                    vertex_layouts: [Vertex::vertex_layout(), TransformComponent::vertex_layout::<5>()],
+                    uses_camera: true,
+                    immediate_size: 4,
                 },
-                components: [
-                    TransformComponent(position: Vector3::new(0.0, 0.0, 0.0), ident: "thing"),
-                    // MeshComponent<Vertex>::from_obj("assets/models/basic_cube.obj", true).ident("unused ident").await.unwrap(),
-                    MeshComponent<Vertex>::from_obj("C:/Users/liors/CodingProjects/shaderbox/assets/shaderball.obj", true).ident("unused ident").await.unwrap(),
-                    HideComponent(entity: ident("test_ent"), immediate_mat: ident("immediate_mat"))
+                immediate_data: bytemuck::cast_slice(&[0.5_f32]).to_vec(),
+                attachments: [
+                    Texture(
+                        texture_bundle: TextureBundle::from_path(
+                            "./assets/testing_textures/cube-diffuse.jpg",
+                            device,
+                            queue,
+                            TextureProperties {
+                                format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                                ..Default::default()
+                            }
+                        ).await.unwrap().1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                    ),
+                    Texture(
+                        texture_bundle: TextureBundle::from_path(
+                            "C:/Users/liors/CodingProjects/shaderbox/assets/shaderball_normal.jpg",
+                            device,
+                            queue,
+                            TextureProperties {
+                                format: wgpu::TextureFormat::Rgba8Unorm,
+                                ..Default::default()
+                            }
+                        ).await.unwrap().1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                    )
                 ],
+                ident: "immediate_mat"
             },
-        }
+            components: [
+                TransformComponent(position: Vector3::new(0.0, 0.0, 0.0), ident: "thing"),
+                // MeshComponent<Vertex>::from_obj("assets/models/basic_cube.obj", true).ident("unused ident").await.unwrap(),
+                MeshComponent<Vertex>::from_obj("C:/Users/liors/CodingProjects/shaderbox/assets/shaderball.obj", true).ident("unused ident").await.unwrap(),
+                HideComponent(entity: ident("test_ent"), immediate_mat: ident("immediate_mat"))
+            ],
+        },
+    }
 
     engine.attach_scene(hello_scene);
 

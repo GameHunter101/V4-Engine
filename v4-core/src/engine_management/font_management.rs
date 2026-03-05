@@ -12,6 +12,17 @@ pub struct FontState {
     pub text_buffers: HashMap<ComponentId, TextRenderInfo>,
 }
 
+impl std::fmt::Debug for FontState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FontState")
+            .field("font_system", &self.font_system)
+            .field("swash_cache", &self.swash_cache)
+            .field("viewport", &self.viewport)
+            .field("text_buffers", &self.text_buffers)
+            .finish()
+    }
+}
+
 impl FontState {
     pub fn create_text_buffer(
         &mut self,

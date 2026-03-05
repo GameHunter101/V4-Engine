@@ -11,7 +11,7 @@ debug = true
 strip = false
 
 [workspace.package]
-version = "0.2.76"
+version = "0.2.77"
 authors = ["Lior Carmeli"]
 
 [workspace.dependencies]
@@ -28,8 +28,8 @@ pollster = "0.3.0"
 log = "0.4.22"
 async-scoped = { version = "0.9.0", features = ["use-tokio"] }
 async-trait = "0.1.83"
-winit = "=0.29.15"
-winit_input_helper = "0.16.0"
+winit = "0.30.13"
+winit_input_helper = { git = "https://github.com/GameHunter101/winit_input_helper" }
 # imgui-winit-support = "=0.13.0"
 glyphon = "0.10.0"
 tobj = { version = "4.0.2", features = ["async"] }

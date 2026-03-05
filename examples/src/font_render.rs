@@ -1,10 +1,12 @@
 use v4::{
+    V4,
     builtin_actions::UpdateTextComponentAction,
     component,
     ecs::component::{ComponentDetails, ComponentId, ComponentSystem, UpdateParams},
     engine_management::font_management::{TextComponentProperties, TextDisplayInfo},
-    scene, V4,
+    scene,
 };
+use winit::window::WindowAttributes;
 
 #[component]
 struct TextComponent {
@@ -20,7 +22,11 @@ struct ToggleComponent {
 pub async fn main() {
     let mut engine = V4::builder()
         .clear_color(wgpu::Color::BLACK)
-        .window_settings(500, 500, "V4 Font Render Example", None)
+        .window_attributes(
+            WindowAttributes::default()
+                .with_inner_size(winit::dpi::PhysicalSize::new(500, 500))
+                .with_title("V4 Font Render Example"),
+        )
         .build()
         .await;
 
