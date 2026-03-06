@@ -24,7 +24,7 @@ pub async fn main() {
         .clear_color(wgpu::Color::BLACK)
         .window_attributes(
             WindowAttributes::default()
-                .with_inner_size(winit::dpi::PhysicalSize::new(500, 500))
+                .with_surface_size(winit::dpi::PhysicalSize::new(500, 500))
                 .with_title("V4 Font Render Example"),
         )
         .build()
@@ -92,11 +92,6 @@ impl ComponentSystem for TextComponent {
             for key in text {
                 if let winit::keyboard::Key::Character(char) = key {
                     self.text.push_str(char);
-                }
-                if let winit::keyboard::Key::Named(named) = key {
-                    if *named == winit::keyboard::NamedKey::Space {
-                        self.text.push(' ');
-                    }
                 }
             }
             return vec![Box::new(UpdateTextComponentAction {

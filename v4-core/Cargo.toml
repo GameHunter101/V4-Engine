@@ -1,27 +1,29 @@
 [package]
 name = "v4-core"
-version = "0.2.77"
+version = "0.3.0"
 authors.workspace = true
 edition = "2024"
 
 [dependencies]
-bytemuck.workspace = true
-env_logger.workspace = true
-wgpu.workspace = true
-nalgebra.workspace = true
-smaa.workspace = true
-futures.workspace = true
-tokio.workspace = true
-# imgui.workspace = true
-# imgui-wgpu.workspace = true
-pollster.workspace = true
-log.workspace = true
+algoe.workspace = true
 async-scoped.workspace = true
 async-trait.workspace = true
-winit.workspace = true
-winit_input_helper.workspace = true
-# imgui-winit-support.workspace = true
-glyphon.workspace = true
+bytemuck.workspace = true
 crossbeam-channel.workspace = true
 downcast-rs.workspace = true
+egui.workspace = true
+egui_wgpu_backend.workspace = true
+egui_winit_platform.workspace = true
+env_logger.workspace = true
+futures.workspace = true
+glyphon.workspace = true
 image.workspace = true
+log.workspace = true
+nalgebra.workspace = true
+pollster.workspace = true
+smaa.workspace = true
+tobj.workspace = true
+tokio.workspace = true
+wgpu.workspace = true
+winit.workspace = true
+winit_input_helper.workspace = true

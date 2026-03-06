@@ -1,5 +1,7 @@
 use async_scoped::TokioScope;
 use ecs::scene::Scene;
+use egui::{FontDefinitions, Style};
+use egui_winit_platform::{Platform, PlatformDescriptor};
 use engine_management::{
     engine_action::V4Mutable,
     font_management::FontState,
@@ -17,7 +19,8 @@ use wgpu::{RenderPipeline, TextureFormat};
 
 use winit::{
     application::ApplicationHandler,
-    event::{DeviceEvent, MouseButton},
+    dpi::PhysicalSize,
+    event::{DeviceEvent, DeviceId, MouseButton, WindowEvent},
     event_loop::{ActiveEventLoop, EventLoop},
     window::{Window, WindowAttributes},
 };
@@ -37,7 +40,7 @@ pub mod ecs;
 /// The main engine struct. Contains the state for the whole engine.
 #[derive(Debug)]
 pub struct V4 {
-    event_loop: EventLoop<()>,
+    event_loop: EventLoop,
     app: V4App,
 }
 
@@ -49,12 +52,13 @@ struct V4App {
     last_active_scene_index: usize,
     active_scene: usize,
     initialized_scene: bool,
-    window: Option<Window>,
+    window: Option<Box<dyn Window>>,
     details: EngineDetails,
     pipelines: HashMap<PipelineId, RenderPipeline>,
     font_state: Option<FontState>,
     hide_cursor: bool,
     core_communication: CoreCommunication,
+    egui_platform: Platform,
 }
 
 #[derive(Debug)]
@@ -91,7 +95,7 @@ impl V4 {
         self.app.details.initialization_time = Instant::now();
 
         self.event_loop
-            .run_app(&mut self.app)
+            .run_app(self.app)
             .expect("An error occured in the main loop.");
     }
 
@@ -141,13 +145,34 @@ impl V4 {
     }
 }
 
+impl V4App {
+    fn resize(&mut self, new_size: PhysicalSize<u32>) {
+        self.rendering_manager.resize(
+            new_size.width,
+            new_size.height,
+            self.window.as_ref().unwrap().scale_factor() as f32,
+        );
+
+        self.font_state.as_mut().unwrap().viewport.update(
+            self.rendering_manager.queue(),
+            glyphon::Resolution {
+                width: new_size.width,
+                height: new_size.height,
+            },
+        );
+
+        self.details.window_resolution = (new_size.width, new_size.height);
+        self.window.as_ref().unwrap().request_redraw();
+    }
+}
+
 impl ApplicationHandler for V4App {
-    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+    fn can_create_surfaces(&mut self, event_loop: &dyn ActiveEventLoop) {
         let Ok(window) = event_loop.create_window(self.window_attributes.clone()) else {
             panic!("Failed to create window.")
         };
 
-        self.rendering_manager.initialize_surface_data(&window);
+        self.rendering_manager.initialize_surface_data(&*window);
 
         let device = self.rendering_manager.device();
         let queue = self.rendering_manager.queue();
@@ -187,63 +212,72 @@ impl ApplicationHandler for V4App {
 
     fn window_event(
         &mut self,
-        event_loop: &ActiveEventLoop,
+        event_loop: &dyn ActiveEventLoop,
         _window_id: winit::window::WindowId,
-        event: winit::event::WindowEvent,
+        event: WindowEvent,
     ) {
+        self.egui_platform.handle_event(&event);
         self.input_manager.process_window_event(&event);
-        let rendering_manager = &mut self.rendering_manager;
         if self.input_manager.close_requested() || self.input_manager.destroyed() {
             event_loop.exit();
             return;
         }
         match event {
-            winit::event::WindowEvent::Resized(new_size) => {
-                rendering_manager.resize(new_size.width, new_size.height);
-
-                self.font_state.as_mut().unwrap().viewport.update(
-                    rendering_manager.queue(),
-                    glyphon::Resolution {
-                        width: new_size.width,
-                        height: new_size.height,
-                    },
-                );
-
-                self.details.window_resolution = (new_size.width, new_size.height);
+            WindowEvent::SurfaceResized(new_size) => {
+                self.resize(new_size);
             }
-            winit::event::WindowEvent::CloseRequested => {
+            WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
+                let new_size: PhysicalSize<u32> = self
+                    .window_attributes
+                    .surface_size
+                    .unwrap()
+                    .to_physical(scale_factor);
+                // inner_size_writer.
+                self.resize(new_size);
+            }
+            WindowEvent::CloseRequested => {
                 event_loop.exit();
             }
-            winit::event::WindowEvent::CursorMoved { position, .. } => {
+            WindowEvent::PointerMoved { position, .. } => {
                 self.details.cursor_position = (position.x as u32, position.y as u32);
             }
-            winit::event::WindowEvent::MouseInput { button, .. } => {
-                if self.details.mouse_state.contains(&button) {
+            WindowEvent::PointerButton { button, .. } => {
+                let button = button.clone().mouse_button().unwrap();
+                if self
+                    .details
+                    .mouse_state
+                    .contains(&button)
+                {
                     self.details.mouse_state.remove(&button);
                 } else {
                     self.details.mouse_state.insert(button);
                 }
             }
-            winit::event::WindowEvent::RedrawRequested => {
+            WindowEvent::RedrawRequested => {
                 if self.scenes.is_empty() {
                     return;
                 }
+                self.egui_platform
+                    .update_time(self.details.initialization_time.elapsed().as_secs_f64());
                 let rendering_manager = &mut self.rendering_manager;
                 if !self.initialized_scene {
                     let device = rendering_manager.device();
                     let queue = rendering_manager.queue();
                     let workload_output_receiver =
                         self.core_communication.workload_output_receiver();
+
+                    let action_queue = self.scenes[self.active_scene].initialize(
+                        device,
+                        self.core_communication.workload_sender(),
+                        workload_output_receiver,
+                        self.core_communication.engine_action_sender(),
+                    );
                     TokioScope::scope_and_block(|scope| {
-                        let proc = self.scenes[self.active_scene].initialize(
+                        scope.spawn(self.scenes[self.active_scene].execute_action_queue(
+                            action_queue,
                             device,
                             queue,
-                            self.core_communication.workload_sender(),
-                            workload_output_receiver,
-                            self.core_communication.engine_action_sender(),
-                        );
-
-                        scope.spawn(proc);
+                        ));
                     });
                     self.initialized_scene = true;
                 }
@@ -257,7 +291,7 @@ impl ApplicationHandler for V4App {
                     self.core_communication.engine_action_receiver().try_recv()
                 {
                     engine_action.execute(V4Mutable {
-                        window: self.window.as_ref().unwrap(),
+                        window: self.window.as_deref().unwrap(),
                         active_scene: &mut self.active_scene,
                         initialized_scene: &mut self.initialized_scene,
                         font_state: self.font_state.as_mut().unwrap(),
@@ -285,6 +319,8 @@ impl ApplicationHandler for V4App {
                     scene,
                     &self.pipelines,
                     self.font_state.as_mut().unwrap(),
+                    &mut self.egui_platform,
+                    self.window.as_deref(),
                 ));
 
                 self.details.frames_elapsed += 1;
@@ -297,27 +333,27 @@ impl ApplicationHandler for V4App {
 
     fn device_event(
         &mut self,
-        _event_loop: &ActiveEventLoop,
-        _device_id: winit::event::DeviceId,
+        _event_loop: &dyn ActiveEventLoop,
+        _device_id: Option<DeviceId>,
         event: DeviceEvent,
     ) {
         self.input_manager.process_device_event(&event);
         match event {
-            DeviceEvent::MouseMotion { delta } => {
+            DeviceEvent::PointerMotion { delta } => {
                 self.details.cursor_delta = (delta.0 as f32, delta.1 as f32);
             }
             _ => {}
         }
     }
 
-    fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
+    fn about_to_wait(&mut self, _event_loop: &dyn ActiveEventLoop) {
         self.input_manager.end_step();
         if let Some(window) = self.window.as_ref() {
             window.request_redraw();
         }
     }
 
-    fn new_events(&mut self, _event_loop: &ActiveEventLoop, _cause: winit::event::StartCause) {
+    fn new_events(&mut self, _event_loop: &dyn ActiveEventLoop, _cause: winit::event::StartCause) {
         self.input_manager.step();
     }
 }
@@ -354,7 +390,7 @@ pub struct V4Builder {
 impl Default for V4Builder {
     fn default() -> Self {
         Self {
-            window_attributes: WindowAttributes::default().with_inner_size(
+            window_attributes: WindowAttributes::default().with_surface_size(
                 winit::dpi::Size::Physical(winit::dpi::PhysicalSize::new(800, 800)),
             ),
             antialiasing_enabled: false,
@@ -409,8 +445,9 @@ impl V4Builder {
         let input_manager = WinitInputHelper::new();
         let window_attributes = self.window_attributes;
 
+        let window_size = window_attributes.surface_size.unwrap().to_physical(1.0);
         let rendering_manager = RenderingManager::new(
-            window_attributes.inner_size.unwrap().to_physical(1.0),
+            window_size,
             RenderingManagerDetails {
                 antialiasing_enabled: self.antialiasing_enabled,
                 clear_color: self.clear_color,
@@ -420,6 +457,14 @@ impl V4Builder {
             },
         )
         .await;
+
+        let egui_platform = Platform::new(PlatformDescriptor {
+            physical_width: window_size.width,
+            physical_height: window_size.height,
+            scale_factor: 1.0,
+            font_definitions: FontDefinitions::default(),
+            style: Style::default(),
+        });
 
         let app = V4App {
             window_attributes,
@@ -435,6 +480,7 @@ impl V4Builder {
             font_state: None,
             hide_cursor: self.hide_cursor,
             core_communication: CoreCommunication::default(),
+            egui_platform,
         };
 
         V4 { event_loop, app }

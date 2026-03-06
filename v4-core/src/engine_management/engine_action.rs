@@ -5,7 +5,7 @@ use crate::ecs::component::ComponentId;
 use super::font_management::{FontState, TextAttributes, TextComponentProperties, TextDisplayInfo};
 
 pub struct V4Mutable<'a> {
-    pub window: &'a Window,
+    pub window: &'a dyn Window,
     pub active_scene: &'a mut usize,
     pub initialized_scene: &'a mut bool,
     pub font_state: &'a mut FontState,

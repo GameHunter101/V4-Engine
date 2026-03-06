@@ -2,14 +2,32 @@ use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::{format_ident, quote};
 use syn::{
-    parse::Parser, parse_macro_input, punctuated::Punctuated, Expr, Field, GenericParam, Generics,
-    Ident, ItemStruct, Meta, MetaNameValue, Token, Type, TypeParam,
+    Expr, Field, GenericParam, Generics, Ident, ItemStruct, Meta, MetaNameValue, Path, Token, Type,
+    TypeParam, parse::Parser, parse_macro_input, punctuated::Punctuated,
 };
 
 pub fn component_impl(args: TokenStream, item: TokenStream) -> TokenStream {
-    let rendering_order = get_rendering_order(
+    let property_string = get_property_string(
         parse_macro_input!(args with Punctuated::<Meta, Token![,]>::parse_terminated),
     );
+    let rendering_order = if let Some((string, val)) = property_string.as_ref()
+        && string == "rendering_order"
+        && let Some(val) = val
+    {
+        quote! {#val}
+    } else {
+        quote! {0}
+    };
+
+    // panic!("{property_string:?}");
+    let debug_impl = if let Some((string, _)) = property_string.as_ref()
+        && string == "custom_debug"
+    {
+        quote! {}
+    } else {
+        quote! {#[derive(Debug)]}
+    };
+
     let mut component_struct = parse_macro_input!(item as ItemStruct);
 
     let ident = component_struct.ident.clone();
@@ -58,7 +76,7 @@ pub fn component_impl(args: TokenStream, item: TokenStream) -> TokenStream {
     let component_generics = remove_generics_bounds(&generics);
 
     quote! {
-        #[derive(Debug)]
+        #debug_impl
         #component_struct
 
         #builder
@@ -100,26 +118,20 @@ pub fn component_impl(args: TokenStream, item: TokenStream) -> TokenStream {
     .into()
 }
 
-fn get_rendering_order(args: Punctuated<Meta, Token![,]>) -> TokenStream2 {
-    let rendering_order_expr: Option<Expr> = args
-        .into_iter()
-        .flat_map(|arg| {
-            if let Meta::NameValue(MetaNameValue { path, value, .. }) = arg {
+fn get_property_string(args: Punctuated<Meta, Token![,]>) -> Option<(String, Option<Expr>)> {
+    args.into_iter()
+        .flat_map(|arg| match arg {
+            Meta::NameValue(MetaNameValue { path, value, .. }) => {
                 if let Some(name) = path.get_ident() {
-                    if &name.to_string() == "rendering_order" {
-                        return Some(value);
-                    }
+                    Some((name.to_string(), Some(value)))
+                } else {
+                    None
                 }
             }
-            None
+            Meta::Path(Path { segments, .. }) => Some((segments[0].ident.to_string(), None)),
+            _ => None,
         })
-        .next();
-
-    if let Some(expr) = rendering_order_expr {
-        quote! {#expr}
-    } else {
-        quote! {0}
-    }
+        .next()
 }
 
 fn builder_struct_construction(

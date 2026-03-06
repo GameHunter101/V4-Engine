@@ -1,4 +1,5 @@
 use downcast_rs::{impl_downcast, DowncastSync};
+use egui::Context;
 use std::{collections::HashMap, fmt::Debug, ops::Range};
 use wgpu::{CommandEncoder, Device, Queue, RenderPass};
 use winit_input_helper::WinitInputHelper;
@@ -61,6 +62,8 @@ pub trait ComponentSystem: ComponentDetails + Debug + DowncastSync + Send + Sync
         computes: &[Compute],
     ) {
     }
+
+    fn ui_render(&mut self, ctx: &Context) {}
 }
 impl_downcast!(sync ComponentSystem);
 

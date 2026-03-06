@@ -1,4 +1,5 @@
 mod compute;
+mod egui;
 mod font_render;
 mod hello_world;
 mod textures;
@@ -22,10 +23,13 @@ fn main() {
             "textures" => {
                 textures::main();
             }
+            "egui" => {
+                egui::main();
+            }
             _ => {
                 println!("Please select a valid example")
             }
         },
-        None => hello_world::main() //println!("Please select a example."),
+        None => hello_world::main(), //println!("Please select a example."),
     }
 }

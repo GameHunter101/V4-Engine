@@ -12,11 +12,11 @@ use wgpu::{BindGroup, Buffer, Device, Queue};
 use winit_input_helper::WinitInputHelper;
 
 use crate::{
+    EngineDetails,
     engine_management::{
         engine_action::EngineAction,
         pipeline::{PipelineId, PipelineShader},
     },
-    EngineDetails,
 };
 
 use super::{
@@ -99,22 +99,21 @@ impl Default for Scene {
 }
 
 impl Scene {
-    pub async fn initialize(
+    pub fn initialize(
         &mut self,
         device: &Device,
-        queue: &Queue,
         workload_sender: Sender<WorkloadPacket>,
         workload_output_receiver: Receiver<(ComponentId, WorkloadOutput)>,
         engine_action_sender: Sender<Box<dyn EngineAction>>,
-    ) {
+    ) -> ActionQueue {
         self.workload_sender = Some(workload_sender);
         self.workload_output_receiver = Some(workload_output_receiver);
         self.engine_action_sender = Some(engine_action_sender);
 
-        self.initialize_components(device, queue).await;
+        self.initialize_components(device)
     }
 
-    async fn initialize_components(&mut self, device: &Device, queue: &Queue) {
+    fn initialize_components(&mut self, device: &Device) -> ActionQueue {
         let comp_action_queue: ActionQueue = self
             .components
             .iter_mut()
@@ -136,13 +135,11 @@ impl Scene {
             .flat_map(|compute| compute.initialize(device))
             .collect();
 
-        let action_queue: ActionQueue = comp_action_queue
+        comp_action_queue
             .into_iter()
             .chain(mat_action_queue.into_iter())
             .chain(compute_action_queue.into_iter())
-            .collect();
-
-        Box::pin(self.execute_action_queue(action_queue, device, queue)).await;
+            .collect()
     }
 
     pub fn update(
@@ -184,11 +181,10 @@ impl Scene {
                 else {
                     return Vec::new();
                 };
-                let mut other_components: Vec<&mut Component> = 
-                    previous_components
-                        .iter_mut()
-                        .chain(later_components.iter_mut())
-                        .collect::<Vec<_>>();
+                let mut other_components: Vec<&mut Component> = previous_components
+                    .iter_mut()
+                    .chain(later_components.iter_mut())
+                    .collect::<Vec<_>>();
                 let mut all_materials: Vec<&mut Material> = self.materials.iter_mut().collect();
 
                 let mut entity_component_groupings = self.entity_component_groupings.clone();
@@ -202,20 +198,19 @@ impl Scene {
                 }
                 let workload_outputs = &self.workload_outputs;
 
-                current_component
-                    .update(super::component::UpdateParams {
-                        device,
-                        queue,
-                        input_manager,
-                        other_components: &mut other_components,
-                        computes: &mut self.computes,
-                        materials: &mut all_materials,
-                        engine_details,
-                        workload_outputs,
-                        entities,
-                        entity_component_groupings,
-                        active_camera,
-                    })
+                current_component.update(super::component::UpdateParams {
+                    device,
+                    queue,
+                    input_manager,
+                    other_components: &mut other_components,
+                    computes: &mut self.computes,
+                    materials: &mut all_materials,
+                    engine_details,
+                    workload_outputs,
+                    entities,
+                    entity_component_groupings,
+                    active_camera,
+                })
             })
             .collect()
     }
@@ -248,27 +243,25 @@ impl Scene {
             let (current_material, later_materials) =
                 all_other_materials.split_first_mut().unwrap();
 
-            let mut other_materials: Vec<&mut Material> = 
-                previous_materials
-                    .iter_mut()
-                    .chain(later_materials.iter_mut())
-                    .collect();
+            let mut other_materials: Vec<&mut Material> = previous_materials
+                .iter_mut()
+                .chain(later_materials.iter_mut())
+                .collect();
             let entity_component_groupings = entity_component_groupings.clone();
 
-            current_material
-                .update(super::component::UpdateParams {
-                    device,
-                    queue,
-                    input_manager,
-                    other_components: &mut all_components,
-                    computes: &mut self.computes,
-                    materials: &mut other_materials,
-                    engine_details,
-                    workload_outputs,
-                    entities,
-                    entity_component_groupings,
-                    active_camera,
-                });
+            current_material.update(super::component::UpdateParams {
+                device,
+                queue,
+                input_manager,
+                other_components: &mut all_components,
+                computes: &mut self.computes,
+                materials: &mut other_materials,
+                engine_details,
+                workload_outputs,
+                entities,
+                entity_component_groupings,
+                active_camera,
+            });
         }
     }
 
@@ -502,13 +495,13 @@ fn main(input: VertexInput) -> VertexOutput {
         device: &Device,
         queue: &Queue,
     ) {
-        let len = action_queue.len();
-        for action in action_queue {
+        let actions = if action_queue.is_empty() {
+            self.initialize_components(device)
+        } else {
+            action_queue
+        };
+        for action in actions {
             action.execute_async(self, device, queue).await;
-        }
-
-        if len != 0 {
-            self.initialize_components(device, queue).await;
         }
     }
 
@@ -558,6 +551,10 @@ fn main(input: VertexInput) -> VertexOutput {
 
     pub fn all_components(&self) -> Vec<&Component> {
         self.components.iter().collect::<Vec<_>>()
+    }
+
+    pub fn all_components_mut(&mut self) -> Vec<&mut Component> {
+        self.components.iter_mut().collect::<Vec<_>>()
     }
 
     pub fn computes(&self) -> &[Compute] {

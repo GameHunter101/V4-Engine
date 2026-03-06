@@ -1,5 +1,8 @@
 use std::{collections::HashMap, fmt::Debug};
 
+use egui::TexturesDelta;
+use egui_wgpu_backend::{RenderPass as EguiRenderPass, ScreenDescriptor};
+use egui_winit_platform::Platform;
 use smaa::SmaaTarget;
 use wgpu::{
     Adapter, BindGroup, Buffer, CommandEncoder, Device, Instance, Queue, RenderPipeline, Texture,
@@ -7,11 +10,11 @@ use wgpu::{
     rwh::{HasDisplayHandle, HasWindowHandle},
     util::DeviceExt,
 };
-use winit::dpi::PhysicalSize;
+use winit::{dpi::PhysicalSize, window::Window};
 
 use crate::{
     ecs::{
-        component::{ComponentDetails, ComponentSystem},
+        component::{Component, ComponentDetails, ComponentSystem},
         compute::Compute,
         scene::Scene,
     },
@@ -41,6 +44,8 @@ pub struct SurfaceData {
     smaa_target: SmaaTarget,
     depth_texture: texture_support::CompleteTexture,
     screen_space_attachments: ScreenSpaceAttachments,
+    egui_render_pass: EguiRenderPass,
+    egui_screen_descriptor: ScreenDescriptor,
 }
 
 impl Debug for SurfaceData {
@@ -115,7 +120,7 @@ impl RenderingManager {
         }
     }
 
-    pub fn initialize_surface_data(&mut self, window: &winit::window::Window) {
+    pub fn initialize_surface_data(&mut self, window: &dyn Window) {
         let surface = unsafe {
             self.instance
                 .create_surface_unsafe(wgpu::SurfaceTargetUnsafe::RawHandle {
@@ -165,6 +170,14 @@ impl RenderingManager {
 
         let screen_space_attachments =
             ScreenSpaceAttachments::new(&self.device, self.width, self.height, format);
+
+        let egui_render_pass = EguiRenderPass::new(&self.device, format, 1);
+        let egui_screen_descriptor = ScreenDescriptor {
+            physical_width: self.width,
+            physical_height: self.height,
+            scale_factor: window.scale_factor() as f32,
+        };
+
         self.surface_data = Some(SurfaceData {
             surface,
             format,
@@ -172,6 +185,8 @@ impl RenderingManager {
             smaa_target,
             depth_texture,
             screen_space_attachments,
+            egui_render_pass,
+            egui_screen_descriptor,
         });
     }
 
@@ -180,6 +195,8 @@ impl RenderingManager {
         scene: &mut Scene,
         pipelines: &HashMap<PipelineId, RenderPipeline>,
         font_state: &mut FontState,
+        egui_platform: &mut Platform,
+        window: Option<&dyn Window>,
     ) {
         let screen_space_materials = scene.screen_space_materials();
         let surface_data = self.surface_data.as_mut().unwrap();
@@ -302,74 +319,24 @@ impl RenderingManager {
         };
 
         if !screen_space_materials.is_empty() {
-            encoder.copy_texture_to_texture(
-                raw_render_tex.as_image_copy(),
-                surface_data
-                    .screen_space_attachments
-                    .screen_space_input_texture
-                    .as_image_copy(),
-                wgpu::Extent3d {
-                    width: self.width,
-                    height: self.height,
-                    depth_or_array_layers: 1,
-                },
+            Self::render_screen_space_effects(
+                scene,
+                self.width,
+                self.height,
+                pipelines,
+                &output_view,
+                &self.device,
+                raw_render_tex,
+                surface_data,
+                &mut encoder,
             );
-            let screen_space_output = self.device.create_texture(&wgpu::TextureDescriptor {
-                label: Some("Screen space effect output texture"),
-                size: wgpu::Extent3d {
-                    width: self.width,
-                    height: self.height,
-                    depth_or_array_layers: 1,
-                },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: surface_data.format,
-                usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::COPY_SRC,
-                view_formats: &[],
-            });
-
-            let screen_space_output_view =
-                screen_space_output.create_view(&wgpu::TextureViewDescriptor::default());
-
-            for material_id in scene.screen_space_materials() {
-                let material = scene
-                    .get_material(*material_id)
-                    .expect("Invalid material ID");
-                if let Some(pipeline) = pipelines.get(material.pipeline_id()) {
-                    surface_data
-                        .screen_space_attachments
-                        .execute_effect_render_pass(
-                            &mut encoder,
-                            &screen_space_output_view,
-                            pipeline,
-                            material.bind_group().unwrap(),
-                        );
-                }
-                encoder.copy_texture_to_texture(
-                    screen_space_output.as_image_copy(),
-                    surface_data
-                        .screen_space_attachments
-                        .screen_space_input_texture
-                        .as_image_copy(),
-                    wgpu::Extent3d {
-                        width: self.width,
-                        height: self.height,
-                        depth_or_array_layers: 1,
-                    },
-                );
-            }
-
-            surface_data
-                .screen_space_attachments
-                .execute_output_render_pass(&mut encoder, &output_view);
         }
 
-        let enabled_components = scene.enabled_ui_components();
+        let enabled_ui_components = scene.enabled_ui_components();
         let text_areas = font_state
             .text_buffers
             .iter()
-            .filter(|(id, _)| enabled_components.contains(id))
+            .filter(|(id, _)| enabled_ui_components.contains(id))
             .map(|(_, data)| glyphon::TextArea {
                 buffer: &data.buffer,
                 left: data.top_left_pos[0],
@@ -416,22 +383,166 @@ impl RenderingManager {
                 .render(&font_state.atlas, &font_state.viewport, &mut ui_render_pass)
                 .expect("Failed to render text.");
         }
+        let tdelta_option = if !enabled_ui_components.is_empty() {
+            let all_comps = scene.all_components_mut();
+            let ui_components: Vec<&mut Component> = all_comps
+                .into_iter()
+                .filter(|comp| enabled_ui_components.contains(&comp.id()))
+                .collect();
+            Some(Self::egui_render(
+                ui_components,
+                egui_platform,
+                &mut surface_data.egui_render_pass,
+                &surface_data.egui_screen_descriptor,
+                window.as_deref(),
+                &self.device,
+                &self.queue,
+                &mut encoder,
+                &output_view,
+            ))
+        } else {
+            None
+        };
 
         self.queue.submit(Some(encoder.finish()));
         output.present();
+
+        if let Some(tdelta) = tdelta_option {
+            surface_data
+                .egui_render_pass
+                .remove_textures(tdelta)
+                .unwrap();
+        }
     }
 
-    pub fn resize(&mut self, width: u32, height: u32) {
-        self.width = width;
-        self.height = height;
+    fn render_screen_space_effects(
+        scene: &Scene,
+        width: u32,
+        height: u32,
+        pipelines: &HashMap<PipelineId, RenderPipeline>,
+        output_view: &TextureView,
+        device: &Device,
+        raw_render_tex: &Texture,
+        surface_data: &SurfaceData,
+        encoder: &mut CommandEncoder,
+    ) {
+        encoder.copy_texture_to_texture(
+            raw_render_tex.as_image_copy(),
+            surface_data
+                .screen_space_attachments
+                .screen_space_input_texture
+                .as_image_copy(),
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+        );
+        let screen_space_output = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Screen space effect output texture"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: surface_data.format,
+            usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+
+        let screen_space_output_view =
+            screen_space_output.create_view(&wgpu::TextureViewDescriptor::default());
+
+        for material_id in scene.screen_space_materials() {
+            let material = scene
+                .get_material(*material_id)
+                .expect("Invalid material ID");
+            if let Some(pipeline) = pipelines.get(material.pipeline_id()) {
+                surface_data
+                    .screen_space_attachments
+                    .execute_effect_render_pass(
+                        encoder,
+                        &screen_space_output_view,
+                        pipeline,
+                        material.bind_group().unwrap(),
+                    );
+            }
+            encoder.copy_texture_to_texture(
+                screen_space_output.as_image_copy(),
+                surface_data
+                    .screen_space_attachments
+                    .screen_space_input_texture
+                    .as_image_copy(),
+                wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+            );
+        }
+
+        surface_data
+            .screen_space_attachments
+            .execute_output_render_pass(encoder, &output_view);
+    }
+
+    fn egui_render(
+        ui_components: Vec<&mut Component>,
+        platform: &mut Platform,
+        render_pass: &mut EguiRenderPass,
+        screen_descriptor: &ScreenDescriptor,
+        window: Option<&dyn Window>,
+        device: &Device,
+        queue: &Queue,
+        encoder: &mut CommandEncoder,
+        output_view: &TextureView,
+    ) -> TexturesDelta {
+        platform.begin_pass();
+        for component in ui_components {
+            component.ui_render(&platform.context());
+        }
+        let full_output = platform.end_pass(window);
+        let paint_jobs = platform
+            .context()
+            .tessellate(full_output.shapes, full_output.pixels_per_point);
+        let tdelta = full_output.textures_delta;
+        render_pass.add_textures(device, queue, &tdelta).unwrap();
+        render_pass.update_buffers(device, queue, &paint_jobs, screen_descriptor);
+        render_pass
+            .execute(
+                encoder,
+                output_view,
+                &paint_jobs,
+                screen_descriptor,
+                Some(wgpu::Color::BLACK),
+            )
+            .unwrap();
+        tdelta
+    }
+
+    pub fn resize(&mut self, physical_width: u32, physical_height: u32, scale_factor: f32,) {
+        self.width = physical_width;
+        self.height = physical_height;
         let surface_data = self.surface_data.as_mut().unwrap();
 
-        surface_data.config.width = width;
-        surface_data.config.height = height;
-        surface_data.surface.configure(&self.device, &surface_data.config);
-        surface_data.depth_texture =
-            texture_support::TextureBundle::create_depth_texture(&self.device, &surface_data.config);
-        surface_data.smaa_target.resize(&self.device, width, height);
+        surface_data.config.width = physical_width;
+        surface_data.config.height = physical_height;
+        surface_data
+            .surface
+            .configure(&self.device, &surface_data.config);
+        surface_data.depth_texture = texture_support::TextureBundle::create_depth_texture(
+            &self.device,
+            &surface_data.config,
+        );
+        surface_data.smaa_target.resize(&self.device, physical_width, physical_height);
+        surface_data.egui_screen_descriptor = ScreenDescriptor {
+            physical_width,
+            physical_height,
+            scale_factor,
+        }
     }
 
     pub fn device(&self) -> &Device {
@@ -483,22 +594,6 @@ impl RenderingManager {
         self.queue.submit(Some(encoder.finish()));
     }
 }
-
-/* impl Debug for RenderingManager {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("RenderingManager")
-            .field("instance", &self.instance)
-            .field("adapter", &self.adapter)
-            .field("device", &self.device)
-            .field("queue", &self.queue)
-            .field("width", &self.width)
-            .field("height", &self.height)
-            .field("clear_color", &self.clear_color)
-            .field("antialiasing_enabled", &self.antialiasing_enabled)
-            .field("surface_data", &self.surface_data)
-            .finish()
-    }
-} */
 
 #[derive(Debug)]
 struct ScreenSpaceAttachments {

@@ -28,7 +28,7 @@ pub async fn main() {
     let mut engine = V4::builder()
         .window_attributes(
             WindowAttributes::default()
-                .with_inner_size(winit::dpi::PhysicalSize::new(800, 800))
+                .with_surface_size(winit::dpi::PhysicalSize::new(800, 800))
                 .with_title("Example V4 Project")
         )
         .clear_color(wgpu::Color {

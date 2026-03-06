@@ -1,7 +1,7 @@
 [package]
 name = "v4-examples"
 edition = "2024"
-version = "0.2.77"
+version = "0.3.0"
 authors.workspace = true
 
 [dependencies]
@@ -16,3 +16,5 @@ async-trait.workspace = true
 winit.workspace = true
 nalgebra.workspace = true
 algoe.workspace = true
+egui.workspace = true
+egui_demo_lib = "0.33.3"
