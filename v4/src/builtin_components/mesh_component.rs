@@ -133,10 +133,15 @@ impl<V: VertexDescriptor> MeshComponent<V> {
         model_index: Option<usize>,
         device: &Device,
         queue: &Queue,
+        overwrite: bool,
     ) {
         let comp_id = self.id();
         if let Some(index) = model_index {
-            self.vertices[index].extend(vertices);
+            if overwrite {
+                self.vertices[index] = vertices;
+            } else {
+                self.vertices[index].extend(vertices);
+            }
             if let Some(buffers) = &mut self.vertex_buffers {
                 let buf = &mut buffers[index];
                 let contents = bytemuck::cast_slice(&self.vertices[index]);
@@ -169,10 +174,15 @@ impl<V: VertexDescriptor> MeshComponent<V> {
         model_index: Option<usize>,
         device: &Device,
         queue: &Queue,
+        overwrite: bool
     ) {
         let comp_id = self.id();
         if let Some(index) = model_index {
-            self.indices[index].extend(indices);
+            if overwrite {
+                self.indices[index] = indices;
+            } else {
+                self.indices[index].extend(indices);
+            }
             if let Some(buffers) = &mut self.index_buffers {
                 let buf = &mut buffers[index];
                 let contents = bytemuck::cast_slice(&self.indices[index]);
