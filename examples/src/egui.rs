@@ -20,11 +20,12 @@ pub async fn main() {
                 .with_title("V4 egui demo"),
         )
         .clear_color(wgpu::Color {
-            r: 0.04,
+            r: 0.5,
             g: 0.04,
             b: 0.04,
             a: 1.0,
         })
+        .egui_clear_color(wgpu::Color::RED)
         .build()
         .await;
 
@@ -44,6 +45,8 @@ pub async fn main() {
 
 #[component(custom_debug)]
 struct EguiUiComponent {
+    #[default(0.5)]
+    val: f32
 }
 
 impl std::fmt::Debug for EguiUiComponent {
@@ -68,11 +71,12 @@ impl ComponentSystem for EguiUiComponent {
 
     fn ui_render(&mut self, ctx: &Context) {
         egui::CentralPanel::default().show(ctx, |ui| {
+            ui.add(egui::Slider::new(&mut self.val, 0.0..=1.0));
             ui.label("Hello, world!");
             if ui.button("Thing").clicked() {
                 println!("Clicked!");
             }
-            egui_demo_lib::DemoWindows::default().ui(ctx);
+            // egui_demo_lib::DemoWindows::default().ui(ctx);
         });
     }
 }

@@ -58,7 +58,8 @@ struct V4App {
     font_state: Option<FontState>,
     hide_cursor: bool,
     core_communication: CoreCommunication,
-    egui_platform: Platform,
+    egui_platform: Option<Platform>,
+    egui_clear_color: Option<wgpu::Color>,
 }
 
 #[derive(Debug)]
@@ -67,6 +68,7 @@ pub struct EngineDetails {
     pub frames_elapsed: u128,
     pub last_frame_instant: Instant,
     pub window_resolution: (u32, u32),
+    pub scale_factor: f32,
     pub cursor_position: (u32, u32),
     pub mouse_state: HashSet<MouseButton>,
     pub cursor_delta: (f32, f32),
@@ -79,6 +81,7 @@ impl Default for EngineDetails {
             frames_elapsed: 0,
             last_frame_instant: Instant::now(),
             window_resolution: (0, 0),
+            scale_factor: 1.0,
             cursor_position: (0, 0),
             mouse_state: HashSet::new(),
             cursor_delta: (0.0, 0.0),
@@ -163,6 +166,14 @@ impl V4App {
 
         self.details.window_resolution = (new_size.width, new_size.height);
         self.window.as_ref().unwrap().request_redraw();
+
+        self.egui_platform = Some(Platform::new(PlatformDescriptor {
+            physical_width: new_size.width,
+            physical_height: new_size.width,
+            scale_factor: self.details.scale_factor as f64,
+            font_definitions: FontDefinitions::default(),
+            style: Style::default(),
+        }));
     }
 }
 
@@ -206,6 +217,15 @@ impl ApplicationHandler for V4App {
             text_buffers: HashMap::new(),
         };
 
+        self.egui_platform = Some(Platform::new(PlatformDescriptor {
+            physical_width: window.surface_size().width,
+            physical_height: window.surface_size().width,
+            scale_factor: window.scale_factor(),
+            font_definitions: FontDefinitions::default(),
+            style: Style::default(),
+        }));
+
+        self.details.scale_factor = window.scale_factor() as f32;
         self.window = Some(window);
         self.font_state = Some(font_state);
     }
@@ -216,7 +236,8 @@ impl ApplicationHandler for V4App {
         _window_id: winit::window::WindowId,
         event: WindowEvent,
     ) {
-        self.egui_platform.handle_event(&event);
+        let egui_platform = self.egui_platform.as_mut().unwrap();
+        egui_platform.handle_event(&event);
         self.input_manager.process_window_event(&event);
         if self.input_manager.close_requested() || self.input_manager.destroyed() {
             event_loop.exit();
@@ -232,7 +253,8 @@ impl ApplicationHandler for V4App {
                     .surface_size
                     .unwrap()
                     .to_physical(scale_factor);
-                // inner_size_writer.
+                self.details.window_resolution = new_size.into();
+                self.details.scale_factor = scale_factor as f32;
                 self.resize(new_size);
             }
             WindowEvent::CloseRequested => {
@@ -243,11 +265,7 @@ impl ApplicationHandler for V4App {
             }
             WindowEvent::PointerButton { button, .. } => {
                 let button = button.clone().mouse_button().unwrap();
-                if self
-                    .details
-                    .mouse_state
-                    .contains(&button)
-                {
+                if self.details.mouse_state.contains(&button) {
                     self.details.mouse_state.remove(&button);
                 } else {
                     self.details.mouse_state.insert(button);
@@ -257,7 +275,7 @@ impl ApplicationHandler for V4App {
                 if self.scenes.is_empty() {
                     return;
                 }
-                self.egui_platform
+                egui_platform
                     .update_time(self.details.initialization_time.elapsed().as_secs_f64());
                 let rendering_manager = &mut self.rendering_manager;
                 if !self.initialized_scene {
@@ -319,8 +337,9 @@ impl ApplicationHandler for V4App {
                     scene,
                     &self.pipelines,
                     self.font_state.as_mut().unwrap(),
-                    &mut self.egui_platform,
+                    egui_platform,
                     self.window.as_deref(),
+                    self.egui_clear_color,
                 ));
 
                 self.details.frames_elapsed += 1;
@@ -385,6 +404,7 @@ pub struct V4Builder {
     hide_cursor: bool,
     limits: wgpu::Limits,
     backends: wgpu::Backends,
+    egui_clear_color: Option<wgpu::Color>,
 }
 
 impl Default for V4Builder {
@@ -399,6 +419,7 @@ impl Default for V4Builder {
             hide_cursor: false,
             limits: wgpu::Limits::default(),
             backends: wgpu::Backends::all(),
+            egui_clear_color: None,
         }
     }
 }
@@ -439,6 +460,11 @@ impl V4Builder {
         self
     }
 
+    pub fn egui_clear_color(mut self, color: wgpu::Color) -> Self {
+        self.egui_clear_color = Some(color);
+        self
+    }
+
     pub async fn build(self) -> V4 {
         let event_loop = EventLoop::new().expect("Failed to create event loop.");
         event_loop.set_control_flow(winit::event_loop::ControlFlow::Poll);
@@ -458,14 +484,6 @@ impl V4Builder {
         )
         .await;
 
-        let egui_platform = Platform::new(PlatformDescriptor {
-            physical_width: window_size.width,
-            physical_height: window_size.height,
-            scale_factor: 1.0,
-            font_definitions: FontDefinitions::default(),
-            style: Style::default(),
-        });
-
         let app = V4App {
             window_attributes,
             input_manager,
@@ -480,7 +498,8 @@ impl V4Builder {
             font_state: None,
             hide_cursor: self.hide_cursor,
             core_communication: CoreCommunication::default(),
-            egui_platform,
+            egui_platform: None,
+            egui_clear_color: self.egui_clear_color,
         };
 
         V4 { event_loop, app }

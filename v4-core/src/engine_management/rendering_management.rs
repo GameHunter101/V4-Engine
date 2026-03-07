@@ -197,6 +197,7 @@ impl RenderingManager {
         font_state: &mut FontState,
         egui_platform: &mut Platform,
         window: Option<&dyn Window>,
+        egui_clear_color: Option<wgpu::Color>,
     ) {
         let screen_space_materials = scene.screen_space_materials();
         let surface_data = self.surface_data.as_mut().unwrap();
@@ -399,6 +400,7 @@ impl RenderingManager {
                 &self.queue,
                 &mut encoder,
                 &output_view,
+                egui_clear_color
             ))
         } else {
             None
@@ -499,6 +501,7 @@ impl RenderingManager {
         queue: &Queue,
         encoder: &mut CommandEncoder,
         output_view: &TextureView,
+        egui_clear_color: Option<wgpu::Color>,
     ) -> TexturesDelta {
         platform.begin_pass();
         for component in ui_components {
@@ -517,7 +520,7 @@ impl RenderingManager {
                 output_view,
                 &paint_jobs,
                 screen_descriptor,
-                Some(wgpu::Color::BLACK),
+                egui_clear_color,
             )
             .unwrap();
         tdelta
