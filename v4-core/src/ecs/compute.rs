@@ -13,12 +13,22 @@ use super::{
     material::ShaderAttachment,
 };
 
+pub trait DynamicWorkgroupCounts: std::fmt::Debug + Send + Sync {
+    fn counts(&self) -> (u32, u32, u32);
+}
+
+#[derive(Debug)]
+pub enum WorkgroupCounts {
+    Static(u32, u32, u32),
+    Dynamic(Box<dyn DynamicWorkgroupCounts>)
+}
+
 #[derive(Debug)]
 pub struct Compute {
     attachments: Vec<ShaderAttachment>,
     shader_path: &'static str,
     is_spirv: bool,
-    workgroup_counts: (u32, u32, u32),
+    workgroup_counts: WorkgroupCounts,
     bind_group_layout: Option<BindGroupLayout>,
     bind_group: Option<BindGroup>,
     pipeline: Option<ComputePipeline>,
@@ -84,7 +94,10 @@ impl Compute {
         }
     }
 
-    fn create_bind_group_entry<'a>(attachment: &'a ShaderAttachment, binding: u32) -> BindGroupEntry<'a> {
+    fn create_bind_group_entry<'a>(
+        attachment: &'a ShaderAttachment,
+        binding: u32,
+    ) -> BindGroupEntry<'a> {
         match attachment {
             ShaderAttachment::Texture(tex) => BindGroupEntry {
                 binding,
@@ -129,11 +142,11 @@ impl Compute {
             "The compute pipeline was not created. Remember to initialize the compute before executing it.",
         ));
         compute_pass.set_bind_group(0, self.bind_group.as_ref().expect("The compute bind group was not created. Remember to initialize the compute before executing it."), &[]);
-        compute_pass.dispatch_workgroups(
-            self.workgroup_counts.0,
-            self.workgroup_counts.1,
-            self.workgroup_counts.2,
-        );
+        let (x, y, z) = match &self.workgroup_counts {
+            WorkgroupCounts::Static(x, y, z) => (*x, *y, *z),
+            WorkgroupCounts::Dynamic(func) => func.counts(),
+        };
+        compute_pass.dispatch_workgroups(x, y, z);
     }
 
     pub fn attachments(&self) -> &[ShaderAttachment] {
@@ -150,10 +163,6 @@ impl Compute {
 
     pub fn set_iterate_count(&mut self, new_iterate_count: usize) {
         self.iterate_count = new_iterate_count;
-    }
-
-    pub fn workgroup_counts(&self) -> (u32, u32, u32) {
-        self.workgroup_counts
     }
 }
 
@@ -236,7 +245,7 @@ pub struct ComputeBuilder {
     attachments: Vec<ShaderAttachment>,
     shader_path: &'static str,
     is_spirv: bool,
-    workgroup_counts: (u32, u32, u32),
+    workgroup_counts: Option<WorkgroupCounts>,
     id: ComponentId,
     enabled: bool,
     iterate_count: usize,
@@ -248,7 +257,7 @@ impl Default for ComputeBuilder {
             attachments: Vec::new(),
             shader_path: "",
             is_spirv: false,
-            workgroup_counts: (0, 0, 0),
+            workgroup_counts: None,
             id: 0,
             enabled: true,
             iterate_count: 1,
@@ -272,8 +281,8 @@ impl ComputeBuilder {
         self
     }
 
-    pub fn workgroup_counts(mut self, workgroup_counts: (u32, u32, u32)) -> Self {
-        self.workgroup_counts = workgroup_counts;
+    pub fn workgroup_counts(mut self, workgroup_counts: WorkgroupCounts) -> Self {
+        self.workgroup_counts = Some(workgroup_counts);
         self
     }
 
@@ -297,7 +306,9 @@ impl ComputeBuilder {
             attachments: self.attachments,
             shader_path: self.shader_path,
             is_spirv: self.is_spirv,
-            workgroup_counts: self.workgroup_counts,
+            workgroup_counts: self
+                .workgroup_counts
+                .expect("No workgroup counts function provided"),
             bind_group_layout: None,
             bind_group: None,
             pipeline: None,

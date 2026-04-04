@@ -1,9 +1,10 @@
 use v4::{
+    V4,
     ecs::{
         compute::Compute,
         material::{ShaderAttachment, ShaderBufferAttachment},
     },
-    scene, V4,
+    scene,
 };
 
 #[tokio::main]
@@ -35,7 +36,7 @@ pub async fn main() {
                         )),
                     ],
                     shader_path: "shaders/compute/compute.wgsl",
-                    workgroup_counts: (8, 1, 1),
+                    workgroup_counts: v4::ecs::compute::WorkgroupCounts::Static(8, 1, 1),
                     ident: "temp"
                 ),
             ]

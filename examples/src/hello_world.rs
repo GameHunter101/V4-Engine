@@ -29,7 +29,7 @@ pub async fn main() {
         .window_attributes(
             WindowAttributes::default()
                 .with_surface_size(winit::dpi::PhysicalSize::new(800, 800))
-                .with_title("Example V4 Project")
+                .with_title("Example V4 Project"),
         )
         .clear_color(wgpu::Color {
             r: 0.8,
@@ -104,7 +104,11 @@ pub async fn main() {
                 visibility: wgpu::ShaderStages::COMPUTE,
             }),
         ])
-        .workgroup_counts(((1024 + 15) / 16, (1024 + 15) / 16, 6))
+        .workgroup_counts(v4::ecs::compute::WorkgroupCounts::Static(
+            (1024 + 15) / 16,
+            (1024 + 15) / 16,
+            6,
+        ))
         .build();
 
     skybox_compute.initialize(device);
