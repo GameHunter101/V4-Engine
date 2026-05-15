@@ -161,7 +161,7 @@ pub struct RawCameraData {
 }
 
 impl RawCameraData {
-    fn from_component(comp: &dyn CameraProps, transform: Option<&TransformComponent>) -> Self {
+    pub fn from_component(comp: &dyn CameraProps, transform: Option<&TransformComponent>) -> Self {
         let c = 1.0 / (comp.field_of_view() * std::f32::consts::PI / 360.0).tan();
         let aspect_ratio = comp.aspect_ratio();
         let far_plane = comp.far_plane();
