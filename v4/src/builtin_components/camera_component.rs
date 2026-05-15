@@ -126,6 +126,31 @@ impl ComponentSystem for CameraComponent {
     }
 }
 
+impl CameraProps for CameraComponent {
+    fn field_of_view(&self) -> f32 {
+        self.field_of_view
+    }
+
+    fn aspect_ratio(&self) -> f32 {
+        self.aspect_ratio
+    }
+
+    fn far_plane(&self) -> f32 {
+        self.far_plane
+    }
+
+    fn near_plane(&self) -> f32 {
+        self.near_plane
+    }
+}
+
+pub trait CameraProps {
+    fn field_of_view(&self) -> f32;
+    fn aspect_ratio(&self) -> f32;
+    fn far_plane(&self) -> f32;
+    fn near_plane(&self) -> f32;
+}
+
 #[repr(C)]
 #[derive(Debug, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct RawCameraData {
@@ -136,11 +161,11 @@ pub struct RawCameraData {
 }
 
 impl RawCameraData {
-    fn from_component(comp: &CameraComponent, transform: Option<&TransformComponent>) -> Self {
-        let c = 1.0 / (comp.field_of_view * std::f32::consts::PI / 360.0).tan();
-        let aspect_ratio = comp.aspect_ratio;
-        let far_plane = comp.far_plane;
-        let near_plane = comp.near_plane;
+    fn from_component(comp: &dyn CameraProps, transform: Option<&TransformComponent>) -> Self {
+        let c = 1.0 / (comp.field_of_view() * std::f32::consts::PI / 360.0).tan();
+        let aspect_ratio = comp.aspect_ratio();
+        let far_plane = comp.far_plane();
+        let near_plane = comp.near_plane();
         let difference = far_plane - near_plane;
 
         let (view_matrix, inverted_view_matrix, pos) = if let Some(transform) = transform {

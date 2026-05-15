@@ -1,3 +1,5 @@
+#![deny(missing_docs)]
+
 use async_scoped::TokioScope;
 use ecs::scene::Scene;
 use egui::{FontDefinitions, Style};

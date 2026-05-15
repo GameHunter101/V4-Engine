@@ -52,7 +52,7 @@ pub struct MeshComponent<V: VertexDescriptor> {
 }
 
 impl<V: VertexDescriptor> MeshComponent<V> {
-    pub async fn from_obj(path: &str, is_enabled: bool) -> Result<Self, tobj::LoadError> {
+    pub fn from_obj(path: &str, is_enabled: bool) -> Result<Self, tobj::LoadError> {
         let (models, _materials) = tobj::load_obj(
             path,
             &tobj::LoadOptions {
