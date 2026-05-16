@@ -196,4 +196,12 @@ impl RawCameraData {
             padding: 0.0,
         }
     }
+
+    pub fn matrix(&self) -> [[f32; 4]; 4] {
+        self.matrix
+    }
+
+    pub fn inv_matrix(&self) -> [[f32; 4]; 4] {
+        self.inv_matrix
+    }
 }
