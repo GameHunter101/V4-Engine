@@ -118,7 +118,7 @@ impl ComponentSystem for CameraComponent {
                     None
                 };
 
-                let raw_camera = RawCameraData::from_component(self, comp);
+                let raw_camera = RawCameraData::from_component(self, comp.map(|e| e.create_matrix()));
                 return vec![Box::new(UpdateCameraBufferAction(raw_camera))];
             }
         }
@@ -161,15 +161,14 @@ pub struct RawCameraData {
 }
 
 impl RawCameraData {
-    pub fn from_component(comp: &dyn CameraProps, transform: Option<&TransformComponent>) -> Self {
+    pub fn from_component(comp: &dyn CameraProps, transform_matrix: Option<Matrix4<f32>>) -> Self {
         let c = 1.0 / (comp.field_of_view() * std::f32::consts::PI / 360.0).tan();
         let aspect_ratio = comp.aspect_ratio();
         let far_plane = comp.far_plane();
         let near_plane = comp.near_plane();
         let difference = far_plane - near_plane;
 
-        let (view_matrix, inverted_view_matrix, pos) = if let Some(transform) = transform {
-            let mat = transform.create_matrix();
+        let (view_matrix, inverted_view_matrix, pos) = if let Some(mat) = transform_matrix {
             if let Some(inverted) = mat.try_inverse() {
                 (inverted, mat, transform.get_position())
             } else {
