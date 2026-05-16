@@ -55,7 +55,8 @@ impl ComponentSystem for CameraComponent {
                 return vec![Box::new(SetCursorLockAction(self.frozen))];
             }
             if active == self.id() && !self.frozen {
-                let sibling_components = &mut other_components[entity_component_groupings[&self.parent_entity_id].clone()];
+                let sibling_components = &mut other_components
+                    [entity_component_groupings[&self.parent_entity_id].clone()];
 
                 let transform_component: Option<&mut TransformComponent> = sibling_components
                     .into_iter()
@@ -118,7 +119,11 @@ impl ComponentSystem for CameraComponent {
                     None
                 };
 
-                let raw_camera = RawCameraData::from_component(self, comp.map(|e| e.create_matrix()));
+                let raw_camera = RawCameraData::from_component(
+                    self,
+                    comp.map(|e| e.create_matrix()),
+                    comp.map(|e| e.get_position()),
+                );
                 return vec![Box::new(UpdateCameraBufferAction(raw_camera))];
             }
         }
@@ -161,21 +166,25 @@ pub struct RawCameraData {
 }
 
 impl RawCameraData {
-    pub fn from_component(comp: &dyn CameraProps, transform_matrix: Option<Matrix4<f32>>) -> Self {
+    pub fn from_component(
+        comp: &dyn CameraProps,
+        transform_matrix: Option<Matrix4<f32>>,
+        pos: Option<Vector3<f32>>,
+    ) -> Self {
         let c = 1.0 / (comp.field_of_view() * std::f32::consts::PI / 360.0).tan();
         let aspect_ratio = comp.aspect_ratio();
         let far_plane = comp.far_plane();
         let near_plane = comp.near_plane();
         let difference = far_plane - near_plane;
 
-        let (view_matrix, inverted_view_matrix, pos) = if let Some(mat) = transform_matrix {
+        let (view_matrix, inverted_view_matrix) = if let Some(mat) = transform_matrix {
             if let Some(inverted) = mat.try_inverse() {
-                (inverted, mat, transform.get_position())
+                (inverted, mat)
             } else {
-                (Matrix4::identity(), Matrix4::identity(), Vector3::zeros())
+                (Matrix4::identity(), Matrix4::identity())
             }
         } else {
-            (Matrix4::identity(), Matrix4::identity(), Vector3::zeros())
+            (Matrix4::identity(), Matrix4::identity())
         };
 
         let projection_matrix = Matrix4::from_columns(&[
@@ -185,9 +194,9 @@ impl RawCameraData {
             Vector4::new(0.0, 0.0, -(far_plane * near_plane) / difference, 0.0),
         ]);
 
-        let matrix =projection_matrix * view_matrix;
+        let matrix = projection_matrix * view_matrix;
 
-        let pos = Vector4::new(pos.x, pos.y, pos.z, 1.0);
+        let pos = pos.unwrap_or_default().to_homogeneous();
 
         Self {
             matrix: matrix.into(),
