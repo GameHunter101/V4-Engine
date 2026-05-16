@@ -52,8 +52,8 @@ pub struct MeshComponent<V: VertexDescriptor> {
 }
 
 impl<V: VertexDescriptor> MeshComponent<V> {
-    pub fn from_obj(path: &str, is_enabled: bool) -> Result<Self, tobj::LoadError> {
-        let (models, _materials) = tobj::load_obj(
+    pub async fn from_obj(path: &str, is_enabled: bool) -> Result<Self, tobj::LoadError> {
+        let (models, _materials) = tobj::tokio::load_obj(
             path,
             &tobj::LoadOptions {
                 single_index: true,
@@ -61,7 +61,7 @@ impl<V: VertexDescriptor> MeshComponent<V> {
                 ignore_points: true,
                 ignore_lines: true,
             },
-        )?;
+        ).await?;
 
         let model_count = models.len();
 

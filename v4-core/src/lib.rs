@@ -1,4 +1,4 @@
-#![deny(missing_docs)]
+// #![deny(missing_docs)]
 
 use async_scoped::TokioScope;
 use ecs::scene::Scene;

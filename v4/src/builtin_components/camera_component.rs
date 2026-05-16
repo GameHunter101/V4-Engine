@@ -196,12 +196,12 @@ impl RawCameraData {
 
         let matrix = projection_matrix * view_matrix;
 
-        let pos = pos.unwrap_or_default().to_homogeneous();
+        let raw_pos: [f32; 3] = pos.unwrap_or_default().into();
 
         Self {
             matrix: matrix.into(),
             inv_matrix: inverted_view_matrix.into(),
-            pos: pos.into(),
+            pos: [raw_pos[0], raw_pos[1], raw_pos[2], 1.0],
             padding: 0.0,
         }
     }
