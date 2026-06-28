@@ -278,6 +278,10 @@ impl Material {
         self.attachments.as_ref()
     }
 
+    pub fn attachments_mut(&mut self) -> &mut [ShaderAttachment] {
+        self.attachments.as_mut()
+    }
+
     pub fn uses_camera(&self) -> bool {
         self.pipeline_id.uses_camera
     }
