@@ -69,7 +69,7 @@ pub fn component_impl(args: TokenStream, item: TokenStream) -> TokenStream {
         fields
             .named
             .extend(Punctuated::<Field, Token![,]>::from_iter(
-                added_component_fields.clone().into_iter(),
+                added_component_fields.clone(),
             ));
     }
 
@@ -122,11 +122,7 @@ fn get_property_string(args: Punctuated<Meta, Token![,]>) -> Option<(String, Opt
     args.into_iter()
         .flat_map(|arg| match arg {
             Meta::NameValue(MetaNameValue { path, value, .. }) => {
-                if let Some(name) = path.get_ident() {
-                    Some((name.to_string(), Some(value)))
-                } else {
-                    None
-                }
+                path.get_ident().map(|name| (name.to_string(), Some(value)))
             }
             Meta::Path(Path { segments, .. }) => Some((segments[0].ident.to_string(), None)),
             _ => None,
@@ -187,7 +183,7 @@ fn builder_struct_construction(
             attrs: Vec::new(),
             ..field.clone()
         })
-        .chain(added_builder_fields.into_iter());
+        .chain(added_builder_fields);
 
     ItemStruct {
         ident: builder_ident,
@@ -530,10 +526,10 @@ fn get_all_defaults(all_fields: &[&Field]) -> TokenStream2 {
             if let Some(attr) = field.attrs.first() {
                 if attr.path().is_ident("default") {
                     if let Ok(expr) = attr.parse_args::<Expr>() {
-                        return quote! {#field_ident: #expr};
+                        quote! {#field_ident: #expr}
                     } else {
-                        return quote! {#field_ident: Default::default()};
-                    };
+                        quote! {#field_ident: Default::default()}
+                    }
                 } else {
                     panic!(
                         "Invalid field attribute '{}'",
@@ -541,7 +537,7 @@ fn get_all_defaults(all_fields: &[&Field]) -> TokenStream2 {
                     )
                 }
             } else {
-                return quote! {#field_ident: None};
+                quote! {#field_ident: None}
             }
         })
         .collect();
@@ -573,7 +569,7 @@ fn builder_construction(builder_ident: Ident, component_struct: &ItemStruct) -> 
     let (required_fields_generics_arr, [full_builder_generics, unset_builder_generics_no_bounds]) =
         generics_constructor(
             &required_fields_idents,
-            &component_struct,
+            component_struct,
             unset_type.clone(),
         );
 
@@ -593,14 +589,14 @@ fn builder_construction(builder_ident: Ident, component_struct: &ItemStruct) -> 
 
     let component_ident = &component_struct.ident;
     let component_generics = &component_struct.generics;
-    let component_generics_no_bounds = remove_generics_bounds(&component_generics);
+    let component_generics_no_bounds = remove_generics_bounds(component_generics);
 
     let build_method = build_method_constructor(
         &full_builder_generics,
         &required_fields_generics_arr,
         &required_fields_trait_idents,
         &builder_ident,
-        &component_struct,
+        component_struct,
         &required_fields,
         &optional_fields,
     );

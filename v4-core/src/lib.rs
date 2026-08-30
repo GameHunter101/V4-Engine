@@ -1,4 +1,6 @@
 // #![deny(missing_docs)]
+#![allow(clippy::type_complexity)]
+#![allow(clippy::too_many_arguments)]
 
 use async_scoped::TokioScope;
 use ecs::scene::Scene;
@@ -28,9 +30,11 @@ use winit::{
 };
 use winit_input_helper::WinitInputHelper;
 
+use thiserror::Error;
+
 use crate::{
-    engine_management::rendering_management::RenderingManagerDetails,
-    engine_support::core_communication_support::CoreCommunication,
+    engine_management::{pipeline::PipelineError, rendering_management::RenderingManagerDetails},
+    engine_support::core_communication_support::{CommunicationError, CoreCommunication},
 };
 
 pub mod engine_management;
@@ -38,6 +42,16 @@ pub mod engine_management;
 pub mod engine_support;
 
 pub mod ecs;
+
+#[derive(Error, Debug)]
+pub enum V4Error {
+    #[error("An error occured in the main loop.")]
+    MainLoopError(winit::error::EventLoopError),
+    #[error("Failed to create event loop.")]
+    EventLoopCreationError(winit::error::EventLoopError),
+    #[error("Failed to create core communication utilities.")]
+    CoreCommunicationError(CommunicationError),
+}
 
 /// The main engine struct. Contains the state for the whole engine.
 #[derive(Debug)]
@@ -96,12 +110,14 @@ impl V4 {
         V4Builder::default()
     }
 
-    pub async fn main_loop(mut self) {
+    pub async fn main_loop(mut self) -> Result<(), V4Error> {
         self.app.details.initialization_time = Instant::now();
 
-        self.event_loop
-            .run_app(self.app)
-            .expect("An error occured in the main loop.");
+        if let Err(err) = self.event_loop.run_app(self.app) {
+            Err(V4Error::MainLoopError(err))
+        } else {
+            Ok(())
+        }
     }
 
     pub fn attach_scene(&mut self, scene: Scene) -> usize {
@@ -124,7 +140,7 @@ impl V4 {
         render_format: TextureFormat,
         active_scene: &mut Scene,
         pipelines: &mut HashMap<PipelineId, RenderPipeline>,
-    ) {
+    ) -> Result<(), PipelineError> {
         if active_scene.new_pipelines_needed {
             let active_scene_pipelines = active_scene.get_pipeline_ids();
             for pipeline_id in active_scene_pipelines {
@@ -141,12 +157,14 @@ impl V4 {
                             render_format,
                             pipeline_id.spirv_vertex_shader,
                             pipeline_id.spirv_fragment_shader,
-                        ),
+                        )?,
                     );
                 }
             }
             active_scene.new_pipelines_needed = false;
         }
+
+        Ok(())
     }
 }
 
@@ -181,11 +199,13 @@ impl V4App {
 
 impl ApplicationHandler for V4App {
     fn can_create_surfaces(&mut self, event_loop: &dyn ActiveEventLoop) {
-        let Ok(window) = event_loop.create_window(self.window_attributes.clone()) else {
-            panic!("Failed to create window.")
-        };
+        let window = event_loop
+            .create_window(self.window_attributes.clone())
+            .expect("Failed to create window.");
 
-        self.rendering_manager.initialize_surface_data(&*window);
+        self.rendering_manager
+            .initialize_surface_data(&*window)
+            .unwrap();
 
         let device = self.rendering_manager.device();
         let queue = self.rendering_manager.queue();
@@ -277,8 +297,7 @@ impl ApplicationHandler for V4App {
                 if self.scenes.is_empty() {
                     return;
                 }
-                egui_platform
-                    .update_time(self.details.initialization_time.elapsed().as_secs_f64());
+                egui_platform.update_time(self.details.initialization_time.elapsed().as_secs_f64());
                 let rendering_manager = &mut self.rendering_manager;
                 if !self.initialized_scene {
                     let device = rendering_manager.device();
@@ -322,18 +341,31 @@ impl ApplicationHandler for V4App {
                 let device = rendering_manager.device();
                 let queue = rendering_manager.queue();
 
-                let action_queue = scene.update(device, queue, &self.input_manager, &self.details);
-                pollster::block_on(scene.execute_action_queue(action_queue, device, queue));
+                let action_queue = scene
+                    .update(device, queue, &self.input_manager, &self.details)
+                    .unwrap();
+                pollster::block_on(scene.execute_action_queue(action_queue, device, queue))
+                    .unwrap();
 
                 scene.update_materials(device, queue, &self.input_manager, &self.details);
-                rendering_manager.individual_compute_execution(scene.computes());
+
+                for compute in scene
+                    .computes()
+                    .iter()
+                    .filter(|compute| compute.continuous_execution())
+                {
+                    rendering_manager
+                        .individual_compute_execution(compute)
+                        .unwrap();
+                }
 
                 V4::create_new_pipelines(
                     device,
                     rendering_manager.format().unwrap(),
                     scene,
                     &mut self.pipelines,
-                );
+                )
+                .unwrap();
 
                 pollster::block_on(rendering_manager.render(
                     scene,
@@ -342,7 +374,8 @@ impl ApplicationHandler for V4App {
                     egui_platform,
                     self.window.as_deref(),
                     self.egui_clear_color,
-                ));
+                ))
+                .unwrap();
 
                 self.details.frames_elapsed += 1;
                 self.details.last_frame_instant = Instant::now();
@@ -467,8 +500,9 @@ impl V4Builder {
         self
     }
 
-    pub async fn build(self) -> V4 {
-        let event_loop = EventLoop::new().expect("Failed to create event loop.");
+    pub async fn build(self) -> Result<V4, V4Error> {
+        let event_loop = EventLoop::new().map_err(V4Error::EventLoopCreationError)?;
+
         event_loop.set_control_flow(winit::event_loop::ControlFlow::Poll);
         let input_manager = WinitInputHelper::new();
         let window_attributes = self.window_attributes;
@@ -499,11 +533,12 @@ impl V4Builder {
             pipelines: HashMap::new(),
             font_state: None,
             hide_cursor: self.hide_cursor,
-            core_communication: CoreCommunication::default(),
+            core_communication: CoreCommunication::new()
+                .map_err(V4Error::CoreCommunicationError)?,
             egui_platform: None,
             egui_clear_color: self.egui_clear_color,
         };
 
-        V4 { event_loop, app }
+        Ok(V4 { event_loop, app })
     }
 }

@@ -6,7 +6,7 @@ use v4_core::{
         component::{Component, ComponentId},
         compute::Compute,
         entity::EntityId,
-        scene::{Scene, Workload},
+        scene::{Scene, SceneError, Workload},
     },
     engine_management::{
         engine_action::{
@@ -16,7 +16,7 @@ use v4_core::{
         font_management::{TextAttributes, TextComponentProperties, TextDisplayInfo},
     },
 };
-use wgpu::{util::DeviceExt, Device, Queue};
+use wgpu::{Device, Queue, util::DeviceExt};
 
 use crate::builtin_components::camera_component::RawCameraData;
 
@@ -33,8 +33,15 @@ impl Debug for WorkloadAction {
 
 #[async_trait::async_trait]
 impl Action for WorkloadAction {
-    async fn execute_async(self: Box<Self>, scene: &mut Scene, _device: &Device, _queue: &Queue) {
-        scene.attach_workload(self.0, self.1).await;
+    async fn execute_async(
+        self: Box<Self>,
+        scene: &mut Scene,
+        _device: &Device,
+        _queue: &Queue,
+    ) -> Result<(), SceneError> {
+        scene.attach_workload(self.0, self.1).await?;
+
+        Ok(())
     }
 }
 
@@ -43,8 +50,13 @@ pub struct WorkloadOutputFreeAction(pub ComponentId, pub usize);
 
 #[async_trait::async_trait]
 impl Action for WorkloadOutputFreeAction {
-    async fn execute_async(self: Box<Self>, scene: &mut Scene, _device: &Device, _queue: &Queue) {
-        scene.free_workload_output(self.0, self.1).await;
+    async fn execute_async(
+        self: Box<Self>,
+        scene: &mut Scene,
+        _device: &Device,
+        _queue: &Queue,
+    ) -> Result<(), SceneError> {
+        scene.free_workload_output(self.0, self.1).await
     }
 }
 
@@ -52,7 +64,12 @@ impl Action for WorkloadOutputFreeAction {
 pub struct EntityToggleAction(pub EntityId, pub Option<bool>);
 
 impl Action for EntityToggleAction {
-    fn execute(self: Box<Self>, scene: &mut Scene, _device: &Device, _queue: &Queue) {
+    fn execute(
+        self: Box<Self>,
+        scene: &mut Scene,
+        _device: &Device,
+        _queue: &Queue,
+    ) -> Result<(), SceneError> {
         let entity = scene.get_entity_mut(self.0);
         if let Some(entity) = entity {
             match self.1 {
@@ -60,6 +77,8 @@ impl Action for EntityToggleAction {
                 None => entity.toggle_enabled_state(),
             }
         }
+
+        Ok(())
     }
 }
 
@@ -67,7 +86,12 @@ impl Action for EntityToggleAction {
 pub struct ComponentToggleAction(pub ComponentId, pub Option<bool>);
 
 impl Action for ComponentToggleAction {
-    fn execute(self: Box<Self>, scene: &mut Scene, _device: &Device, _queue: &Queue) {
+    fn execute(
+        self: Box<Self>,
+        scene: &mut Scene,
+        _device: &Device,
+        _queue: &Queue,
+    ) -> Result<(), SceneError> {
         let component = scene.get_component_mut(self.0);
         if let Some(component) = component {
             let component_enabled = component.is_enabled();
@@ -76,6 +100,8 @@ impl Action for ComponentToggleAction {
                 None => component.set_enabled_state(!component_enabled),
             }
         }
+
+        Ok(())
     }
 }
 
@@ -86,14 +112,21 @@ pub struct RegisterUiComponentAction {
 }
 
 impl Action for RegisterUiComponentAction {
-    fn execute(self: Box<Self>, scene: &mut Scene, _device: &Device, _queue: &Queue) {
+    fn execute(
+        self: Box<Self>,
+        scene: &mut Scene,
+        _device: &Device,
+        _queue: &Queue,
+    ) -> Result<(), SceneError> {
         if let Some(text_component_properties) = self.text_component_properties {
             scene.send_engine_action(Box::new(CreateTextBufferEngineAction {
                 component_id: self.component_id,
                 text_component_properties,
-            }));
+            }))?;
         }
         scene.register_ui_component(self.component_id);
+
+        Ok(())
     }
 }
 
@@ -107,7 +140,12 @@ pub struct UpdateTextComponentAction {
 }
 
 impl Action for UpdateTextComponentAction {
-    fn execute(self: Box<Self>, scene: &mut Scene, _device: &Device, _queue: &Queue) {
+    fn execute(
+        self: Box<Self>,
+        scene: &mut Scene,
+        _device: &Device,
+        _queue: &Queue,
+    ) -> Result<(), SceneError> {
         /* scene.update_text_buffer(
             self.component_id,
             self.text,
@@ -121,7 +159,7 @@ impl Action for UpdateTextComponentAction {
             text_attributes: self.text_attributes,
             text_metrics: self.text_metrics,
             text_display_info: self.text_display_info,
-        }));
+        }))
     }
 }
 
@@ -129,10 +167,17 @@ impl Action for UpdateTextComponentAction {
 pub struct SetEntityActiveMaterialAction(pub EntityId, pub ComponentId);
 
 impl Action for SetEntityActiveMaterialAction {
-    fn execute(self: Box<Self>, scene: &mut Scene, _device: &Device, _queue: &Queue) {
+    fn execute(
+        self: Box<Self>,
+        scene: &mut Scene,
+        _device: &Device,
+        _queue: &Queue,
+    ) -> Result<(), SceneError> {
         if let Some(entity) = scene.get_entity_mut(self.0) {
             entity.set_active_material(self.1);
         }
+
+        Ok(())
     }
 }
 
@@ -146,14 +191,21 @@ pub struct CreateEntityAction {
 }
 
 impl Action for CreateEntityAction {
-    fn execute(self: Box<Self>, scene: &mut Scene, _device: &Device, _queue: &Queue) {
+    fn execute(
+        self: Box<Self>,
+        scene: &mut Scene,
+        _device: &Device,
+        _queue: &Queue,
+    ) -> Result<(), SceneError> {
         scene.create_entity(
             self.entity_parent_id,
             self.components,
             self.computes,
             self.active_material,
             self.is_enabled,
-        );
+        )?;
+
+        Ok(())
     }
 }
 
@@ -161,8 +213,15 @@ impl Action for CreateEntityAction {
 pub struct SetActiveCameraAction(pub ComponentId);
 
 impl Action for SetActiveCameraAction {
-    fn execute(self: Box<Self>, scene: &mut Scene, _device: &Device, _queue: &Queue) {
+    fn execute(
+        self: Box<Self>,
+        scene: &mut Scene,
+        _device: &Device,
+        _queue: &Queue,
+    ) -> Result<(), SceneError> {
         scene.set_active_camera(Some(self.0));
+
+        Ok(())
     }
 }
 
@@ -170,8 +229,15 @@ impl Action for SetActiveCameraAction {
 pub struct DisableCameraAction;
 
 impl Action for DisableCameraAction {
-    fn execute(self: Box<Self>, scene: &mut Scene, _device: &Device, _queue: &Queue) {
+    fn execute(
+        self: Box<Self>,
+        scene: &mut Scene,
+        _device: &Device,
+        _queue: &Queue,
+    ) -> Result<(), SceneError> {
         scene.set_active_camera(None);
+
+        Ok(())
     }
 }
 
@@ -179,15 +245,20 @@ impl Action for DisableCameraAction {
 pub struct UpdateCameraBufferAction(pub RawCameraData);
 
 impl Action for UpdateCameraBufferAction {
-    fn execute(self: Box<Self>, scene: &mut Scene, device: &Device, queue: &Queue) {
+    fn execute(
+        self: Box<Self>,
+        scene: &mut Scene,
+        device: &Device,
+        queue: &Queue,
+    ) -> Result<(), SceneError> {
         let arr = [self.0];
         let buf = bytemuck::cast_slice(&arr);
         if let Some(camera_buffer) = scene.active_camera_buffer() {
-            queue.write_buffer(camera_buffer, 0, &buf);
+            queue.write_buffer(camera_buffer, 0, buf);
         } else {
             let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some(&format!("Scene {} Camera Buffer", scene.scene_index())),
-                contents: &buf,
+                contents: buf,
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             });
             let bind_group_layout =
@@ -216,6 +287,8 @@ impl Action for UpdateCameraBufferAction {
             scene.set_active_camera_bind_group(Some(bind_group));
             scene.set_active_camera_buffer(Some(buffer));
         }
+
+        Ok(())
     }
 }
 
@@ -223,8 +296,13 @@ impl Action for UpdateCameraBufferAction {
 pub struct SetCursorLockAction(pub bool);
 
 impl Action for SetCursorLockAction {
-    fn execute(self: Box<Self>, scene: &mut Scene, _device: &Device, _queue: &Queue) {
-        scene.send_engine_action(Box::new(SetCursorLockEngineAction(self.0)));
+    fn execute(
+        self: Box<Self>,
+        scene: &mut Scene,
+        _device: &Device,
+        _queue: &Queue,
+    ) -> Result<(), SceneError> {
+        scene.send_engine_action(Box::new(SetCursorLockEngineAction(self.0)))
     }
 }
 
@@ -232,7 +310,12 @@ impl Action for SetCursorLockAction {
 pub struct SetCursorPositionAction(pub winit::dpi::Position);
 
 impl Action for SetCursorPositionAction {
-    fn execute(self: Box<Self>, scene: &mut Scene, _device: &Device, _queue: &Queue) {
-        scene.send_engine_action(Box::new(SetCursorPositionEngineAction(self.0)));
+    fn execute(
+        self: Box<Self>,
+        scene: &mut Scene,
+        _device: &Device,
+        _queue: &Queue,
+    ) -> Result<(), SceneError> {
+        scene.send_engine_action(Box::new(SetCursorPositionEngineAction(self.0)))
     }
 }

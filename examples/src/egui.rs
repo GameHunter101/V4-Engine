@@ -27,7 +27,8 @@ pub async fn main() {
         })
         .egui_clear_color(wgpu::Color::RED)
         .build()
-        .await;
+        .await
+        .unwrap();
 
     scene! {
         scene: egui_scene,
@@ -40,7 +41,7 @@ pub async fn main() {
 
     engine.attach_scene(egui_scene);
 
-    engine.main_loop().await;
+    engine.main_loop().await.unwrap();
 }
 
 #[component(custom_debug)]

@@ -74,7 +74,7 @@ impl EngineAction for SetCursorPositionEngineAction
     fn execute(self: Box<Self>, engine: V4Mutable) {
         engine
             .window
-            .set_cursor_position(self.0.clone())
+            .set_cursor_position(self.0)
             .unwrap_or_else(|_| panic!("Error setting cursor to position {:?}", self.0));
     }
 }

@@ -290,7 +290,7 @@ impl Material {
         &self.pipeline_id
     }
 
-    pub fn get_immediate_data<'a>(&'a self) -> &'a [u8] {
+    pub fn get_immediate_data(&self) -> &[u8] {
         &self.immediate_data
     }
 
@@ -392,7 +392,8 @@ impl ComponentSystem for Material {
         other_components: &[&Component],
     ) {
         let bind_group_offset = if self.uses_camera() { 1 } else { 0 };
-        render_pass.set_bind_group(bind_group_offset, self.bind_group.as_ref().expect("The material bind group was not created. Remember to initialize the material before executing it."), &[]);
+        let bind_group = self.bind_group.as_ref().expect("The material bind group was not created. Remember to initialize the material before executing it.");
+        render_pass.set_bind_group(bind_group_offset, bind_group, &[]);
 
         for range in &self.component_ranges {
             for component in &other_components[range.clone()] {

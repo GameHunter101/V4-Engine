@@ -44,7 +44,8 @@ pub async fn main() {
         })
         .hide_cursor(true)
         .build()
-        .await;
+        .await
+        .unwrap();
 
     let rendering_manager = engine.rendering_manager();
     let device = rendering_manager.device();
@@ -105,15 +106,15 @@ pub async fn main() {
             }),
         ])
         .workgroup_counts(v4::ecs::compute::WorkgroupCounts::Static(
-            (1024 + 15) / 16,
-            (1024 + 15) / 16,
+            1024_u32.div_ceil(16),
+            1024_u32.div_ceil(16),
             6,
         ))
-        .build();
+        .build().unwrap();
 
     skybox_compute.initialize(device);
 
-    rendering_manager.individual_compute_execution(&[skybox_compute]);
+    rendering_manager.individual_compute_execution(&skybox_compute).unwrap();
 
     scene! {
         scene: hello_scene,
@@ -254,7 +255,7 @@ pub async fn main() {
 
     engine.attach_scene(hello_scene);
 
-    engine.main_loop().await;
+    engine.main_loop().await.unwrap();
 }
 
 #[repr(C)]
@@ -328,8 +329,7 @@ impl ComponentSystem for HideComponent {
             } */
             if let Some(mat) = materials
                 .iter_mut()
-                .filter(|mat| mat.id() == self.immediate_mat)
-                .next()
+                .find(|mat| mat.id() == self.immediate_mat)
             {
                 mat.set_immediate_data(bytemuck::cast_slice(&[if self.showing {
                     1.0_f32

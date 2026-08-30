@@ -1,11 +1,19 @@
 use std::borrow::Cow;
 
 use wgpu::{
-    util::make_spirv, BindGroupLayout, Device, RenderPipeline, ShaderStages, TextureFormat,
-    VertexBufferLayout,
+    BindGroupLayout, Device, RenderPipeline, ShaderStages, TextureFormat, VertexBufferLayout,
+    util::make_spirv,
 };
 
+use thiserror::Error;
+
 use crate::engine_support::texture_support::TextureBundle;
+
+#[derive(Error, Debug)]
+pub enum PipelineError {
+    #[error("Failed to read the shader at '{path}'")]
+    ShaderModuleError { path: String, err: std::io::Error },
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum PipelineAttachments {
@@ -64,14 +72,7 @@ impl Default for GeometryDetails {
     }
 }
 
-pub fn create_render_pipeline(
-    device: &Device,
-    id: &PipelineId,
-    attachment_bind_group_layout: Option<&BindGroupLayout>,
-    render_format: TextureFormat,
-    is_vert_spirv: bool,
-    is_frag_spirv: bool,
-) -> RenderPipeline {
+fn create_special_bind_group_layouts(device: &Device, id: &PipelineId) -> Vec<BindGroupLayout> {
     let camera_layout = if id.uses_camera {
         Some(
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -120,21 +121,25 @@ pub fn create_render_pipeline(
         None
     };
 
-    let bind_group_layouts: Vec<&wgpu::BindGroupLayout> =
-        if let Some(camera_layout) = &camera_layout {
-            vec![camera_layout]
-                .into_iter()
-                .chain(attachment_bind_group_layout)
-                .collect()
-        } else if let Some(screen_space_layout) = &screen_space_layout {
-            vec![screen_space_layout]
-                .into_iter()
-                .chain(attachment_bind_group_layout)
-                .collect()
-        } else {
-            attachment_bind_group_layout.as_ref().map_or_else(|| Vec::new(), |x| vec![*x])
-        };
+    camera_layout
+        .into_iter()
+        .chain(screen_space_layout)
+        .collect()
+}
 
+pub fn create_render_pipeline(
+    device: &Device,
+    id: &PipelineId,
+    attachment_bind_group_layout: Option<&BindGroupLayout>,
+    render_format: TextureFormat,
+    is_vert_spirv: bool,
+    is_frag_spirv: bool,
+) -> Result<RenderPipeline, PipelineError> {
+    let special_bind_group_layouts = create_special_bind_group_layouts(device, id);
+    let bind_group_layouts: Vec<&BindGroupLayout> = special_bind_group_layouts
+        .iter()
+        .chain(attachment_bind_group_layout)
+        .collect();
 
     let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some(&format!("{id:?} Pipeline Layout")),
@@ -143,82 +148,75 @@ pub fn create_render_pipeline(
     });
 
     let vertex_shader_module =
-        load_shader_module_descriptor(device, &id.vertex_shader, is_vert_spirv);
-    if let Err(error) = vertex_shader_module {
-        panic!(
-            "Vertex shader error for shader {:?}: {error}",
-            id.vertex_shader
-        );
-    }
-    let vertex_shader_module = vertex_shader_module.unwrap();
+        load_shader_module_descriptor(device, &id.vertex_shader, is_vert_spirv)?;
 
     let fragment_shader_module =
-        load_shader_module_descriptor(device, &id.fragment_shader, is_frag_spirv);
-    if let Err(error) = fragment_shader_module {
-        panic!(
-            "Fragment shader error for shader {:?}: {error}",
-            id.fragment_shader
-        );
-    }
-    let fragment_shader_module = fragment_shader_module.unwrap();
+        load_shader_module_descriptor(device, &id.fragment_shader, is_frag_spirv)?;
 
-    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        label: Some(&format!("{id:?} Pipeline")),
-        layout: Some(&pipeline_layout),
-        vertex: wgpu::VertexState {
-            module: &vertex_shader_module,
-            entry_point: Some("main"),
-            compilation_options: Default::default(),
-            buffers: &id.vertex_layouts,
-        },
-        primitive: wgpu::PrimitiveState {
-            topology: id.geometry_details.topology,
-            strip_index_format: id.geometry_details.strip_index_format,
-            front_face: id.geometry_details.front_face,
-            cull_mode: id.geometry_details.cull_mode,
-            unclipped_depth: false,
-            polygon_mode: id.geometry_details.polygon_mode,
-            conservative: false,
-        },
-        depth_stencil: if id.is_screen_space {
-            None
-        } else {
-            Some(wgpu::DepthStencilState {
-                format: TextureBundle::DEPTH_FORMAT,
-                depth_write_enabled: true,
-                depth_compare: wgpu::CompareFunction::LessEqual,
-                stencil: wgpu::StencilState::default(),
-                bias: wgpu::DepthBiasState::default(),
-            })
-        },
-        multisample: wgpu::MultisampleState {
-            count: 1,
-            mask: !0,
-            alpha_to_coverage_enabled: false,
-        },
-        fragment: Some(wgpu::FragmentState {
-            module: &fragment_shader_module,
-            entry_point: Some("main"),
-            compilation_options: Default::default(),
-            targets: &[Some(wgpu::ColorTargetState {
-                format: render_format,
-                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                write_mask: wgpu::ColorWrites::ALL,
-            })],
+    Ok(
+        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some(&format!("{id:?} Pipeline")),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &vertex_shader_module,
+                entry_point: Some("main"),
+                compilation_options: Default::default(),
+                buffers: &id.vertex_layouts,
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: id.geometry_details.topology,
+                strip_index_format: id.geometry_details.strip_index_format,
+                front_face: id.geometry_details.front_face,
+                cull_mode: id.geometry_details.cull_mode,
+                unclipped_depth: false,
+                polygon_mode: id.geometry_details.polygon_mode,
+                conservative: false,
+            },
+            depth_stencil: if id.is_screen_space {
+                None
+            } else {
+                Some(wgpu::DepthStencilState {
+                    format: TextureBundle::DEPTH_FORMAT,
+                    depth_write_enabled: true,
+                    depth_compare: wgpu::CompareFunction::LessEqual,
+                    stencil: wgpu::StencilState::default(),
+                    bias: wgpu::DepthBiasState::default(),
+                })
+            },
+            multisample: wgpu::MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &fragment_shader_module,
+                entry_point: Some("main"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: render_format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multiview_mask: None,
+            cache: None,
         }),
-        multiview_mask: None,
-        cache: None,
-    })
+    )
 }
 
 pub fn load_shader_module_descriptor(
     device: &Device,
     shader: &PipelineShader,
     spirv: bool,
-) -> Result<wgpu::ShaderModule, std::io::Error> {
+) -> Result<wgpu::ShaderModule, PipelineError> {
     match shader {
         PipelineShader::Path(shader_path) => {
-            let shader_contents_bytes = std::fs::read(shader_path)?;
+            let shader_contents_bytes =
+                std::fs::read(shader_path).map_err(|err| PipelineError::ShaderModuleError {
+                    path: shader_path.to_string(),
+                    err,
+                })?;
+
             Ok(device.create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: None,
                 source: if spirv {

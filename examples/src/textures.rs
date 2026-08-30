@@ -7,7 +7,7 @@ use v4::{
 
 #[tokio::main]
 pub async fn main() {
-    let mut engine = V4::builder().build().await;
+    let mut engine = V4::builder().build().await.unwrap();
     let rendering_manager = engine.rendering_manager();
     let device = rendering_manager.device();
     let queue = rendering_manager.queue();
@@ -64,7 +64,7 @@ pub async fn main() {
 
     engine.attach_scene(scene);
 
-    engine.main_loop().await;
+    engine.main_loop().await.unwrap();
 }
 
 #[repr(C)]

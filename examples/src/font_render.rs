@@ -28,7 +28,8 @@ pub async fn main() {
                 .with_title("V4 Font Render Example"),
         )
         .build()
-        .await;
+        .await
+        .unwrap();
 
     scene! {
         "main" = {
@@ -41,7 +42,7 @@ pub async fn main() {
 
     engine.attach_scene(scene);
 
-    engine.main_loop().await;
+    engine.main_loop().await.unwrap();
 }
 
 impl ComponentSystem for TextComponent {
@@ -114,9 +115,9 @@ impl ComponentSystem for ToggleComponent {
         let text = input_manager.text();
 
         if !text.is_empty()
-            && text
-                .iter()
-                .any(|c| *c == winit::keyboard::Key::Named(winit::keyboard::NamedKey::Escape))
+            && text.contains(&winit::keyboard::Key::Named(
+                winit::keyboard::NamedKey::Escape,
+            ))
         {
             return vec![Box::new(v4::builtin_actions::ComponentToggleAction(
                 self.text_component,

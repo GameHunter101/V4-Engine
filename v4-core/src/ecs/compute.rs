@@ -5,13 +5,27 @@ use wgpu::{
     Device, ShaderStages,
 };
 
-use crate::engine_management::pipeline::{PipelineShader, load_shader_module_descriptor};
+use crate::engine_management::pipeline::{
+    PipelineError, PipelineShader, load_shader_module_descriptor,
+};
 
 use super::{
     component::{ComponentDetails, ComponentId, ComponentSystem},
     entity::EntityId,
     material::ShaderAttachment,
 };
+
+use thiserror::Error;
+
+#[derive(Error, Debug)]
+pub enum ComputeError {
+    #[error(
+        "The compute pipeline was not created. Remember to initialize the compute before executing it. (Compute {0})"
+    )]
+    PipelineNotInitialized(ComponentId),
+    #[error("No workgroup counts provided.")]
+    NoWorkgroupCounts,
+}
 
 pub trait DynamicWorkgroupCounts: std::fmt::Debug + Send + Sync {
     fn counts(&self) -> (u32, u32, u32);
@@ -20,7 +34,7 @@ pub trait DynamicWorkgroupCounts: std::fmt::Debug + Send + Sync {
 #[derive(Debug)]
 pub enum WorkgroupCounts {
     Static(u32, u32, u32),
-    Dynamic(Box<dyn DynamicWorkgroupCounts>)
+    Dynamic(Box<dyn DynamicWorkgroupCounts>),
 }
 
 #[derive(Debug)]
@@ -37,12 +51,14 @@ pub struct Compute {
     is_initialized: bool,
     parent_entity: EntityId,
     iterate_count: usize,
+    continuous_execution: bool,
 }
 
 impl Compute {
     pub fn builder() -> ComputeBuilder {
         ComputeBuilder::default()
     }
+
     fn create_bind_group_layout_entry(
         attachment: &ShaderAttachment,
         binding: u32,
@@ -116,7 +132,7 @@ impl Compute {
         shader_path: &'static str,
         compute_id: ComponentId,
         is_spirv: bool,
-    ) -> ComputePipeline {
+    ) -> Result<ComputePipeline, PipelineError> {
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some(&format!("Compute {compute_id} pipeline layout")),
             bind_group_layouts: &[bind_group_layout],
@@ -124,29 +140,37 @@ impl Compute {
         });
 
         let module =
-            load_shader_module_descriptor(device, &PipelineShader::Path(shader_path), is_spirv)
-                .unwrap();
+            load_shader_module_descriptor(device, &PipelineShader::Path(shader_path), is_spirv)?;
 
-        device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some(&format!("Compute {compute_id} pipeline")),
-            layout: Some(&layout),
-            module: &module,
-            entry_point: Some("main"),
-            compilation_options: Default::default(),
-            cache: None,
-        })
+        Ok(
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some(&format!("Compute {compute_id} pipeline")),
+                layout: Some(&layout),
+                module: &module,
+                entry_point: Some("main"),
+                compilation_options: Default::default(),
+                cache: None,
+            }),
+        )
     }
 
-    pub fn calculate(&self, compute_pass: &mut ComputePass) {
-        compute_pass.set_pipeline(self.pipeline.as_ref().expect(
-            "The compute pipeline was not created. Remember to initialize the compute before executing it.",
-        ));
-        compute_pass.set_bind_group(0, self.bind_group.as_ref().expect("The compute bind group was not created. Remember to initialize the compute before executing it."), &[]);
-        let (x, y, z) = match &self.workgroup_counts {
-            WorkgroupCounts::Static(x, y, z) => (*x, *y, *z),
-            WorkgroupCounts::Dynamic(func) => func.counts(),
-        };
-        compute_pass.dispatch_workgroups(x, y, z);
+    pub fn calculate(&self, compute_pass: &mut ComputePass) -> Result<(), ComputeError> {
+        if let (Some(pipeline), Some(bind_group)) =
+            (self.pipeline.as_ref(), self.bind_group.as_ref())
+        {
+            compute_pass.set_pipeline(pipeline);
+
+            compute_pass.set_bind_group(0, bind_group, &[]);
+            let (x, y, z) = match &self.workgroup_counts {
+                WorkgroupCounts::Static(x, y, z) => (*x, *y, *z),
+                WorkgroupCounts::Dynamic(func) => func.counts(),
+            };
+            compute_pass.dispatch_workgroups(x, y, z);
+        } else {
+            return Err(ComputeError::PipelineNotInitialized(self.id));
+        }
+
+        Ok(())
     }
 
     pub fn attachments(&self) -> &[ShaderAttachment] {
@@ -163,6 +187,10 @@ impl Compute {
 
     pub fn set_iterate_count(&mut self, new_iterate_count: usize) {
         self.iterate_count = new_iterate_count;
+    }
+
+    pub fn continuous_execution(&self) -> bool {
+        self.continuous_execution
     }
 }
 
@@ -200,7 +228,7 @@ impl ComponentSystem for Compute {
             self.shader_path,
             self.id,
             self.is_spirv,
-        ));
+        ).unwrap());
 
         self.bind_group_layout = Some(bind_group_layout);
         self.bind_group = Some(bind_group);
@@ -249,6 +277,7 @@ pub struct ComputeBuilder {
     id: ComponentId,
     enabled: bool,
     iterate_count: usize,
+    continuous_execution: bool,
 }
 
 impl Default for ComputeBuilder {
@@ -261,6 +290,7 @@ impl Default for ComputeBuilder {
             id: 0,
             enabled: true,
             iterate_count: 1,
+            continuous_execution: true,
         }
     }
 }
@@ -301,14 +331,23 @@ impl ComputeBuilder {
         self
     }
 
-    pub fn build(self) -> Compute {
-        Compute {
+    pub fn continuous_execution(mut self, continuous_execution: bool) -> Self {
+        self.continuous_execution = continuous_execution;
+        self
+    }
+
+    pub fn build(self) -> Result<Compute, ComputeError> {
+        let workgroup_counts = if let Some(counts) = self.workgroup_counts {
+            Ok(counts)
+        } else {
+            Err(ComputeError::NoWorkgroupCounts)
+        }?;
+
+        Ok(Compute {
             attachments: self.attachments,
             shader_path: self.shader_path,
             is_spirv: self.is_spirv,
-            workgroup_counts: self
-                .workgroup_counts
-                .expect("No workgroup counts function provided"),
+            workgroup_counts,
             bind_group_layout: None,
             bind_group: None,
             pipeline: None,
@@ -323,6 +362,7 @@ impl ComputeBuilder {
             is_initialized: false,
             parent_entity: 0,
             iterate_count: self.iterate_count,
-        }
+            continuous_execution: self.continuous_execution,
+        })
     }
 }
