@@ -9,7 +9,7 @@ use v4::{
 
 #[tokio::main]
 pub async fn main() {
-    let mut engine = V4::builder().build().await;
+    let mut engine = V4::builder().build().await.unwrap();
 
     let device = engine.rendering_manager().device();
 
@@ -45,5 +45,5 @@ pub async fn main() {
 
     engine.attach_scene(thing);
 
-    engine.main_loop().await;
+    engine.main_loop().await.unwrap();
 }

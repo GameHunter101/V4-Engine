@@ -171,13 +171,13 @@ impl Parse for SceneDescriptor {
             Ok(transformed_entity)
         }).collect::<syn::Result<Vec<TransformedEntityDescriptor>>>()?;
 
-        if let Some(active_camera_ident) = active_camera.as_ref() {
-            if !idents.contains_key(active_camera_ident) {
-                return Err(syn::Error::new(
-                    active_camera_ident.span(),
-                    "The identifier was not found. Make sure to specify which the identifier on an entity",
-                ));
-            }
+        if let Some(active_camera_ident) = active_camera.as_ref()
+            && !idents.contains_key(active_camera_ident)
+        {
+            return Err(syn::Error::new(
+                active_camera_ident.span(),
+                "The identifier was not found. Make sure to specify which the identifier on an entity",
+            ));
         }
 
         Ok(Self {
@@ -496,24 +496,21 @@ impl ComponentDescriptor {
 
         if let Some(constructor) = &self.custom_constructor {
             let params = constructor.parameters.iter().map(|param| {
-                if let Expr::Call(ExprCall { func, args, .. }) = param {
-                    if let Expr::Path(ExprPath { path, .. }) = *func.clone() {
-                        if let Some(possible_ident) = path.get_ident() {
-                            if &possible_ident.to_string() == "ident" {
-                                if let Some(Expr::Lit(lit)) = args.first() {
-                                    let id = idents.get(&lit.lit).unwrap();
-                                    return syn::Expr::Verbatim(quote! {#id});
-                                }
-                            }
-                        }
-                    }
+                if let Expr::Call(ExprCall { func, args, .. }) = param
+                    && let Expr::Path(ExprPath { path, .. }) = *func.clone()
+                    && let Some(possible_ident) = path.get_ident()
+                    && &possible_ident.to_string() == "ident"
+                    && let Some(Expr::Lit(lit)) = args.first()
+                {
+                    let id = idents.get(&lit.lit).unwrap();
+                    return syn::Expr::Verbatim(quote! {#id});
                 }
 
-                return param.clone();
+                param.clone()
             });
 
             let new_constructor = ComponentConstructor {
-                parameters: Punctuated::from_iter(params.into_iter()),
+                parameters: Punctuated::from_iter(params),
                 ..(constructor.clone())
             };
 
@@ -643,17 +640,17 @@ impl Parse for ComponentConstructor {
 
                 let fork = input.fork();
                 // Parse second token in fork to check for ident (constructor.ident("Temp ident"))
-                if let Ok(_) = fork.parse::<Token![.]>() {
-                    if let Ok(ident_func_name) = fork.parse::<Ident>() {
-                        if &ident_func_name.to_string() == "ident" {
-                            let ident_buf;
-                            parenthesized!(ident_buf in fork);
-                            ident = Some(ident_buf.parse()?);
-                            tail_getter(&fork)?;
-                        }
+                if fork.parse::<Token![.]>().is_ok() {
+                    if let Ok(ident_func_name) = fork.parse::<Ident>()
+                        && &ident_func_name.to_string() == "ident"
+                    {
+                        let ident_buf;
+                        parenthesized!(ident_buf in fork);
+                        ident = Some(ident_buf.parse()?);
+                        tail_getter(&fork)?;
                     }
                 } else {
-                    tail_getter(&input)?;
+                    tail_getter(input)?;
                 }
 
                 input.advance_to(&fork);
@@ -709,7 +706,7 @@ impl ComputeDescriptor {
         };
 
         tokens.extend(quote! {
-            Compute::builder()#(#params)*#id_set.build()
+            Compute::builder()#(#params)*#id_set.build().unwrap()
         });
     }
 }
@@ -812,16 +809,13 @@ impl PartialEq for SimpleFieldValue {
 
 impl SimpleFieldValue {
     fn get_ident(&self) -> Option<Lit> {
-        if let SimpleFieldValue::Expression(Expr::Call(ExprCall { func, args, .. })) = &self {
-            if let Expr::Path(ExprPath { path, .. }) = *func.clone() {
-                if let Some(possible_ident) = path.get_ident() {
-                    if &possible_ident.to_string() == "ident" {
-                        if let Some(Expr::Lit(lit)) = args.first() {
-                            return Some(lit.lit.clone());
-                        }
-                    }
-                }
-            }
+        if let SimpleFieldValue::Expression(Expr::Call(ExprCall { func, args, .. })) = &self
+            && let Expr::Path(ExprPath { path, .. }) = *func.clone()
+            && let Some(possible_ident) = path.get_ident()
+            && &possible_ident.to_string() == "ident"
+            && let Some(Expr::Lit(lit)) = args.first()
+        {
+            return Some(lit.lit.clone());
         }
 
         None

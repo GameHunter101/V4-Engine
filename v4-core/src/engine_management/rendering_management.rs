@@ -12,17 +12,35 @@ use wgpu::{
 };
 use winit::{dpi::PhysicalSize, window::Window};
 
+use thiserror::Error;
+
 use crate::{
     ecs::{
-        component::{Component, ComponentDetails, ComponentSystem},
-        compute::Compute,
+        component::{Component, ComponentDetails, ComponentId, ComponentSystem},
+        compute::{Compute, ComputeError},
         scene::Scene,
     },
-    engine_management::pipeline::{PipelineId, create_render_pipeline},
+    engine_management::pipeline::{PipelineError, PipelineId, create_render_pipeline},
     engine_support::texture_support,
 };
 
 use super::font_management::FontState;
+
+#[derive(Error, Debug)]
+pub enum RendererError {
+    #[error("Pipeline error: {0}")]
+    FailedPipelineCreation(#[from] PipelineError),
+    #[error("Could not create surface: {0}")]
+    FailedSurfaceCreation(#[from] wgpu::CreateSurfaceError),
+    #[error("No active camera has been set")]
+    NoActiveCamera,
+    #[error("Material ID '{0}' does not correspond to a material")]
+    InvalidMaterialId(ComponentId),
+    #[error("Failed to prepare text renderer")]
+    TextPreparationFailure(glyphon::PrepareError),
+    #[error("Failed to render text elements")]
+    TextRenderFailure,
+}
 
 #[derive(Debug)]
 pub struct RenderingManager {
@@ -120,15 +138,14 @@ impl RenderingManager {
         }
     }
 
-    pub fn initialize_surface_data(&mut self, window: &dyn Window) {
+    pub fn initialize_surface_data(&mut self, window: &dyn Window) -> Result<(), RendererError> {
         let surface = unsafe {
             self.instance
                 .create_surface_unsafe(wgpu::SurfaceTargetUnsafe::RawHandle {
                     raw_display_handle: window.display_handle().unwrap().into(),
                     raw_window_handle: window.window_handle().unwrap().into(),
                 })
-        }
-        .expect("Error creating the surface for the given window.");
+        }?;
 
         let surface_caps = surface.get_capabilities(&self.adapter);
 
@@ -169,7 +186,7 @@ impl RenderingManager {
         );
 
         let screen_space_attachments =
-            ScreenSpaceAttachments::new(&self.device, self.width, self.height, format);
+            ScreenSpaceAttachments::new(&self.device, self.width, self.height, format)?;
 
         let egui_render_pass = EguiRenderPass::new(&self.device, format, 1);
         let egui_screen_descriptor = ScreenDescriptor {
@@ -188,6 +205,8 @@ impl RenderingManager {
             egui_render_pass,
             egui_screen_descriptor,
         });
+
+        Ok(())
     }
 
     pub async fn render(
@@ -198,7 +217,7 @@ impl RenderingManager {
         egui_platform: &mut Platform,
         window: Option<&dyn Window>,
         egui_clear_color: Option<wgpu::Color>,
-    ) {
+    ) -> Result<(), RendererError> {
         let screen_space_materials = scene.screen_space_materials();
         let surface_data = self.surface_data.as_mut().unwrap();
         let output = surface_data.surface.get_current_texture().unwrap();
@@ -267,7 +286,7 @@ impl RenderingManager {
 
             let mut sorted_pipelines: Vec<(&PipelineId, &RenderPipeline)> =
                 Vec::from_iter(pipelines);
-            sorted_pipelines.sort_by(|(a, _), (b, _)| a.render_priority.cmp(&b.render_priority));
+            sorted_pipelines.sort_by_key(|(pipeline, _)| pipeline.render_priority);
 
             for (pipeline_id, pipeline) in sorted_pipelines {
                 if pipeline_id.is_screen_space {
@@ -282,9 +301,11 @@ impl RenderingManager {
                     if material.uses_camera() {
                         render_pass.set_bind_group(
                             0,
-                            scene
-                                .active_camera_bind_group()
-                                .expect("No active camera buffer set"),
+                            if let Some(bind_group) = scene.active_camera_bind_group() {
+                                Ok(bind_group)
+                            } else {
+                                Err(RendererError::NoActiveCamera)
+                            }?,
                             &[],
                         );
                     }
@@ -330,7 +351,7 @@ impl RenderingManager {
                 raw_render_tex,
                 surface_data,
                 &mut encoder,
-            );
+            )?;
         }
 
         let enabled_ui_components = scene.enabled_ui_components();
@@ -349,18 +370,17 @@ impl RenderingManager {
             })
             .collect::<Vec<_>>();
 
-        font_state
-            .text_renderer
-            .prepare(
-                &self.device,
-                &self.queue,
-                &mut font_state.font_system,
-                &mut font_state.atlas,
-                &font_state.viewport,
-                text_areas,
-                &mut font_state.swash_cache,
-            )
-            .expect("Failed to prepare text for rendering.");
+        if let Err(err) = font_state.text_renderer.prepare(
+            &self.device,
+            &self.queue,
+            &mut font_state.font_system,
+            &mut font_state.atlas,
+            &font_state.viewport,
+            text_areas,
+            &mut font_state.swash_cache,
+        ) {
+            return Err(RendererError::TextPreparationFailure(err));
+        }
 
         {
             let mut ui_render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -379,10 +399,13 @@ impl RenderingManager {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            font_state
+            if font_state
                 .text_renderer
                 .render(&font_state.atlas, &font_state.viewport, &mut ui_render_pass)
-                .expect("Failed to render text.");
+                .is_err()
+            {
+                return Err(RendererError::TextRenderFailure);
+            }
         }
         let tdelta_option = if !enabled_ui_components.is_empty() {
             let all_comps = scene.all_components_mut();
@@ -395,12 +418,12 @@ impl RenderingManager {
                 egui_platform,
                 &mut surface_data.egui_render_pass,
                 &surface_data.egui_screen_descriptor,
-                window.as_deref(),
+                window,
                 &self.device,
                 &self.queue,
                 &mut encoder,
                 &output_view,
-                egui_clear_color
+                egui_clear_color,
             ))
         } else {
             None
@@ -415,6 +438,8 @@ impl RenderingManager {
                 .remove_textures(tdelta)
                 .unwrap();
         }
+
+        Ok(())
     }
 
     fn render_screen_space_effects(
@@ -427,7 +452,7 @@ impl RenderingManager {
         raw_render_tex: &Texture,
         surface_data: &SurfaceData,
         encoder: &mut CommandEncoder,
-    ) {
+    ) -> Result<(), RendererError> {
         encoder.copy_texture_to_texture(
             raw_render_tex.as_image_copy(),
             surface_data
@@ -459,9 +484,12 @@ impl RenderingManager {
             screen_space_output.create_view(&wgpu::TextureViewDescriptor::default());
 
         for material_id in scene.screen_space_materials() {
-            let material = scene
-                .get_material(*material_id)
-                .expect("Invalid material ID");
+            let material = if let Some(mat) = scene.get_material(*material_id) {
+                Ok(mat)
+            } else {
+                Err(RendererError::InvalidMaterialId(*material_id))
+            }?;
+
             if let Some(pipeline) = pipelines.get(material.pipeline_id()) {
                 surface_data
                     .screen_space_attachments
@@ -488,7 +516,9 @@ impl RenderingManager {
 
         surface_data
             .screen_space_attachments
-            .execute_output_render_pass(encoder, &output_view);
+            .execute_output_render_pass(encoder, output_view);
+
+        Ok(())
     }
 
     fn egui_render(
@@ -526,7 +556,7 @@ impl RenderingManager {
         tdelta
     }
 
-    pub fn resize(&mut self, physical_width: u32, physical_height: u32, scale_factor: f32,) {
+    pub fn resize(&mut self, physical_width: u32, physical_height: u32, scale_factor: f32) {
         self.width = physical_width;
         self.height = physical_height;
         let surface_data = self.surface_data.as_mut().unwrap();
@@ -540,7 +570,9 @@ impl RenderingManager {
             &self.device,
             &surface_data.config,
         );
-        surface_data.smaa_target.resize(&self.device, physical_width, physical_height);
+        surface_data
+            .smaa_target
+            .resize(&self.device, physical_width, physical_height);
         surface_data.egui_screen_descriptor = ScreenDescriptor {
             physical_width,
             physical_height,
@@ -574,7 +606,7 @@ impl RenderingManager {
             .map(|surface_data| &mut surface_data.smaa_target)
     }
 
-    pub fn individual_compute_execution(&self, computes: &[Compute]) {
+    pub fn individual_compute_execution(&self, compute: &Compute) -> Result<(), ComputeError> {
         let mut encoder =
             self.device
                 .create_command_encoder(&wgpu::wgt::CommandEncoderDescriptor {
@@ -587,14 +619,14 @@ impl RenderingManager {
                 timestamp_writes: None,
             });
 
-            for compute in computes {
-                for _ in 0..compute.iterate_count() {
-                    compute.calculate(&mut compute_pass);
-                }
+            for _ in 0..compute.iterate_count() {
+                compute.calculate(&mut compute_pass)?;
             }
         }
 
         self.queue.submit(Some(encoder.finish()));
+
+        Ok(())
     }
 }
 
@@ -607,7 +639,12 @@ struct ScreenSpaceAttachments {
 }
 
 impl ScreenSpaceAttachments {
-    fn new(device: &Device, width: u32, height: u32, format: TextureFormat) -> Self {
+    fn new(
+        device: &Device,
+        width: u32,
+        height: u32,
+        format: TextureFormat,
+    ) -> Result<Self, PipelineError> {
         let screen_space_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("Screen-space render output bind group layout"),
@@ -717,20 +754,20 @@ impl ScreenSpaceAttachments {
         };
 
         let screen_space_output_pipeline = create_render_pipeline(
-            &device,
+            device,
             &screen_space_output_pipeline_id,
             None,
             format,
             false,
             false,
-        );
+        )?;
 
-        ScreenSpaceAttachments {
+        Ok(ScreenSpaceAttachments {
             screen_space_input_texture,
             screen_space_bind_group,
             screen_triangle_buffer,
             screen_space_output_pipeline,
-        }
+        })
     }
 
     fn execute_effect_render_pass(

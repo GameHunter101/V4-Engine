@@ -11,6 +11,8 @@ use crossbeam_channel::{Receiver, Sender};
 use wgpu::{BindGroup, Buffer, Device, Queue};
 use winit_input_helper::WinitInputHelper;
 
+use thiserror::Error;
+
 use crate::{
     EngineDetails,
     engine_management::{
@@ -28,6 +30,22 @@ use super::{
 };
 
 static mut SCENE_COUNT: usize = 0;
+
+#[derive(Error, Debug)]
+pub enum SceneError {
+    #[error("Workload receiver has not been initialized")]
+    WorkloadRecvInitError,
+    #[error("Could not send workload packet over to worker thread: {0}")]
+    WorkloadSendError(#[from] crossbeam_channel::TrySendError<WorkloadPacket>),
+    #[error("Could not receive workload result from worker thread")]
+    WorkloadRecvError,
+    #[error("The specified material ID ({0}) is invalid")]
+    InvalidMaterialId(ComponentId),
+    #[error("Failed to send engine action: {0}")]
+    SendEngineActionFailure(#[from] crossbeam_channel::TrySendError<Box<dyn EngineAction>>),
+    #[error("The specified entity ID ({0}) is invalid")]
+    InvalidEntityId(EntityId),
+}
 
 pub struct Scene {
     scene_index: usize,
@@ -137,8 +155,8 @@ impl Scene {
 
         comp_action_queue
             .into_iter()
-            .chain(mat_action_queue.into_iter())
-            .chain(compute_action_queue.into_iter())
+            .chain(mat_action_queue)
+            .chain(compute_action_queue)
             .collect()
     }
 
@@ -148,13 +166,12 @@ impl Scene {
         queue: &Queue,
         input_manager: &WinitInputHelper,
         engine_details: &EngineDetails,
-    ) -> ActionQueue {
-        while let Ok((component_id, workload_output)) = self
-            .workload_output_receiver
-            .as_ref()
-            .expect("Failed to initialize workload output receiver.")
-            .try_recv()
-        {
+    ) -> Result<ActionQueue, SceneError> {
+        let Some(workload_recv) = self.workload_output_receiver.as_ref() else {
+            return Err(SceneError::WorkloadRecvInitError);
+        };
+
+        while let Ok((component_id, workload_output)) = workload_recv.try_recv() {
             if let Some(outputs) = self.workload_outputs.get_mut(&component_id) {
                 outputs.push(workload_output);
             } else {
@@ -172,7 +189,7 @@ impl Scene {
 
         let all_components: &mut Vec<Component> = &mut self.components;
 
-        enabled_components
+        Ok(enabled_components
             .into_iter()
             .flat_map(|i| {
                 let (previous_components, rest_of_components) = all_components.split_at_mut(i);
@@ -212,7 +229,7 @@ impl Scene {
                     active_camera,
                 })
             })
-            .collect()
+            .collect())
     }
 
     pub fn update_materials(
@@ -265,30 +282,36 @@ impl Scene {
         }
     }
 
-    pub async fn attach_workload(&mut self, component_id: ComponentId, workload: Workload) {
+    pub async fn attach_workload(
+        &mut self,
+        component_id: ComponentId,
+        workload: Workload,
+    ) -> Result<(), SceneError> {
         if let Some(sender) = &self.workload_sender {
-            sender
-                .try_send(WorkloadPacket {
-                    scene_index: self.scene_index,
-                    component_id,
-                    workload,
-                })
-                .expect("Failed to send workload");
+            sender.try_send(WorkloadPacket {
+                scene_index: self.scene_index,
+                component_id,
+                workload,
+            })?;
         }
+
+        Ok(())
     }
 
     pub async fn free_workload_output(
         &mut self,
         component_id: ComponentId,
         workload_output_index: usize,
-    ) {
-        let outputs = self
-            .workload_outputs
-            .get_mut(&component_id)
-            .expect("Failed to get workloads assigned to the given component ID.");
+    ) -> Result<(), SceneError> {
+        let Some(outputs) = self.workload_outputs.get_mut(&component_id) else {
+            return Err(SceneError::WorkloadRecvError);
+        };
+
         if !outputs.is_empty() {
             outputs.remove(workload_output_index);
         }
+
+        Ok(())
     }
 
     pub fn create_material(
@@ -411,7 +434,7 @@ fn main(input: VertexInput) -> VertexOutput {
         computes: Vec<Compute>,
         material: Option<ComponentId>,
         is_enabled: bool,
-    ) -> EntityId {
+    ) -> Result<EntityId, SceneError> {
         let entity = Entity::new(
             self.total_entities_created + 1,
             Vec::new(),
@@ -422,7 +445,10 @@ fn main(input: VertexInput) -> VertexOutput {
         let id = entity.id();
 
         if let Some(parent) = parent {
-            self.entities.get_mut(&parent).unwrap().push_child(id);
+            let Some(parent_entity) = self.entities.get_mut(&parent) else {
+                return Err(SceneError::InvalidEntityId(parent));
+            };
+            parent_entity.push_child(id);
         }
 
         self.entities.insert(id, entity);
@@ -438,18 +464,16 @@ fn main(input: VertexInput) -> VertexOutput {
         );
 
         if let Some(mat_id) = material {
-            let material = self
-                .materials
-                .iter_mut()
-                .find(|mat| mat.id() == mat_id)
-                .expect(&format!("The specified material ID ({mat_id}) is invalid"));
+            let Some(material) = self.materials.iter_mut().find(|mat| mat.id() == mat_id) else {
+                return Err(SceneError::InvalidMaterialId(mat_id));
+            };
             material.attach_entity(id);
         }
 
         self.components.append(&mut components);
         self.computes.extend(computes);
 
-        id
+        Ok(id)
     }
 
     pub fn get_entity(&self, entity_id: EntityId) -> Option<&Entity> {
@@ -494,27 +518,29 @@ fn main(input: VertexInput) -> VertexOutput {
         action_queue: ActionQueue,
         device: &Device,
         queue: &Queue,
-    ) {
+    ) -> Result<(), SceneError> {
         let actions = if action_queue.is_empty() {
             self.initialize_components(device)
         } else {
             action_queue
         };
         for action in actions {
-            action.execute_async(self, device, queue).await;
+            action.execute_async(self, device, queue).await?;
         }
+
+        Ok(())
     }
 
     pub fn register_ui_component(&mut self, component_id: ComponentId) {
         self.ui_components.push(component_id);
     }
 
-    pub fn send_engine_action(&self, action: Box<dyn EngineAction>) {
+    pub fn send_engine_action(&self, action: Box<dyn EngineAction>) -> Result<(), SceneError> {
         if let Some(engine_action_sender) = &self.engine_action_sender {
-            engine_action_sender
-                .try_send(action)
-                .expect("Failed to send engine action.");
+            engine_action_sender.try_send(action)?;
         }
+
+        Ok(())
     }
 
     pub fn set_active_camera(&mut self, camera: Option<ComponentId>) {

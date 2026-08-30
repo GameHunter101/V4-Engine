@@ -59,7 +59,7 @@ impl ComponentSystem for CameraComponent {
                     [entity_component_groupings[&self.parent_entity_id].clone()];
 
                 let transform_component: Option<&mut TransformComponent> = sibling_components
-                    .into_iter()
+                    .iter_mut()
                     .flat_map(|comp| {
                         if comp.type_id() == TypeId::of::<TransformComponent>() {
                             comp.downcast_mut()

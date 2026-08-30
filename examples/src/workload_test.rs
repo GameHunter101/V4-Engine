@@ -1,16 +1,17 @@
 use v4::{
+    V4,
     builtin_actions::{CreateEntityAction, WorkloadAction, WorkloadOutputFreeAction},
     component,
     ecs::{
         component::{ComponentDetails, ComponentSystem, UpdateParams},
         scene::WorkloadOutput,
     },
-    scene, V4,
+    scene,
 };
 
 #[tokio::main]
 pub async fn main() {
-    let mut engine = V4::builder().build().await;
+    let mut engine = V4::builder().build().await.unwrap();
 
     scene! {
         _ = {
@@ -24,7 +25,7 @@ pub async fn main() {
 
     engine.attach_scene(scene);
 
-    engine.main_loop().await;
+    engine.main_loop().await.unwrap();
 }
 
 #[component]
@@ -51,7 +52,9 @@ impl ComponentSystem for WorkloadTesterComponent {
 
     fn update(
         &mut self,
-        UpdateParams { workload_outputs, .. }: UpdateParams<'_, '_>,
+        UpdateParams {
+            workload_outputs, ..
+        }: UpdateParams<'_, '_>,
     ) -> v4::ecs::actions::ActionQueue {
         if self.initialized_time.elapsed().as_secs_f32() % 1.0 <= 0.01 {
             return vec![Box::new(WorkloadAction(

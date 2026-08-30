@@ -1,10 +1,24 @@
 use std::io::Cursor;
 
-use image::{EncodableLayout, GenericImageView, ImageDecoder, codecs::hdr::HdrDecoder};
+use image::{EncodableLayout, GenericImageView, ImageDecoder, ImageError, codecs::hdr::HdrDecoder};
 use wgpu::{
     Device, Queue, StorageTextureAccess, Texture as WgpuTexture, TextureFormat, TextureUsages,
     TextureView,
 };
+
+use thiserror::Error;
+
+#[derive(Error, Debug)]
+pub enum TextureError {
+    #[error("Failed to create image: {0}")]
+    CreationError(ImageError),
+    #[error("Failed to read the path at {path}: {err}")]
+    ReadPathError { path: String, err: tokio::io::Error },
+    #[error("HDR decoder could not be created: {0}")]
+    HdrDecoderError(ImageError),
+    #[error("Could not read the bytes in texture: {0}")]
+    ByteReadError(ImageError),
+}
 
 #[derive(Debug, Clone, Copy)]
 pub struct TextureProperties {
@@ -51,8 +65,14 @@ impl TextureBundle {
         device: &Device,
         queue: &Queue,
         props: TextureProperties,
-    ) -> tokio::io::Result<CompleteTexture> {
-        let raw_image = tokio::fs::read(path).await?;
+    ) -> Result<CompleteTexture, TextureError> {
+        let raw_image = tokio::fs::read(path)
+            .await
+            .map_err(|err| TextureError::ReadPathError {
+                path: path.to_string(),
+                err,
+            })?;
+
         let (bytes, props, dimensions) = if props.is_hdr {
             (
                 raw_image,
@@ -66,8 +86,8 @@ impl TextureBundle {
                 (0, 0),
             )
         } else {
-            // TODO: Implement actual error handling
-            let img = image::load_from_memory(&raw_image).expect("Failed to create image");
+            let img = image::load_from_memory(&raw_image).map_err(TextureError::CreationError)?;
+
             let dims = img.dimensions();
             let bytes = if props.format.components() == 4 {
                 let rgba8 = img.into_rgba8();
@@ -79,7 +99,7 @@ impl TextureBundle {
             (bytes, props, dims)
         };
 
-        Ok(Self::from_bytes(&bytes, dimensions, device, queue, props))
+        Self::from_bytes(&bytes, dimensions, device, queue, props)
     }
 
     pub fn from_bytes(
@@ -88,14 +108,17 @@ impl TextureBundle {
         device: &Device,
         queue: &Queue,
         props: TextureProperties,
-    ) -> CompleteTexture {
-        let texture_bundle = if props.is_hdr {
-            let hdr_decoder = HdrDecoder::new(Cursor::new(bytes)).unwrap();
+    ) -> Result<CompleteTexture, TextureError> {
+        if props.is_hdr {
+            let hdr_decoder = HdrDecoder::new(Cursor::new(bytes)).map_err(TextureError::HdrDecoderError)?;
             let meta = hdr_decoder.metadata();
             let complete_texture = Self::create_texture(device, meta.width, meta.height, props);
 
             let mut bytes = vec![0_u8; hdr_decoder.total_bytes() as usize];
-            hdr_decoder.read_image(&mut bytes).unwrap();
+            if let Err(err) = hdr_decoder.read_image(&mut bytes) {
+                return Err(TextureError::ByteReadError(err));
+            }
+
             bytes = (0..meta.width * meta.height)
                 .flat_map(|pix_idx| {
                     let pix_idx = pix_idx as usize;
@@ -116,7 +139,7 @@ impl TextureBundle {
                 },
                 complete_texture.0.size(),
             );
-            complete_texture
+            Ok(complete_texture)
         } else {
             let texture_bundle = Self::create_texture(device, dimensions.0, dimensions.1, props);
             let size = props.format.theoretical_memory_footprint(wgpu::Extent3d {
@@ -139,10 +162,8 @@ impl TextureBundle {
                     depth_or_array_layers: 1,
                 },
             );
-            texture_bundle
-        };
-
-        texture_bundle
+            Ok(texture_bundle)
+        }
     }
 
     pub fn create_texture(
