@@ -28,10 +28,10 @@ use super::font_management::FontState;
 
 #[derive(Error, Debug)]
 pub enum RendererError {
-    #[error("Could not create pipeline")]
-    FailedPipelineCreation(PipelineError),
-    #[error("Could not create surface")]
-    FailedSurfaceCreation(wgpu::CreateSurfaceError),
+    #[error("Pipeline error: {0}")]
+    FailedPipelineCreation(#[from] PipelineError),
+    #[error("Could not create surface: {0}")]
+    FailedSurfaceCreation(#[from] wgpu::CreateSurfaceError),
     #[error("No active camera has been set")]
     NoActiveCamera,
     #[error("Material ID '{0}' does not correspond to a material")]
@@ -145,8 +145,7 @@ impl RenderingManager {
                     raw_display_handle: window.display_handle().unwrap().into(),
                     raw_window_handle: window.window_handle().unwrap().into(),
                 })
-        }
-        .map_err(RendererError::FailedSurfaceCreation)?;
+        }?;
 
         let surface_caps = surface.get_capabilities(&self.adapter);
 
@@ -187,8 +186,7 @@ impl RenderingManager {
         );
 
         let screen_space_attachments =
-            ScreenSpaceAttachments::new(&self.device, self.width, self.height, format)
-                .map_err(RendererError::FailedPipelineCreation)?;
+            ScreenSpaceAttachments::new(&self.device, self.width, self.height, format)?;
 
         let egui_render_pass = EguiRenderPass::new(&self.device, format, 1);
         let egui_screen_descriptor = ScreenDescriptor {

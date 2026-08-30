@@ -45,12 +45,10 @@ pub mod ecs;
 
 #[derive(Error, Debug)]
 pub enum V4Error {
-    #[error("An error occured in the main loop.")]
-    MainLoopError(winit::error::EventLoopError),
-    #[error("Failed to create event loop.")]
-    EventLoopCreationError(winit::error::EventLoopError),
-    #[error("Failed to create core communication utilities.")]
-    CoreCommunicationError(CommunicationError),
+    #[error("An error occured during the event loop: {0}")]
+    EventLoopError(#[from] winit::error::EventLoopError),
+    #[error("Failed to create core communication utilities: {0}")]
+    CoreCommunicationError(#[from] CommunicationError),
 }
 
 /// The main engine struct. Contains the state for the whole engine.
@@ -113,11 +111,9 @@ impl V4 {
     pub async fn main_loop(mut self) -> Result<(), V4Error> {
         self.app.details.initialization_time = Instant::now();
 
-        if let Err(err) = self.event_loop.run_app(self.app) {
-            Err(V4Error::MainLoopError(err))
-        } else {
-            Ok(())
-        }
+        self.event_loop.run_app(self.app)?;
+
+        Ok(())
     }
 
     pub fn attach_scene(&mut self, scene: Scene) -> usize {
@@ -170,10 +166,12 @@ impl V4 {
 
 impl V4App {
     fn resize(&mut self, new_size: PhysicalSize<u32>) {
+        let window = self.window.as_ref().unwrap();
+
         self.rendering_manager.resize(
             new_size.width,
             new_size.height,
-            self.window.as_ref().unwrap().scale_factor() as f32,
+            window.scale_factor() as f32,
         );
 
         self.font_state.as_mut().unwrap().viewport.update(
@@ -185,7 +183,7 @@ impl V4App {
         );
 
         self.details.window_resolution = (new_size.width, new_size.height);
-        self.window.as_ref().unwrap().request_redraw();
+        window.request_redraw();
 
         self.egui_platform = Some(Platform::new(PlatformDescriptor {
             physical_width: new_size.width,
@@ -341,11 +339,23 @@ impl ApplicationHandler for V4App {
                 let device = rendering_manager.device();
                 let queue = rendering_manager.queue();
 
-                let action_queue = scene
-                    .update(device, queue, &self.input_manager, &self.details)
-                    .unwrap();
-                pollster::block_on(scene.execute_action_queue(action_queue, device, queue))
-                    .unwrap();
+                let action_queue =
+                    match scene.update(device, queue, &self.input_manager, &self.details) {
+                        Ok(queue) => queue,
+                        Err(err) => {
+                            eprintln!("{err}");
+                            event_loop.exit();
+                            return;
+                        }
+                    };
+
+                if let Err(err) =
+                    pollster::block_on(scene.execute_action_queue(action_queue, device, queue))
+                {
+                    eprintln!("{err}");
+                    event_loop.exit();
+                    return;
+                }
 
                 scene.update_materials(device, queue, &self.input_manager, &self.details);
 
@@ -354,28 +364,36 @@ impl ApplicationHandler for V4App {
                     .iter()
                     .filter(|compute| compute.continuous_execution())
                 {
-                    rendering_manager
-                        .individual_compute_execution(compute)
-                        .unwrap();
+                    if let Err(err) = rendering_manager.individual_compute_execution(compute) {
+                        eprintln!("{err}");
+                        event_loop.exit();
+                        return;
+                    }
                 }
 
-                V4::create_new_pipelines(
+                if let Err(err) = V4::create_new_pipelines(
                     device,
                     rendering_manager.format().unwrap(),
                     scene,
                     &mut self.pipelines,
-                )
-                .unwrap();
+                ) {
+                    eprintln!("{err}");
+                    event_loop.exit();
+                    return;
+                }
 
-                pollster::block_on(rendering_manager.render(
+                if let Err(err) = pollster::block_on(rendering_manager.render(
                     scene,
                     &self.pipelines,
                     self.font_state.as_mut().unwrap(),
                     egui_platform,
                     self.window.as_deref(),
                     self.egui_clear_color,
-                ))
-                .unwrap();
+                )) {
+                    eprintln!("{err}");
+                    event_loop.exit();
+                    return;
+                }
 
                 self.details.frames_elapsed += 1;
                 self.details.last_frame_instant = Instant::now();
@@ -501,7 +519,7 @@ impl V4Builder {
     }
 
     pub async fn build(self) -> Result<V4, V4Error> {
-        let event_loop = EventLoop::new().map_err(V4Error::EventLoopCreationError)?;
+        let event_loop = EventLoop::new()?;
 
         event_loop.set_control_flow(winit::event_loop::ControlFlow::Poll);
         let input_manager = WinitInputHelper::new();
@@ -533,8 +551,7 @@ impl V4Builder {
             pipelines: HashMap::new(),
             font_state: None,
             hide_cursor: self.hide_cursor,
-            core_communication: CoreCommunication::new()
-                .map_err(V4Error::CoreCommunicationError)?,
+            core_communication: CoreCommunication::new()?,
             egui_platform: None,
             egui_clear_color: self.egui_clear_color,
         };

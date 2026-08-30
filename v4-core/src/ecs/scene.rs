@@ -35,14 +35,14 @@ static mut SCENE_COUNT: usize = 0;
 pub enum SceneError {
     #[error("Workload receiver has not been initialized")]
     WorkloadRecvInitError,
-    #[error("Could not send workload packet over to worker thread")]
-    WorkloadSendError(crossbeam_channel::TrySendError<WorkloadPacket>),
+    #[error("Could not send workload packet over to worker thread: {0}")]
+    WorkloadSendError(#[from] crossbeam_channel::TrySendError<WorkloadPacket>),
     #[error("Could not receive workload result from worker thread")]
     WorkloadRecvError,
     #[error("The specified material ID ({0}) is invalid")]
     InvalidMaterialId(ComponentId),
-    #[error("Failed to send engine action")]
-    SendEngineActionFailure(crossbeam_channel::TrySendError<Box<dyn EngineAction>>),
+    #[error("Failed to send engine action: {0}")]
+    SendEngineActionFailure(#[from] crossbeam_channel::TrySendError<Box<dyn EngineAction>>),
     #[error("The specified entity ID ({0}) is invalid")]
     InvalidEntityId(EntityId),
 }
@@ -167,11 +167,9 @@ impl Scene {
         input_manager: &WinitInputHelper,
         engine_details: &EngineDetails,
     ) -> Result<ActionQueue, SceneError> {
-        let workload_recv = if let Some(recv) = self.workload_output_receiver.as_ref() {
-            Ok(recv)
-        } else {
-            Err(SceneError::WorkloadRecvInitError)
-        }?;
+        let Some(workload_recv) = self.workload_output_receiver.as_ref() else {
+            return Err(SceneError::WorkloadRecvInitError);
+        };
 
         while let Ok((component_id, workload_output)) = workload_recv.try_recv() {
             if let Some(outputs) = self.workload_outputs.get_mut(&component_id) {
@@ -289,14 +287,12 @@ impl Scene {
         component_id: ComponentId,
         workload: Workload,
     ) -> Result<(), SceneError> {
-        if let Some(sender) = &self.workload_sender
-            && let Err(err) = sender.try_send(WorkloadPacket {
+        if let Some(sender) = &self.workload_sender {
+            sender.try_send(WorkloadPacket {
                 scene_index: self.scene_index,
                 component_id,
                 workload,
-            })
-        {
-            return Err(SceneError::WorkloadSendError(err));
+            })?;
         }
 
         Ok(())
@@ -540,10 +536,8 @@ fn main(input: VertexInput) -> VertexOutput {
     }
 
     pub fn send_engine_action(&self, action: Box<dyn EngineAction>) -> Result<(), SceneError> {
-        if let Some(engine_action_sender) = &self.engine_action_sender
-            && let Err(err) = engine_action_sender.try_send(action)
-        {
-            return Err(SceneError::SendEngineActionFailure(err));
+        if let Some(engine_action_sender) = &self.engine_action_sender {
+            engine_action_sender.try_send(action)?;
         }
 
         Ok(())

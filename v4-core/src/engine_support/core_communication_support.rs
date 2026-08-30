@@ -12,8 +12,8 @@ use crate::{
 
 #[derive(Error, Debug)]
 pub enum CommunicationError {
-    #[error("Failed to create tokio runtime for workloads")]
-    RuntimeInitError(std::io::Error),
+    #[error("Failed to create tokio runtime for workloads: {0}")]
+    RuntimeInitError(#[from] std::io::Error),
     #[error("Failed to send workload output for component {id}")]
     WorkloadOutputSendError {
         id: ComponentId,
@@ -43,7 +43,7 @@ impl CoreCommunication {
         ) = crossbeam_channel::unbounded();
 
         let _workload_thread_handle = std::thread::spawn(move || {
-            let runtime = tokio::runtime::Runtime::new().map_err(CommunicationError::RuntimeInitError)?;
+            let runtime = tokio::runtime::Runtime::new()?;
 
             runtime.block_on(async move {
                 TokioScope::scope_and_block(|async_scope| {
@@ -51,16 +51,14 @@ impl CoreCommunication {
                         let sender = workload_output_sender.clone();
                         async_scope.spawn(async move {
                             let workload_result = workload_packet.workload.await;
-                            if let Err(err) =
-                                sender.send((workload_packet.component_id, workload_result))
-                            {
-                                return Err(CommunicationError::WorkloadOutputSendError {
+                            sender
+                                .send((workload_packet.component_id, workload_result))
+                                .map_err(|err| CommunicationError::WorkloadOutputSendError {
                                     id: workload_packet.component_id,
                                     err,
-                                });
-                            }
+                                })?;
 
-                            Ok(())
+                            Ok::<(), CommunicationError>(())
                         });
                     }
                 });

@@ -10,13 +10,13 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum TextureError {
-    #[error("Failed to create image")]
+    #[error("Failed to create image: {0}")]
     CreationError(ImageError),
-    #[error("Failed to read the path at {path}")]
+    #[error("Failed to read the path at {path}: {err}")]
     ReadPathError { path: String, err: tokio::io::Error },
-    #[error("HDR decoder could not be created")]
+    #[error("HDR decoder could not be created: {0}")]
     HdrDecoderError(ImageError),
-    #[error("Could not read the bytes in texture")]
+    #[error("Could not read the bytes in texture: {0}")]
     ByteReadError(ImageError),
 }
 
