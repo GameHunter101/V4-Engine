@@ -359,17 +359,33 @@ impl ApplicationHandler for V4App {
 
                 scene.update_materials(device, queue, &self.input_manager, &self.details);
 
-                for compute in scene
-                    .computes()
-                    .iter()
-                    .filter(|compute| compute.continuous_execution())
+                let mut compute_encoder =
+                    device.create_command_encoder(&wgpu::wgt::CommandEncoderDescriptor {
+                        label: Some("Automatic compute encoder"),
+                    });
+
                 {
-                    if let Err(err) = rendering_manager.individual_compute_execution(compute) {
-                        eprintln!("{err}");
-                        event_loop.exit();
-                        return;
-                    }
+                    let mut compute_pass = compute_encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                        label: Some("Compute pass"),
+                        timestamp_writes: None,
+                    });
+
+                    for compute in scene
+                        .computes()
+                            .iter()
+                            .filter(|compute| compute.continuous_execution())
+                            {
+                                if let Err(err) = ecs::compute::Compute::individual_compute_execution(
+                                    compute, device, queue, Some(&mut compute_pass),
+                                ) {
+                                    eprintln!("{err}");
+                                    event_loop.exit();
+                                    return;
+                                }
+                            }
                 }
+
+                queue.submit(Some(compute_encoder.finish()));
 
                 if let Err(err) = V4::create_new_pipelines(
                     device,
