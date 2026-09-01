@@ -5,8 +5,8 @@ use egui_wgpu_backend::{RenderPass as EguiRenderPass, ScreenDescriptor};
 use egui_winit_platform::Platform;
 use smaa::SmaaTarget;
 use wgpu::{
-    Adapter, BindGroup, Buffer, CommandEncoder, Device, Instance, Queue, RenderPipeline, Texture,
-    TextureFormat, TextureUsages, TextureView,
+    Adapter, BindGroup, Buffer, CommandEncoder, ComputePass, Device, Instance, Queue,
+    RenderPipeline, Texture, TextureFormat, TextureUsages, TextureView,
     rwh::{HasDisplayHandle, HasWindowHandle},
     util::DeviceExt,
 };
@@ -604,29 +604,6 @@ impl RenderingManager {
         self.surface_data
             .as_mut()
             .map(|surface_data| &mut surface_data.smaa_target)
-    }
-
-    pub fn individual_compute_execution(&self, compute: &Compute) -> Result<(), ComputeError> {
-        let mut encoder =
-            self.device
-                .create_command_encoder(&wgpu::wgt::CommandEncoderDescriptor {
-                    label: Some("Individual compute encoder"),
-                });
-
-        {
-            let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("Compute pass"),
-                timestamp_writes: None,
-            });
-
-            for _ in 0..compute.iterate_count() {
-                compute.calculate(&mut compute_pass)?;
-            }
-        }
-
-        self.queue.submit(Some(encoder.finish()));
-
-        Ok(())
     }
 }
 

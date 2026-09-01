@@ -114,7 +114,7 @@ pub async fn main() {
 
     skybox_compute.initialize(device);
 
-    rendering_manager.individual_compute_execution(&skybox_compute).unwrap();
+    Compute::individual_compute_execution(&skybox_compute, device, queue, None).unwrap();
 
     scene! {
         scene: hello_scene,

@@ -1,8 +1,8 @@
 use std::hash::{DefaultHasher, Hash, Hasher};
 
 use wgpu::{
-    BindGroup, BindGroupEntry, BindGroupLayout, BindGroupLayoutEntry, ComputePass, ComputePipeline,
-    Device, ShaderStages,
+    BindGroup, BindGroupEntry, BindGroupLayout, BindGroupLayoutEntry, CommandEncoder, ComputePass,
+    ComputePipeline, Device, Queue, ShaderStages,
 };
 
 use crate::engine_management::pipeline::{
@@ -192,6 +192,44 @@ impl Compute {
     pub fn continuous_execution(&self) -> bool {
         self.continuous_execution
     }
+
+    /// Execute a single compute component. The compute component must be initialized before
+    /// execution may occur, otherwise an error will be returned. An optional compute pass can be
+    /// provided in the use case of grouping multiple compute executions together. However, the
+    /// encoder must be finished and submitted to the queue in this case.
+    pub fn individual_compute_execution(
+        compute: &Compute,
+        device: &Device,
+        queue: &Queue,
+        compute_pass: Option<&mut ComputePass<'_>>,
+    ) -> Result<(), ComputeError> {
+        if let Some(pass) = compute_pass {
+            for _ in 0..compute.iterate_count() {
+                compute.calculate(pass)?;
+            }
+
+            return Ok(());
+        }
+
+        let mut encoder = device.create_command_encoder(&wgpu::wgt::CommandEncoderDescriptor {
+            label: Some("Individual compute encoder"),
+        });
+
+        {
+            let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("Compute pass"),
+                timestamp_writes: None,
+            });
+
+            for _ in 0..compute.iterate_count() {
+                compute.calculate(&mut compute_pass)?;
+            }
+        }
+
+        queue.submit(Some(encoder.finish()));
+
+        Ok(())
+    }
 }
 
 impl ComponentSystem for Compute {
@@ -222,13 +260,16 @@ impl ComponentSystem for Compute {
             entries: &bind_group_entries,
         });
 
-        self.pipeline = Some(Self::create_compute_pipeline(
-            device,
-            &bind_group_layout,
-            self.shader_path,
-            self.id,
-            self.is_spirv,
-        ).unwrap());
+        self.pipeline = Some(
+            Self::create_compute_pipeline(
+                device,
+                &bind_group_layout,
+                self.shader_path,
+                self.id,
+                self.is_spirv,
+            )
+            .unwrap(),
+        );
 
         self.bind_group_layout = Some(bind_group_layout);
         self.bind_group = Some(bind_group);
