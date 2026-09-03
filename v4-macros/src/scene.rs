@@ -10,6 +10,7 @@ use syn::{
     punctuated::Punctuated,
     spanned::Spanned,
 };
+use uuid::Uuid;
 use v4_core::ecs::{component::ComponentId, entity::EntityId};
 
 pub struct SceneDescriptor {
@@ -521,12 +522,7 @@ impl ComponentDescriptor {
             let params = self.parameters.iter().map(|param| {
                 let field = &param.ident;
                 if let Some(value) = &param.value {
-                    if let Some(ident) = value.get_ident() {
-                        let id = idents.get(&ident).unwrap();
-                        quote! {.#field(#id)}
-                    } else {
-                        quote! {.#field(#value)}
-                    }
+                    quote! {.#field(#value)}
                 } else {
                     quote! {.#field(#field)}
                 }
@@ -688,12 +684,7 @@ impl ComputeDescriptor {
         let params = self.params.iter().map(|param| {
             let field = &param.ident;
             if let Some(value) = &param.value {
-                if let Some(ident) = value.get_ident() {
-                    let id = idents.get(&ident).unwrap();
-                    quote! {.#field(#id)}
-                } else {
-                    quote! {.#field(#value)}
-                }
+                quote! {.#field(#value)}
             } else {
                 quote! {.#field(#field)}
             }
@@ -804,21 +795,6 @@ impl PartialEq for SimpleFieldValue {
             (Self::Literal(l0), Self::Literal(r0)) => l0 == r0,
             _ => false,
         }
-    }
-}
-
-impl SimpleFieldValue {
-    fn get_ident(&self) -> Option<Lit> {
-        if let SimpleFieldValue::Expression(Expr::Call(ExprCall { func, args, .. })) = &self
-            && let Expr::Path(ExprPath { path, .. }) = *func.clone()
-            && let Some(possible_ident) = path.get_ident()
-            && &possible_ident.to_string() == "ident"
-            && let Some(Expr::Lit(lit)) = args.first()
-        {
-            return Some(lit.lit.clone());
-        }
-
-        None
     }
 }
 
@@ -1028,7 +1004,7 @@ impl Parse for MaterialParameters {
 
 #[derive(Clone)]
 enum PipelineIdVariants {
-    Ident(Lit),
+    Ident(Expr),
     Specifier(PipelineIdDescriptor),
     ScreenSpace(ScreenSpacePipelineIdDescriptor),
 }
@@ -1039,7 +1015,7 @@ impl PipelineIdVariants {
         input: ParseStream,
         idents: &mut HashMap<Lit, Id>,
         pipelines: &mut Vec<PipelineIdDescriptor>,
-    ) -> syn::Result<usize> {
+    ) -> syn::Result<Uuid> {
         match self {
             PipelineIdVariants::Ident(pipeline_ident) => match idents.get(&pipeline_ident) {
                 Some(id) => {
@@ -1082,20 +1058,8 @@ impl Parse for PipelineIdVariants {
         if input.peek(syn::token::Brace) {
             Ok(Self::Specifier(input.parse()?))
         } else {
-            let val = SimpleFieldValue::Expression(input.parse()?);
-            if let Some(ident) = val.get_ident() {
-                Ok(Self::Ident(ident))
-            } else {
-                let span = match val {
-                    SimpleFieldValue::Expression(expr) => expr.span(),
-                    SimpleFieldValue::Literal(lit) => lit.span(),
-                    SimpleFieldValue::Group(group) => group.span(),
-                };
-                Err(syn::Error::new(
-                    span,
-                    "Error getting an identifier for a pipeline ID",
-                ))
-            }
+            let val = input.parse()?;
+            Ok(Self::Ident(val))
         }
     }
 }

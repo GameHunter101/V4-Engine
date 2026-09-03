@@ -25,6 +25,7 @@ smaa.workspace = true
 thiserror = "2.0.20"
 tobj.workspace = true
 tokio.workspace = true
+uuid.workspace = true
 wgpu.workspace = true
 winit.workspace = true
 winit_input_helper.workspace = true
