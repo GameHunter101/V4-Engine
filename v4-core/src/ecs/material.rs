@@ -7,7 +7,7 @@ use wgpu::{
 
 use crate::{
     ecs::compute::Compute,
-    engine_management::pipeline::PipelineId,
+    engine_management::pipeline::PipelineDescriptor,
     engine_support::texture_support::{TextureBundle, TextureProperties},
 };
 
@@ -84,7 +84,7 @@ pub enum ShaderAttachment {
 #[derive(Debug)]
 pub struct Material {
     id: ComponentId,
-    pipeline_id: PipelineId,
+    pipeline_id: PipelineDescriptor,
     entities_attached: Vec<EntityId>,
     component_ranges: Vec<Range<usize>>,
     attachments: Vec<ShaderAttachment>,
@@ -98,7 +98,7 @@ pub struct Material {
 impl Material {
     pub fn new(
         id: ComponentId,
-        pipeline_id: PipelineId,
+        pipeline_id: PipelineDescriptor,
         attachments: Vec<ShaderAttachment>,
         entities_attached: Vec<EntityId>,
         immediate_data: Vec<u8>,
@@ -286,7 +286,7 @@ impl Material {
         self.pipeline_id.uses_camera
     }
 
-    pub fn pipeline_id(&self) -> &PipelineId {
+    pub fn pipeline_id(&self) -> &PipelineDescriptor {
         &self.pipeline_id
     }
 

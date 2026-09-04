@@ -9,7 +9,7 @@ use egui_winit_platform::{Platform, PlatformDescriptor};
 use engine_management::{
     engine_action::V4Mutable,
     font_management::FontState,
-    pipeline::{PipelineId, create_render_pipeline},
+    pipeline::{PipelineDescriptor, create_render_pipeline},
     rendering_management::RenderingManager,
 };
 use glyphon::{FontSystem, SwashCache, TextAtlas, TextRenderer};
@@ -68,7 +68,7 @@ struct V4App {
     initialized_scene: bool,
     window: Option<Box<dyn Window>>,
     details: EngineDetails,
-    pipelines: HashMap<PipelineId, RenderPipeline>,
+    pipelines: HashMap<PipelineDescriptor, RenderPipeline>,
     font_state: Option<FontState>,
     hide_cursor: bool,
     core_communication: CoreCommunication,
@@ -135,7 +135,7 @@ impl V4 {
         device: &Device,
         render_format: TextureFormat,
         active_scene: &mut Scene,
-        pipelines: &mut HashMap<PipelineId, RenderPipeline>,
+        pipelines: &mut HashMap<PipelineDescriptor, RenderPipeline>,
     ) -> Result<(), PipelineError> {
         if active_scene.new_pipelines_needed {
             let active_scene_pipelines = active_scene.get_pipeline_ids();
