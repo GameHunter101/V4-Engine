@@ -17,7 +17,7 @@ use crate::{
     EngineDetails,
     engine_management::{
         engine_action::EngineAction,
-        pipeline::{PipelineId, PipelineShader},
+        pipeline::PipelineDescriptor,
     },
 };
 
@@ -55,7 +55,7 @@ pub struct Scene {
     ui_components: Vec<ComponentId>,
     materials: Vec<Material>,
     screen_space_materials: Vec<ComponentId>,
-    pipeline_to_corresponding_materials: HashMap<PipelineId, Vec<ComponentId>>,
+    pipeline_to_corresponding_materials: HashMap<PipelineDescriptor, Vec<ComponentId>>,
     total_entities_created: EntityId,
     workload_sender: Option<Sender<WorkloadPacket>>,
     workload_output_receiver: Option<Receiver<(ComponentId, WorkloadOutput)>>,
@@ -316,7 +316,7 @@ impl Scene {
 
     pub fn create_material(
         &mut self,
-        mut pipeline_id: PipelineId,
+        pipeline_descriptor: PipelineDescriptor,
         attachments: Vec<ShaderAttachment>,
         entities_attached: Vec<EntityId>,
         immediate_data: Vec<u8>,
@@ -324,43 +324,13 @@ impl Scene {
     ) -> ComponentId {
         let id = self.materials.len() as ComponentId;
 
-        if pipeline_id.is_screen_space {
-            const ATTRIBUTES: &[wgpu::VertexAttribute] =
-                &wgpu::vertex_attr_array![0=>Float32x3, 1=>Float32x2];
-            pipeline_id.vertex_layouts = vec![wgpu::VertexBufferLayout {
-                array_stride: 4 * 5,
-                step_mode: wgpu::VertexStepMode::Vertex,
-                attributes: ATTRIBUTES,
-            }];
-            pipeline_id.vertex_shader = PipelineShader::Raw(std::borrow::Cow::Owned(
-                "
-struct VertexInput {
-    @location(0) position: vec3<f32>,
-    @location(1) tex_coords: vec2<f32>,
-}
-
-struct VertexOutput {
-    @builtin(position) position: vec4<f32>,
-    @location(0) tex_coords: vec2<f32>,
-}
-
-@vertex
-fn main(input: VertexInput) -> VertexOutput {
-    var output: VertexOutput;
-    output.position = vec4f(input.position, 1.0);
-    output.tex_coords = input.tex_coords;
-    return output;
-}
-"
-                .to_string(),
-            ));
-            pipeline_id.spirv_vertex_shader = false;
+        if pipeline_descriptor.is_screen_space {
             self.screen_space_materials.push(id);
         }
 
         let new_material = Material::new(
             id,
-            pipeline_id.clone(),
+            pipeline_descriptor.clone(),
             attachments,
             entities_attached,
             immediate_data,
@@ -369,12 +339,12 @@ fn main(input: VertexInput) -> VertexOutput {
 
         if let Some(entry) = self
             .pipeline_to_corresponding_materials
-            .get_mut(&pipeline_id)
+            .get_mut(&pipeline_descriptor)
         {
             entry.push(new_material.id());
         } else {
             self.pipeline_to_corresponding_materials
-                .insert(pipeline_id, vec![new_material.id()]);
+                .insert(pipeline_descriptor, vec![new_material.id()]);
             self.new_pipelines_needed = true;
         }
 
@@ -383,11 +353,11 @@ fn main(input: VertexInput) -> VertexOutput {
         id
     }
 
-    pub fn get_pipeline_ids(&self) -> Vec<&PipelineId> {
+    pub fn get_pipeline_ids(&self) -> Vec<&PipelineDescriptor> {
         self.pipeline_to_corresponding_materials.keys().collect()
     }
 
-    pub fn get_pipeline_materials(&self, pipeline_id: &PipelineId) -> Vec<&Material> {
+    pub fn get_pipeline_materials(&self, pipeline_id: &PipelineDescriptor) -> Vec<&Material> {
         let material_ids = self.pipeline_to_corresponding_materials.get(pipeline_id);
         match material_ids {
             Some(material_ids) => self

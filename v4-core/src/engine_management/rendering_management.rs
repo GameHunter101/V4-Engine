@@ -20,7 +20,7 @@ use crate::{
         compute::{Compute, ComputeError},
         scene::Scene,
     },
-    engine_management::pipeline::{PipelineError, PipelineId, create_render_pipeline},
+    engine_management::pipeline::{PipelineDescriptor, PipelineError, create_render_pipeline},
     engine_support::texture_support,
 };
 
@@ -212,7 +212,7 @@ impl RenderingManager {
     pub async fn render(
         &mut self,
         scene: &mut Scene,
-        pipelines: &HashMap<PipelineId, RenderPipeline>,
+        pipelines: &HashMap<PipelineDescriptor, RenderPipeline>,
         font_state: &mut FontState,
         egui_platform: &mut Platform,
         window: Option<&dyn Window>,
@@ -284,7 +284,7 @@ impl RenderingManager {
                 multiview_mask: None,
             });
 
-            let mut sorted_pipelines: Vec<(&PipelineId, &RenderPipeline)> =
+            let mut sorted_pipelines: Vec<(&PipelineDescriptor, &RenderPipeline)> =
                 Vec::from_iter(pipelines);
             sorted_pipelines.sort_by_key(|(pipeline, _)| pipeline.render_priority);
 
@@ -446,7 +446,7 @@ impl RenderingManager {
         scene: &Scene,
         width: u32,
         height: u32,
-        pipelines: &HashMap<PipelineId, RenderPipeline>,
+        pipelines: &HashMap<PipelineDescriptor, RenderPipeline>,
         output_view: &TextureView,
         device: &Device,
         raw_render_tex: &Texture,
@@ -705,18 +705,10 @@ impl ScreenSpaceAttachments {
             usage: wgpu::BufferUsages::VERTEX,
         });
 
-        let screen_space_output_pipeline_id = PipelineId {
-            vertex_shader: crate::engine_management::pipeline::PipelineShader::Raw(
-                std::borrow::Cow::Borrowed(include_str!(
-                    "../default_shaders/screen_space_vertex.wgsl"
-                )),
-            ),
+        let screen_space_output_pipeline_id = PipelineDescriptor {
+            vertex_shader: "../default_shaders/screen_space_vertex.wgsl",
             spirv_vertex_shader: false,
-            fragment_shader: crate::engine_management::pipeline::PipelineShader::Raw(
-                std::borrow::Cow::Borrowed(include_str!(
-                    "../default_shaders/screen_space_output_fragment.wgsl"
-                )),
-            ),
+            fragment_shader: "../default_shaders/screen_space_output_fragment.wgsl",
             spirv_fragment_shader: false,
             vertex_layouts: vec![wgpu::VertexBufferLayout {
                 array_stride: 4 * 5,

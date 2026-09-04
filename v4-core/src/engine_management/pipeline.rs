@@ -1,5 +1,3 @@
-use std::borrow::Cow;
-
 use wgpu::{
     BindGroupLayout, Device, RenderPipeline, ShaderStages, TextureFormat, VertexBufferLayout,
     util::make_spirv,
@@ -22,10 +20,10 @@ pub enum PipelineAttachments {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct PipelineId {
-    pub vertex_shader: PipelineShader,
+pub struct PipelineDescriptor {
+    pub vertex_shader: &'static str,
     pub spirv_vertex_shader: bool,
-    pub fragment_shader: PipelineShader,
+    pub fragment_shader: &'static str,
     pub spirv_fragment_shader: bool,
     pub vertex_layouts: Vec<wgpu::VertexBufferLayout<'static>>,
     pub uses_camera: bool,
@@ -35,7 +33,7 @@ pub struct PipelineId {
     pub render_priority: i32,
 }
 
-impl PipelineId {
+impl PipelineDescriptor {
     pub fn vertex_layouts<'a>(&'a self) -> &'a [VertexBufferLayout<'a>] {
         &self.vertex_layouts
     }
@@ -43,12 +41,33 @@ impl PipelineId {
     pub fn geometry_details(&self) -> &GeometryDetails {
         &self.geometry_details
     }
-}
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum PipelineShader {
-    Path(&'static str),
-    Raw(Cow<'static, str>),
+    pub fn screenspace_shader(
+        shader_path: &'static str,
+        spirv_shader: bool,
+        immediate_size: u32,
+    ) -> Self {
+        const ATTRIBUTES: &[wgpu::VertexAttribute] =
+            &wgpu::vertex_attr_array![0=>Float32x3, 1=>Float32x2];
+        let vertex_layouts = vec![wgpu::VertexBufferLayout {
+            array_stride: 4 * 5,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: ATTRIBUTES,
+        }];
+
+        Self {
+            vertex_shader: "../default_shaders/screen_space_vertex.wgsl",
+            spirv_vertex_shader: false,
+            fragment_shader: shader_path,
+            spirv_fragment_shader: spirv_shader,
+            vertex_layouts,
+            uses_camera: true,
+            is_screen_space: true,
+            geometry_details: Default::default(),
+            immediate_size,
+            render_priority: i32::MAX,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -72,7 +91,10 @@ impl Default for GeometryDetails {
     }
 }
 
-fn create_special_bind_group_layouts(device: &Device, id: &PipelineId) -> Vec<BindGroupLayout> {
+fn create_special_bind_group_layouts(
+    device: &Device,
+    id: &PipelineDescriptor,
+) -> Vec<BindGroupLayout> {
     let camera_layout = if id.uses_camera {
         Some(
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -129,7 +151,7 @@ fn create_special_bind_group_layouts(device: &Device, id: &PipelineId) -> Vec<Bi
 
 pub fn create_render_pipeline(
     device: &Device,
-    id: &PipelineId,
+    id: &PipelineDescriptor,
     attachment_bind_group_layout: Option<&BindGroupLayout>,
     render_format: TextureFormat,
     is_vert_spirv: bool,
@@ -206,36 +228,22 @@ pub fn create_render_pipeline(
 
 pub fn load_shader_module_descriptor(
     device: &Device,
-    shader: &PipelineShader,
+    shader_path: &str,
     spirv: bool,
 ) -> Result<wgpu::ShaderModule, PipelineError> {
-    match shader {
-        PipelineShader::Path(shader_path) => {
-            let shader_contents_bytes =
-                std::fs::read(shader_path).map_err(|err| PipelineError::ShaderModuleError {
-                    path: shader_path.to_string(),
-                    err,
-                })?;
+    let shader_contents_bytes =
+        std::fs::read(shader_path).map_err(|err| PipelineError::ShaderModuleError {
+            path: shader_path.to_string(),
+            err,
+        })?;
 
-            Ok(device.create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: None,
-                source: if spirv {
-                    make_spirv(&shader_contents_bytes)
-                } else {
-                    let contents = String::from_utf8_lossy(&shader_contents_bytes);
-                    wgpu::ShaderSource::Wgsl(contents)
-                },
-            }))
-        }
-        PipelineShader::Raw(contents) => {
-            Ok(device.create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: None,
-                source: if spirv {
-                    make_spirv(contents.as_bytes())
-                } else {
-                    wgpu::ShaderSource::Wgsl(contents.clone())
-                },
-            }))
-        }
-    }
+    Ok(device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: None,
+        source: if spirv {
+            make_spirv(&shader_contents_bytes)
+        } else {
+            let contents = String::from_utf8_lossy(&shader_contents_bytes);
+            wgpu::ShaderSource::Wgsl(contents)
+        },
+    }))
 }

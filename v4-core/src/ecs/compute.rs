@@ -6,7 +6,7 @@ use wgpu::{
 };
 
 use crate::engine_management::pipeline::{
-    PipelineError, PipelineShader, load_shader_module_descriptor,
+    PipelineError, load_shader_module_descriptor,
 };
 
 use super::{
@@ -140,7 +140,7 @@ impl Compute {
         });
 
         let module =
-            load_shader_module_descriptor(device, &PipelineShader::Path(shader_path), is_spirv)?;
+            load_shader_module_descriptor(device, shader_path, is_spirv)?;
 
         Ok(
             device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
