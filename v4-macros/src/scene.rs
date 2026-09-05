@@ -1,15 +1,18 @@
+#![allow(clippy::large_enum_variant)]
 use std::collections::{HashMap, HashSet};
 
 use proc_macro2::{Span, TokenTree};
 use quote::{ToTokens, quote};
 use syn::{
-    Error, Expr, ExprStruct, FieldValue, Ident, ItemMacro, LitBool, LitStr, Path, Token,
+    Error, Expr, ExprCall, ExprStruct, FieldValue, Ident, ItemMacro, LitBool, LitStr, Path, Token,
+    braced, bracketed,
     parse::{Parse, ParseStream, Parser},
     parse_quote, parse2,
     punctuated::Punctuated,
     spanned::Spanned,
 };
 
+#[derive(Debug)]
 struct ModularStruct {
     ident: Ident,
     fields: HashMap<String, FieldValue>,
@@ -19,27 +22,18 @@ struct ModularStruct {
 impl ModularStruct {
     fn parse(
         input: ParseStream,
-        mandatory_fields: Vec<&'static str>,
-        optional_fields: Vec<&'static str>,
+        struct_ident: &str,
+        mandatory_fields: Vec<&str>,
+        optional_fields: Vec<&str>,
     ) -> syn::Result<Self> {
-        let base_struct: ExprStruct = input.parse()?;
-        let span = base_struct.span();
+        let modular_struct = Self::parse_everything(input)?;
 
-        let Some(ident) = base_struct.path.get_ident().cloned() else {
+        if modular_struct.ident != struct_ident {
             return Err(Error::new_spanned(
-                base_struct.path,
-                "This modular struct needs to have an identifier.",
+                modular_struct.ident,
+                format!("Expected identifier '{struct_ident}'"),
             ));
-        };
-
-        let fields: Vec<&Ident> = base_struct
-            .fields
-            .iter()
-            .flat_map(|field| match &field.member {
-                syn::Member::Named(ident) => Some(ident),
-                syn::Member::Unnamed(_) => None,
-            })
-            .collect();
+        }
 
         let mandatory_fields_set = HashSet::<&str>::from_iter(mandatory_fields);
         let optional_fields_set = HashSet::from_iter(optional_fields);
@@ -50,9 +44,10 @@ impl ModularStruct {
             .copied()
             .collect();
 
-        if let Some(extraneous_field) = fields
-            .iter()
-            .find(|ident| !complete_names_set.contains(ident.to_string().as_str()))
+        if let Some(extraneous_field) = modular_struct
+            .fields
+            .keys()
+            .find(|ident| !complete_names_set.contains(ident.as_str()))
         {
             return Err(Error::new_spanned(
                 extraneous_field,
@@ -60,17 +55,34 @@ impl ModularStruct {
             ));
         }
 
-        let field_names: HashSet<String> = fields.iter().map(|ident| ident.to_string()).collect();
-        let field_names: HashSet<&str> = field_names.iter().map(|name| name.as_str()).collect();
+        let field_names: HashSet<&str> = modular_struct
+            .fields
+            .keys()
+            .map(|ident| ident.as_str())
+            .collect();
 
         let missing_fields: Vec<&&str> = mandatory_fields_set.difference(&field_names).collect();
 
         if !missing_fields.is_empty() {
-            return Err(Error::new_spanned(
-                base_struct,
-                "Missing modular struct fields: {missing_fields:?}",
+            return Err(Error::new(
+                modular_struct.span,
+                format!("Missing modular struct fields: {missing_fields:?}"),
             ));
         }
+
+        Ok(modular_struct)
+    }
+
+    fn parse_everything(input: ParseStream) -> syn::Result<Self> {
+        let base_struct: ExprStruct = input.parse()?;
+        let span = base_struct.span();
+
+        let Some(ident) = base_struct.path.get_ident().cloned() else {
+            return Err(Error::new_spanned(
+                base_struct.path,
+                "This modular struct needs to have an identifier.",
+            ));
+        };
 
         let fields_map: HashMap<String, FieldValue> = base_struct
             .fields
@@ -89,10 +101,18 @@ impl ModularStruct {
     }
 
     fn get_optional_field<T: Parse>(&self, field: &str) -> syn::Result<Option<T>> {
+        self.get_optional_field_with(field, T::parse)
+    }
+
+    fn get_optional_field_with<T>(
+        &self,
+        field: &str,
+        parser: impl Fn(ParseStream) -> syn::Result<T>,
+    ) -> syn::Result<Option<T>> {
         let expr = self.fields.get(field).map(|field| &field.expr);
 
         if let Some(expr) = expr {
-            Ok(Some(parse2(quote! {#expr})?))
+            Ok(Some(parser.parse2(quote! {#expr})?))
         } else {
             Ok(None)
         }
@@ -110,54 +130,6 @@ impl ModularStruct {
 pub struct SceneDescriptor {
     attributes: SceneAttributes,
     entities: Vec<EntityDescriptor>,
-}
-
-pub struct SceneAttributes {
-    active_camera: Option<ItemMacro>,
-    screen_space_materials: Vec<MaterialDescriptor>,
-}
-
-impl SceneAttributes {
-    fn validate_attributes(attributes: Vec<FieldValue>) -> syn::Result<SceneAttributes> {
-        let mut active_camera = None;
-        let mut screen_space_materials = Vec::new();
-
-        for attribute in attributes {
-            match attribute.member {
-                syn::Member::Named(ref ident) => match ident.to_string().as_str() {
-                    "active_camera" => {
-                        active_camera = Some(parse_quote!(quote! {#(attribute.expr)}))
-                    }
-                    "screen_space_materials" => {
-                        let parser = |input: ParseStream| {
-                            Punctuated::<MaterialDescriptor, Token![,]>::parse_terminated_with(
-                                input,
-                                |input: ParseStream| MaterialDescriptor::parse(input, true),
-                            )
-                        };
-
-                        let punctuated = parser.parse2(quote! {#(attribute.expr)})?;
-                        screen_space_materials = Vec::from_iter(punctuated);
-                    }
-                    _ => {
-                        let error = format!("Invalid attribute {ident}");
-                        return Err(Error::new_spanned(attribute, error));
-                    }
-                },
-                syn::Member::Unnamed(_) => {
-                    return Err(Error::new_spanned(
-                        attribute,
-                        "Unnamed fields are not allowed for scene attributes",
-                    ));
-                }
-            }
-        }
-
-        Ok(SceneAttributes {
-            active_camera,
-            screen_space_materials,
-        })
-    }
 }
 
 impl Parse for SceneDescriptor {
@@ -183,10 +155,63 @@ impl Parse for SceneDescriptor {
     }
 }
 
+pub struct SceneAttributes {
+    active_camera: Option<ItemMacro>,
+    screen_space_materials: Vec<MaterialDescriptor>,
+}
+
+impl SceneAttributes {
+    fn validate_attributes(attributes: Vec<FieldValue>) -> syn::Result<SceneAttributes> {
+        let mut active_camera = None;
+        let mut screen_space_materials = Vec::new();
+
+        for attribute in attributes {
+            match attribute.member {
+                syn::Member::Named(ref ident) => match ident.to_string().as_str() {
+                    "active_camera" => {
+                        active_camera = Some(parse_quote!(quote! {#(attribute.expr)}))
+                    }
+                    "screen_space_materials" => {
+                        let get_array_contents = |input: ParseStream| {
+                            let array_contents;
+                            bracketed!(array_contents in input);
+                            array_contents.parse_terminated(
+                                |input: ParseStream| MaterialDescriptor::parse(input, true),
+                                Token![,],
+                            )
+                        };
+
+                        let expr = attribute.expr;
+                        let array_contents = get_array_contents.parse2(quote! {#expr})?;
+
+                        screen_space_materials = Vec::from_iter(array_contents);
+                    }
+                    _ => {
+                        let error = format!("Invalid attribute {ident}");
+                        return Err(Error::new_spanned(attribute, error));
+                    }
+                },
+                syn::Member::Unnamed(_) => {
+                    return Err(Error::new_spanned(
+                        attribute,
+                        "Unnamed fields are not allowed for scene attributes",
+                    ));
+                }
+            }
+        }
+
+        Ok(SceneAttributes {
+            active_camera,
+            screen_space_materials,
+        })
+    }
+}
+
 impl ToTokens for SceneDescriptor {
     fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {}
 }
 
+#[derive(Debug)]
 enum SceneItems {
     SceneAttribute(FieldValue),
     Entity(EntityDescriptor),
@@ -202,36 +227,66 @@ impl Parse for SceneItems {
     }
 }
 
+#[derive(Debug)]
 struct MaterialDescriptor {
     pipeline: PipelineOptions,
     attachments: Vec<ShaderAttachmentOptions>,
     immediate_data: Option<Expr>,
     enabled: Option<Expr>,
+    id: Option<LitStr>,
 }
 
 impl MaterialDescriptor {
     fn parse(input: ParseStream, screenspace: bool) -> syn::Result<Self> {
         let modular_struct = ModularStruct::parse(
             input,
+            "Material",
             vec!["pipeline"],
-            vec!["attachments", "immediate_data", "enabled"],
+            vec!["attachments", "immediate_data", "enabled", "ID"],
         )?;
 
+        let pipeline = modular_struct.get_mandatory_field("pipeline")?;
+
+        match &pipeline {
+            PipelineOptions::Screenspace(pipeline) => {
+                if !screenspace {
+                    return Err(Error::new(
+                        pipeline.span,
+                        "A standard material cannot receive a screenspace pipeline",
+                    ));
+                }
+            }
+            PipelineOptions::Normal(screenspace_pipeline) => {
+                if screenspace {
+                    return Err(Error::new(
+                        screenspace_pipeline.span,
+                        "A screenspace material cannot receive a normal pipeline",
+                    ));
+                }
+            }
+            PipelineOptions::Id(_) => {}
+        }
+
         Ok(Self {
-            pipeline: modular_struct.get_mandatory_field("pipeline")?,
+            pipeline,
             attachments: if let Some(attachments) =
-                modular_struct.get_optional_field("attachments")?
-            {
-                attachments
+                modular_struct.get_optional_field_with("attachments", |input: ParseStream| {
+                    let contents;
+                    bracketed!(contents in input);
+                    contents.parse_terminated(ShaderAttachmentOptions::parse, Token![,])
+                })? {
+                Vec::from_iter(attachments)
             } else {
                 Vec::new()
             },
             immediate_data: modular_struct.get_optional_field("immediate_data")?,
             enabled: modular_struct.get_optional_field("enabled")?,
+            id: modular_struct.get_optional_field("ID")?,
         })
     }
 }
 
+#[derive(Debug)]
 enum PipelineOptions {
     Screenspace(ScreenspacePipelineDescriptor),
     Normal(NormalPipelineDescriptor),
@@ -240,40 +295,46 @@ enum PipelineOptions {
 
 impl Parse for PipelineOptions {
     fn parse(input: ParseStream) -> syn::Result<Self> {
-        if let Ok(screenspace) = input.fork().parse::<ScreenspacePipelineDescriptor>() {
-            Ok(PipelineOptions::Screenspace(screenspace))
-        } else if let Ok(normal) = input.fork().parse::<NormalPipelineDescriptor>() {
-            Ok(PipelineOptions::Normal(normal))
-        } else if let Ok(id) = input.fork().parse::<ItemMacro>() {
-            Ok(PipelineOptions::Id(id))
-        } else {
-            Err(Error::new_spanned(input.parse::<TokenTree>()?, "Invalid pipeline specified."))
+        let ident: Ident = input.fork().parse()?;
+
+        match ident.to_string().as_str() {
+            "ScreenSpacePipeline" => Ok(Self::Screenspace(input.parse()?)),
+            "Pipeline" => Ok(Self::Normal(input.parse()?)),
+            "ID" => Ok(Self::Id(input.parse()?)),
+            _ => Err(Error::new_spanned(ident, "Invalid pipeline specified.")),
         }
     }
 }
 
+#[derive(Debug)]
 struct ScreenspacePipelineDescriptor {
     shader_path: LitStr,
     spirv_shader: Option<LitBool>,
     immediate_size: Option<Expr>,
+    span: Span,
+    id: Option<LitStr>,
 }
 
 impl Parse for ScreenspacePipelineDescriptor {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let modular_struct = ModularStruct::parse(
             input,
+            "ScreenSpacePipeline",
             vec!["shader_path"],
-            vec!["spirv_shader", "immediate_size"],
+            vec!["spirv_shader", "immediate_size", "ID"],
         )?;
 
         Ok(Self {
             shader_path: modular_struct.get_mandatory_field("shader_path")?,
             spirv_shader: modular_struct.get_optional_field("spirv_shader")?,
             immediate_size: modular_struct.get_optional_field("immediate_size")?,
+            span: modular_struct.span,
+            id: modular_struct.get_optional_field("ID")?,
         })
     }
 }
 
+#[derive(Debug)]
 struct NormalPipelineDescriptor {
     vertex_shader: LitStr,
     spirv_vertex_shader: Option<LitBool>,
@@ -284,12 +345,15 @@ struct NormalPipelineDescriptor {
     geometry_details: Option<GeometryDetailsDescriptor>,
     immediate_size: Option<Expr>,
     render_priority: Option<Expr>,
+    span: Span,
+    id: Option<LitStr>,
 }
 
 impl Parse for NormalPipelineDescriptor {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let modular_struct = ModularStruct::parse(
             input,
+            "Pipeline",
             vec![
                 "vertex_shader",
                 "fragment_shader",
@@ -302,6 +366,7 @@ impl Parse for NormalPipelineDescriptor {
                 "geometry_details",
                 "immediate_size",
                 "render_priority",
+                "ID",
             ],
         )?;
 
@@ -315,22 +380,27 @@ impl Parse for NormalPipelineDescriptor {
             geometry_details: modular_struct.get_optional_field("geometry_details")?,
             immediate_size: modular_struct.get_optional_field("immediate_size")?,
             render_priority: modular_struct.get_optional_field("render_priority")?,
+            span: modular_struct.span,
+            id: modular_struct.get_optional_field("ID")?,
         })
     }
 }
 
+#[derive(Debug)]
 struct GeometryDetailsDescriptor {
     topology: Option<Path>,
     strip_index_format: Option<Path>,
     front_face: Option<Path>,
     cull_mode: Option<Path>,
     polygon_mode: Option<Path>,
+    span: Span,
 }
 
 impl Parse for GeometryDetailsDescriptor {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let modular_struct = ModularStruct::parse(
             input,
+            "GeometryDetails",
             Vec::new(),
             vec![
                 "topology",
@@ -347,28 +417,217 @@ impl Parse for GeometryDetailsDescriptor {
             front_face: modular_struct.get_optional_field("front_face")?,
             cull_mode: modular_struct.get_optional_field("cull_mode")?,
             polygon_mode: modular_struct.get_optional_field("polygon_mode")?,
+            span: modular_struct.span,
         })
     }
 }
 
+#[derive(Debug)]
 enum ShaderAttachmentOptions {
-    Texture(ShaderTextureAttachment),
-    Buffer
+    Texture(ShaderTextureDescriptor),
+    Buffer(ShaderBufferOptions),
 }
 
-struct ShaderTextureAttachment {
-
+impl Parse for ShaderAttachmentOptions {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let ident: Ident = input.fork().parse()?;
+        if &ident.to_string() == "Buffer" {
+            Ok(Self::Buffer(input.parse()?))
+        } else if &ident.to_string() == "Texture" {
+            Ok(Self::Texture(input.parse()?))
+        } else {
+            Err(Error::new_spanned(
+                ident,
+                "Invalid shader attachment specified",
+            ))
+        }
+    }
 }
 
+#[derive(Debug)]
+struct ShaderTextureDescriptor {
+    texture_bundle: Expr,
+    visibility: Expr,
+    span: Span,
+}
+
+impl Parse for ShaderTextureDescriptor {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let modular_struct = ModularStruct::parse(
+            input,
+            "Texture",
+            vec!["texture_bundle", "visibility"],
+            Vec::new(),
+        )?;
+
+        Ok(Self {
+            texture_bundle: modular_struct.get_mandatory_field("texture_bundle")?,
+            visibility: modular_struct.get_mandatory_field("visibility")?,
+            span: modular_struct.span,
+        })
+    }
+}
+
+#[derive(Debug)]
+enum ShaderBufferOptions {
+    Descriptor(ShaderBufferDescriptor),
+    Constructor(ShaderBufferConstructor),
+}
+
+impl Parse for ShaderBufferOptions {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        if input.fork().parse::<ShaderBufferDescriptor>().is_ok() {
+            Ok(Self::Descriptor(input.parse()?))
+        } else if input.fork().parse::<ShaderBufferConstructor>().is_ok() {
+            Ok(Self::Constructor(input.parse()?))
+        } else {
+            Err(Error::new_spanned(
+                input.parse::<TokenTree>()?,
+                "Invalid shader buffer variant found. Use either the buffer descriptor (buffer, visibility, buffer_type), or the constructor (device, data, buffer_type, visibility, extra_usages)",
+            ))
+        }
+    }
+}
+
+#[derive(Debug)]
+struct ShaderBufferDescriptor {
+    buffer: Expr,
+    visibility: Expr,
+    buffer_type: Expr,
+}
+
+impl Parse for ShaderBufferDescriptor {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let modular_struct = ModularStruct::parse(
+            input,
+            "Buffer",
+            vec!["buffer", "visibility", "buffer_type"],
+            Vec::new(),
+        )?;
+
+        let buffer = modular_struct.get_mandatory_field("buffer")?;
+        let visibility = modular_struct.get_mandatory_field("visibility")?;
+        let buffer_type = modular_struct.get_mandatory_field("buffer_type")?;
+
+        Ok(Self {
+            buffer,
+            visibility,
+            buffer_type,
+        })
+    }
+}
+
+#[derive(Debug)]
+struct ShaderBufferConstructor {
+    device: Expr,
+    data: Expr,
+    buffer_type: Expr,
+    visibility: Expr,
+    extra_usages: Expr,
+}
+
+impl Parse for ShaderBufferConstructor {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let modular_struct = ModularStruct::parse(
+            input,
+            "Buffer",
+            vec![
+                "device",
+                "data",
+                "buffer_type",
+                "visibility",
+                "extra_usages",
+            ],
+            Vec::new(),
+        )?;
+
+        Ok(Self {
+            device: modular_struct.get_mandatory_field("device")?,
+            data: modular_struct.get_mandatory_field("data")?,
+            buffer_type: modular_struct.get_mandatory_field("buffer_type")?,
+            visibility: modular_struct.get_mandatory_field("visibility")?,
+            extra_usages: modular_struct.get_mandatory_field("extra_usages")?,
+        })
+    }
+}
+
+#[derive(Debug)]
 struct EntityDescriptor {
-    id: LitStr,
-    components: Vec<ComponentDescriptor>,
+    id: Option<LitStr>,
+    components: Vec<ComponentOptions>,
 }
 
 impl Parse for EntityDescriptor {
     fn parse(input: ParseStream) -> syn::Result<Self> {
-        todo!()
+        let id: Option<LitStr> = if input.peek(Token![_]) {
+            let _underscore_token: Token![_] = input.parse()?;
+            None
+        } else {
+            Some(input.parse()?)
+        };
+
+        let _equal_token: Token![=] = input.parse()?;
+
+        let entity_contents;
+        braced!(entity_contents in input);
+
+        let components =
+            Vec::from_iter(entity_contents.parse_terminated(ComponentOptions::parse, Token![,])?);
+
+        Ok(Self { id, components })
     }
 }
 
-struct ComponentDescriptor {}
+#[derive(Debug)]
+enum ComponentOptions {
+    Descriptor(ComponentDescriptor),
+    Constructor(ComponentConstructor),
+}
+
+impl Parse for ComponentOptions {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        if input.fork().parse::<ExprCall>().is_ok() {
+            Ok(Self::Constructor(input.parse()?))
+        } else {
+            Ok(Self::Descriptor(input.parse()?))
+        }
+    }
+}
+
+#[derive(Debug)]
+struct ComponentDescriptor {
+    ident: Ident,
+    fields: Vec<FieldValue>,
+    id: Option<LitStr>,
+}
+
+impl Parse for ComponentDescriptor {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let modular_struct = ModularStruct::parse_everything(input)?;
+
+        Ok(Self {
+            fields: modular_struct
+                .fields
+                .iter()
+                .flat_map(|(name, field)| {
+                    if name != "ID" {
+                        Some(field.clone())
+                    } else {
+                        None
+                    }
+                })
+                .collect(),
+            id: modular_struct.get_optional_field("ID")?,
+            ident: modular_struct.ident,
+        })
+    }
+}
+
+#[derive(Debug)]
+struct ComponentConstructor {}
+
+impl Parse for ComponentConstructor {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        todo!()
+    }
+}
