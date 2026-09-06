@@ -4,8 +4,8 @@ use std::collections::{HashMap, HashSet};
 use proc_macro2::{Span, TokenTree};
 use quote::{ToTokens, quote};
 use syn::{
-    Error, Expr, ExprCall, ExprStruct, FieldValue, Ident, ItemMacro, LitBool, LitStr, Path, Token,
-    braced, bracketed,
+    Error, Expr, ExprCall, ExprMethodCall, ExprStruct, FieldValue, Ident, ItemMacro, LitBool,
+    LitStr, Path, Token, braced, bracketed,
     parse::{Parse, ParseStream, Parser},
     parse_quote, parse2,
     punctuated::Punctuated,
@@ -126,6 +126,17 @@ impl ModularStruct {
         }
     }
 }
+fn expr_to_array<T>(input: Expr, parser: fn(ParseStream) -> syn::Result<T>) -> syn::Result<Vec<T>> {
+    let array_parse = |input: ParseStream| {
+        let array_contents;
+        bracketed!(array_contents in input);
+        Ok(Vec::from_iter(
+            array_contents.parse_terminated(parser, Token![,])?,
+        ))
+    };
+
+    array_parse.parse2(quote! {#input})
+}
 
 pub struct SceneDescriptor {
     attributes: SceneAttributes,
@@ -172,17 +183,10 @@ impl SceneAttributes {
                         active_camera = Some(parse_quote!(quote! {#(attribute.expr)}))
                     }
                     "screen_space_materials" => {
-                        let get_array_contents = |input: ParseStream| {
-                            let array_contents;
-                            bracketed!(array_contents in input);
-                            array_contents.parse_terminated(
-                                |input: ParseStream| MaterialDescriptor::parse(input, true),
-                                Token![,],
-                            )
-                        };
-
-                        let expr = attribute.expr;
-                        let array_contents = get_array_contents.parse2(quote! {#expr})?;
+                        let array_contents =
+                            expr_to_array(attribute.expr, |input: ParseStream| {
+                                MaterialDescriptor::parse(input, true)
+                            })?;
 
                         screen_space_materials = Vec::from_iter(array_contents);
                     }
@@ -571,10 +575,29 @@ impl Parse for EntityDescriptor {
         let entity_contents;
         braced!(entity_contents in input);
 
-        let components =
-            Vec::from_iter(entity_contents.parse_terminated(ComponentOptions::parse, Token![,])?);
+        let mut fields: HashMap<String, FieldValue> = entity_contents
+            .parse_terminated(FieldValue::parse, Token![,])?
+            .into_iter()
+            .flat_map(|field| match &field.member {
+                syn::Member::Named(ident) => Some((ident.to_string(), field)),
+                syn::Member::Unnamed(_) => None,
+            })
+            .collect();
 
-        Ok(Self { id, components })
+        let components = if let Some(components_field) = fields.remove("components") {
+            expr_to_array(components_field.expr.clone(), ComponentOptions::parse)?
+        } else {
+            Vec::new()
+        };
+
+        if let Some((field_name, extraneous_field)) = fields.into_iter().next() {
+            Err(Error::new_spanned(
+                extraneous_field,
+                format!("Unexpected field '{field_name}'"),
+            ))
+        } else {
+            Ok(Self { id, components })
+        }
     }
 }
 
@@ -586,7 +609,7 @@ enum ComponentOptions {
 
 impl Parse for ComponentOptions {
     fn parse(input: ParseStream) -> syn::Result<Self> {
-        if input.fork().parse::<ExprCall>().is_ok() {
+        if input.fork().parse::<ComponentConstructor>().is_ok() {
             Ok(Self::Constructor(input.parse()?))
         } else {
             Ok(Self::Descriptor(input.parse()?))
@@ -624,10 +647,40 @@ impl Parse for ComponentDescriptor {
 }
 
 #[derive(Debug)]
-struct ComponentConstructor {}
+struct ComponentConstructor {
+    constructor: Expr,
+    id: Option<LitStr>,
+}
 
 impl Parse for ComponentConstructor {
     fn parse(input: ParseStream) -> syn::Result<Self> {
-        todo!()
+        if input.fork().parse::<ExprCall>().is_ok() {
+            Ok(Self {
+                constructor: input.parse()?,
+                id: None,
+            })
+        } else if input.fork().parse::<ExprMethodCall>().is_ok() {
+            let method_call: ExprMethodCall = input.parse()?;
+            let (id, filtered_constructor) = if method_call.method == "ID" {
+                let expr_parser = |input: ParseStream| input.parse::<LitStr>();
+
+                (
+                    Some(expr_parser.parse2(quote! {method_call.args[0]})?),
+                    *method_call.receiver,
+                )
+            } else {
+                (None, Expr::MethodCall(method_call))
+            };
+
+            Ok(Self {
+                constructor: filtered_constructor,
+                id,
+            })
+        } else {
+            Ok(Self {
+                constructor: input.parse()?,
+                id: None,
+            })
+        }
     }
 }
