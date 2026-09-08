@@ -124,12 +124,12 @@ impl ModularStruct {
             .flat_map(|field| match &field.member {
                 syn::Member::Named(ident) => {
                     if all_fields.contains(ident.to_string().as_str()) {
+                        Some(Ok((ident.to_string(), field)))
+                    } else {
                         Some(Err(Error::new_spanned(
                             ident,
                             format!("Unexpected field '{ident}'"),
                         )))
-                    } else {
-                        Some(Ok((ident.to_string(), field)))
                     }
                 }
                 syn::Member::Unnamed(_) => None,
@@ -210,6 +210,16 @@ impl Parse for SceneDescriptor {
     }
 }
 
+impl ToTokens for SceneDescriptor {
+    fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
+        tokens.extend(quote! {
+            {
+                let mut scene = v4::ecs::scene::Scene::default();
+            }
+        });
+    }
+}
+
 pub struct SceneAttributes {
     active_camera: Option<ItemMacro>,
     screen_space_materials: Vec<MaterialDescriptor>,
@@ -253,10 +263,6 @@ impl SceneAttributes {
             screen_space_materials,
         })
     }
-}
-
-impl ToTokens for SceneDescriptor {
-    fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {}
 }
 
 #[derive(Debug)]

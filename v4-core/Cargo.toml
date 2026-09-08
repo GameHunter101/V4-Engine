@@ -1,6 +1,6 @@
 [package]
 name = "v4-core"
-version = "0.3.13"
+version = "0.3.17"
 authors.workspace = true
 edition = "2024"
 
@@ -22,9 +22,10 @@ log.workspace = true
 nalgebra.workspace = true
 pollster.workspace = true
 smaa.workspace = true
-thiserror = "2.0.20"
+thiserror.workspace = true
 tobj.workspace = true
 tokio.workspace = true
+uuid.workspace = true
 wgpu.workspace = true
 winit.workspace = true
 winit_input_helper.workspace = true

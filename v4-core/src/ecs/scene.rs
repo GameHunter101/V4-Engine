@@ -8,6 +8,7 @@ use std::{
 };
 
 use crossbeam_channel::{Receiver, Sender};
+use uuid::Uuid;
 use wgpu::{BindGroup, Buffer, Device, Queue};
 use winit_input_helper::WinitInputHelper;
 
@@ -15,17 +16,14 @@ use thiserror::Error;
 
 use crate::{
     EngineDetails,
-    engine_management::{
-        engine_action::EngineAction,
-        pipeline::PipelineDescriptor,
-    },
+    engine_management::{engine_action::EngineAction, pipeline::PipelineDescriptor},
 };
 
 use super::{
     actions::ActionQueue,
-    component::{Component, ComponentDetails, ComponentId, ComponentSystem},
+    component::{Component, ComponentDetails, ComponentSystem},
     compute::Compute,
-    entity::{Entity, EntityId},
+    entity::Entity,
     material::{Material, ShaderAttachment},
 };
 
@@ -40,29 +38,29 @@ pub enum SceneError {
     #[error("Could not receive workload result from worker thread")]
     WorkloadRecvError,
     #[error("The specified material ID ({0}) is invalid")]
-    InvalidMaterialId(ComponentId),
+    InvalidMaterialId(Uuid),
     #[error("Failed to send engine action: {0}")]
     SendEngineActionFailure(#[from] crossbeam_channel::TrySendError<Box<dyn EngineAction>>),
     #[error("The specified entity ID ({0}) is invalid")]
-    InvalidEntityId(EntityId),
+    InvalidUuid(Uuid),
 }
 
 pub struct Scene {
     scene_index: usize,
     components: Vec<Component>,
-    entities: HashMap<EntityId, Entity>,
-    entity_component_groupings: HashMap<EntityId, Range<usize>>,
-    ui_components: Vec<ComponentId>,
-    materials: Vec<Material>,
-    screen_space_materials: Vec<ComponentId>,
-    pipeline_to_corresponding_materials: HashMap<PipelineDescriptor, Vec<ComponentId>>,
-    total_entities_created: EntityId,
+    entities: HashMap<Uuid, Entity>,
+    entity_component_groupings: HashMap<Uuid, Range<usize>>,
+    ui_components: Vec<Uuid>,
+    materials: HashMap<Uuid, Material>,
+    screen_space_materials: Vec<Uuid>,
+    pipeline_to_corresponding_materials: HashMap<PipelineDescriptor, Vec<Uuid>>,
+    total_entities_created: u32,
     workload_sender: Option<Sender<WorkloadPacket>>,
-    workload_output_receiver: Option<Receiver<(ComponentId, WorkloadOutput)>>,
+    workload_output_receiver: Option<Receiver<(Uuid, WorkloadOutput)>>,
     workload_outputs: WorkloadOutputCollection,
     engine_action_sender: Option<Sender<Box<dyn EngineAction>>>,
     pub new_pipelines_needed: bool,
-    active_camera: Option<ComponentId>,
+    active_camera: Option<Uuid>,
     active_camera_buffer: Option<Buffer>,
     active_camera_bind_group: Option<BindGroup>,
     computes: Vec<Compute>,
@@ -77,12 +75,12 @@ impl Debug for Scene {
 }
 
 pub type WorkloadOutput = Box<dyn Any + Send + Sync>;
-pub type WorkloadOutputCollection = HashMap<ComponentId, Vec<WorkloadOutput>>;
+pub type WorkloadOutputCollection = HashMap<Uuid, Vec<WorkloadOutput>>;
 pub type Workload = Pin<Box<dyn Future<Output = WorkloadOutput> + Send>>;
 
 pub struct WorkloadPacket {
     pub scene_index: usize,
-    pub component_id: ComponentId,
+    pub component_id: Uuid,
     pub workload: Workload,
 }
 
@@ -99,7 +97,7 @@ impl Default for Scene {
             entities: HashMap::new(),
             entity_component_groupings: HashMap::new(),
             ui_components: Vec::new(),
-            materials: Vec::new(),
+            materials: HashMap::new(),
             screen_space_materials: Vec::new(),
             pipeline_to_corresponding_materials: HashMap::new(),
             total_entities_created: 0,
@@ -121,7 +119,7 @@ impl Scene {
         &mut self,
         device: &Device,
         workload_sender: Sender<WorkloadPacket>,
-        workload_output_receiver: Receiver<(ComponentId, WorkloadOutput)>,
+        workload_output_receiver: Receiver<(Uuid, WorkloadOutput)>,
         engine_action_sender: Sender<Box<dyn EngineAction>>,
     ) -> ActionQueue {
         self.workload_sender = Some(workload_sender);
@@ -141,7 +139,7 @@ impl Scene {
 
         let mat_action_queue: ActionQueue = self
             .materials
-            .iter_mut()
+            .values_mut()
             .filter(|mat| !mat.is_initialized())
             .flat_map(|mat| mat.initialize(device))
             .collect();
@@ -202,7 +200,6 @@ impl Scene {
                     .iter_mut()
                     .chain(later_components.iter_mut())
                     .collect::<Vec<_>>();
-                let mut all_materials: Vec<&mut Material> = self.materials.iter_mut().collect();
 
                 let mut entity_component_groupings = self.entity_component_groupings.clone();
                 for grouping in entity_component_groupings.values_mut() {
@@ -221,7 +218,7 @@ impl Scene {
                     input_manager,
                     other_components: &mut other_components,
                     computes: &mut self.computes,
-                    materials: &mut all_materials,
+                    materials: &mut self.materials,
                     engine_details,
                     workload_outputs,
                     entities,
@@ -241,29 +238,23 @@ impl Scene {
     ) {
         let active_camera = self.active_camera();
         let entities = &self.entities;
-        let entity_component_groupings: HashMap<EntityId, Range<usize>> = self
+        let entity_component_groupings: HashMap<Uuid, Range<usize>> = self
             .entity_component_groupings
             .clone()
             .into_iter()
             .filter(|(ent, _)| self.is_entity_enabled(*ent))
             .collect();
 
-        let all_materials: &mut Vec<Material> = &mut self.materials;
+        let mut all_materials: Vec<&mut Material> = self.materials.values_mut().collect();
 
         let workload_outputs = &self.workload_outputs;
 
-        for i in 0..all_materials.len() {
-            let (previous_materials, all_other_materials) = all_materials.split_at_mut(i);
+        let material_ids: Vec<Uuid> = self.materials.keys().copied().collect();
+        for id in material_ids {
+            let mut current_material = self.materials.remove(&id).unwrap();
+
             let mut all_components: Vec<&mut Component> =
                 self.components.iter_mut().collect::<Vec<_>>();
-
-            let (current_material, later_materials) =
-                all_other_materials.split_first_mut().unwrap();
-
-            let mut other_materials: Vec<&mut Material> = previous_materials
-                .iter_mut()
-                .chain(later_materials.iter_mut())
-                .collect();
             let entity_component_groupings = entity_component_groupings.clone();
 
             current_material.update(super::component::UpdateParams {
@@ -272,19 +263,21 @@ impl Scene {
                 input_manager,
                 other_components: &mut all_components,
                 computes: &mut self.computes,
-                materials: &mut other_materials,
+                materials: &mut self.materials,
                 engine_details,
                 workload_outputs,
                 entities,
                 entity_component_groupings,
                 active_camera,
             });
+
+            self.materials.insert(id, current_material);
         }
     }
 
     pub async fn attach_workload(
         &mut self,
-        component_id: ComponentId,
+        component_id: Uuid,
         workload: Workload,
     ) -> Result<(), SceneError> {
         if let Some(sender) = &self.workload_sender {
@@ -300,7 +293,7 @@ impl Scene {
 
     pub async fn free_workload_output(
         &mut self,
-        component_id: ComponentId,
+        component_id: Uuid,
         workload_output_index: usize,
     ) -> Result<(), SceneError> {
         let Some(outputs) = self.workload_outputs.get_mut(&component_id) else {
@@ -318,11 +311,12 @@ impl Scene {
         &mut self,
         pipeline_descriptor: PipelineDescriptor,
         attachments: Vec<ShaderAttachment>,
-        entities_attached: Vec<EntityId>,
+        entities_attached: Vec<Uuid>,
         immediate_data: Vec<u8>,
         is_enabled: bool,
-    ) -> ComponentId {
-        let id = self.materials.len() as ComponentId;
+        id: Option<Uuid>,
+    ) -> Uuid {
+        let id = id.unwrap_or(Uuid::new_v4());
 
         if pipeline_descriptor.is_screen_space {
             self.screen_space_materials.push(id);
@@ -348,7 +342,7 @@ impl Scene {
             self.new_pipelines_needed = true;
         }
 
-        self.materials.push(new_material);
+        self.materials.insert(id, new_material);
 
         id
     }
@@ -362,16 +356,16 @@ impl Scene {
         match material_ids {
             Some(material_ids) => self
                 .materials
-                .iter()
+                .values()
                 .filter(|mat| material_ids.contains(&mat.id()))
                 .collect(),
             None => Vec::new(),
         }
     }
 
-    pub fn get_components_per_material(&self) -> HashMap<ComponentId, Vec<&Component>> {
+    pub fn get_components_per_material(&self) -> HashMap<Uuid, Vec<&Component>> {
         self.materials
-            .iter()
+            .values()
             .flat_map(|material| {
                 if material.pipeline_id().is_screen_space {
                     return None;
@@ -399,16 +393,17 @@ impl Scene {
 
     pub fn create_entity(
         &mut self,
-        parent: Option<EntityId>,
+        parent: Option<Uuid>,
         mut components: Vec<Component>,
         computes: Vec<Compute>,
-        material: Option<ComponentId>,
+        material: Option<Uuid>,
         is_enabled: bool,
-    ) -> Result<EntityId, SceneError> {
+        id: Option<Uuid>,
+    ) -> Result<Uuid, SceneError> {
         let entity = Entity::new(
-            self.total_entities_created + 1,
+            id.unwrap_or(Uuid::new_v4()),
             Vec::new(),
-            parent.unwrap_or(0),
+            parent.unwrap_or(Uuid::nil()),
             is_enabled,
             material,
         );
@@ -416,7 +411,7 @@ impl Scene {
 
         if let Some(parent) = parent {
             let Some(parent_entity) = self.entities.get_mut(&parent) else {
-                return Err(SceneError::InvalidEntityId(parent));
+                return Err(SceneError::InvalidUuid(parent));
             };
             parent_entity.push_child(id);
         }
@@ -434,7 +429,7 @@ impl Scene {
         );
 
         if let Some(mat_id) = material {
-            let Some(material) = self.materials.iter_mut().find(|mat| mat.id() == mat_id) else {
+            let Some(material) = self.materials.get_mut(&mat_id) else {
                 return Err(SceneError::InvalidMaterialId(mat_id));
             };
             material.attach_entity(id);
@@ -446,31 +441,31 @@ impl Scene {
         Ok(id)
     }
 
-    pub fn get_entity(&self, entity_id: EntityId) -> Option<&Entity> {
+    pub fn get_entity(&self, entity_id: Uuid) -> Option<&Entity> {
         self.entities.get(&entity_id)
     }
 
-    pub fn get_entity_mut(&mut self, entity_id: EntityId) -> Option<&mut Entity> {
+    pub fn get_entity_mut(&mut self, entity_id: Uuid) -> Option<&mut Entity> {
         self.entities.get_mut(&entity_id)
     }
 
-    pub fn get_component(&self, component_id: ComponentId) -> Option<&Component> {
+    pub fn get_component(&self, component_id: Uuid) -> Option<&Component> {
         self.components
             .iter()
             .find(|comp| comp.id() == component_id)
     }
 
-    pub fn get_component_mut(&mut self, component_id: ComponentId) -> Option<&mut Component> {
+    pub fn get_component_mut(&mut self, component_id: Uuid) -> Option<&mut Component> {
         self.components
             .iter_mut()
             .find(|comp| comp.id() == component_id)
     }
 
-    pub fn get_material(&self, material_id: ComponentId) -> Option<&Material> {
-        self.materials.get(material_id as usize)
+    pub fn get_material(&self, material_id: Uuid) -> Option<&Material> {
+        self.materials.get(&material_id)
     }
 
-    pub fn enabled_ui_components(&self) -> HashSet<ComponentId> {
+    pub fn enabled_ui_components(&self) -> HashSet<Uuid> {
         self.components
             .iter()
             .filter_map(|comp| {
@@ -501,7 +496,7 @@ impl Scene {
         Ok(())
     }
 
-    pub fn register_ui_component(&mut self, component_id: ComponentId) {
+    pub fn register_ui_component(&mut self, component_id: Uuid) {
         self.ui_components.push(component_id);
     }
 
@@ -513,11 +508,11 @@ impl Scene {
         Ok(())
     }
 
-    pub fn set_active_camera(&mut self, camera: Option<ComponentId>) {
+    pub fn set_active_camera(&mut self, camera: Option<Uuid>) {
         self.active_camera = camera;
     }
 
-    pub fn active_camera(&self) -> Option<ComponentId> {
+    pub fn active_camera(&self) -> Option<Uuid> {
         self.active_camera
     }
 
@@ -541,7 +536,7 @@ impl Scene {
         self.scene_index
     }
 
-    pub fn screen_space_materials(&self) -> &[ComponentId] {
+    pub fn screen_space_materials(&self) -> &[Uuid] {
         &self.screen_space_materials
     }
 
@@ -561,13 +556,13 @@ impl Scene {
         self.computes.push(compute);
     }
 
-    pub fn materials(&self) -> &[Material] {
-        &self.materials
+    pub fn materials(&self) -> Vec<&Material> {
+        self.materials.values().collect()
     }
 
-    pub fn is_entity_enabled(&self, entity: EntityId) -> bool {
+    pub fn is_entity_enabled(&self, entity: Uuid) -> bool {
         let mut predecessor_entity_id = entity;
-        while predecessor_entity_id != 0 {
+        while !predecessor_entity_id.is_nil() {
             let ent = &self.entities[&predecessor_entity_id];
             if !ent.is_enabled() {
                 return false;

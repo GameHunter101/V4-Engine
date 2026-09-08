@@ -1,7 +1,6 @@
-use std::hash::{DefaultHasher, Hash, Hasher};
-
+use uuid::Uuid;
 use wgpu::{
-    BindGroup, BindGroupEntry, BindGroupLayout, BindGroupLayoutEntry, CommandEncoder, ComputePass,
+    BindGroup, BindGroupEntry, BindGroupLayout, BindGroupLayoutEntry, ComputePass,
     ComputePipeline, Device, Queue, ShaderStages,
 };
 
@@ -10,7 +9,7 @@ use crate::engine_management::pipeline::{
 };
 
 use super::{
-    component::{ComponentDetails, ComponentId, ComponentSystem},
+    component::{ComponentDetails, ComponentSystem},
     entity::EntityId,
     material::ShaderAttachment,
 };
@@ -22,7 +21,7 @@ pub enum ComputeError {
     #[error(
         "The compute pipeline was not created. Remember to initialize the compute before executing it. (Compute {0})"
     )]
-    PipelineNotInitialized(ComponentId),
+    PipelineNotInitialized(Uuid),
     #[error("No workgroup counts provided.")]
     NoWorkgroupCounts,
 }
@@ -46,7 +45,7 @@ pub struct Compute {
     bind_group_layout: Option<BindGroupLayout>,
     bind_group: Option<BindGroup>,
     pipeline: Option<ComputePipeline>,
-    id: ComponentId,
+    id: Uuid,
     is_enabled: bool,
     is_initialized: bool,
     parent_entity: EntityId,
@@ -130,7 +129,7 @@ impl Compute {
         device: &Device,
         bind_group_layout: &BindGroupLayout,
         shader_path: &'static str,
-        compute_id: ComponentId,
+        compute_id: Uuid,
         is_spirv: bool,
     ) -> Result<ComputePipeline, PipelineError> {
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -280,7 +279,7 @@ impl ComponentSystem for Compute {
 }
 
 impl ComponentDetails for Compute {
-    fn id(&self) -> ComponentId {
+    fn id(&self) -> Uuid {
         self.id
     }
 
@@ -315,7 +314,7 @@ pub struct ComputeBuilder {
     shader_path: &'static str,
     is_spirv: bool,
     workgroup_counts: Option<WorkgroupCounts>,
-    id: ComponentId,
+    id: Uuid,
     enabled: bool,
     iterate_count: usize,
     continuous_execution: bool,
@@ -328,7 +327,7 @@ impl Default for ComputeBuilder {
             shader_path: "",
             is_spirv: false,
             workgroup_counts: None,
-            id: 0,
+            id: Uuid::nil(),
             enabled: true,
             iterate_count: 1,
             continuous_execution: true,
@@ -357,7 +356,7 @@ impl ComputeBuilder {
         self
     }
 
-    pub fn id(mut self, id: ComponentId) -> Self {
+    pub fn id(mut self, id: Uuid) -> Self {
         self.id = id;
         self
     }
@@ -392,10 +391,8 @@ impl ComputeBuilder {
             bind_group_layout: None,
             bind_group: None,
             pipeline: None,
-            id: if self.id == 0 {
-                let mut hasher = DefaultHasher::new();
-                std::time::Instant::now().hash(&mut hasher);
-                hasher.finish()
+            id: if self.id.is_nil() {
+                Uuid::new_v4()
             } else {
                 self.id
             },
