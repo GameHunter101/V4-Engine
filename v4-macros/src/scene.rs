@@ -7,14 +7,13 @@ use syn::{
     Error, Expr, ExprCall, ExprMethodCall, ExprStruct, FieldValue, Ident, ItemMacro, LitBool,
     LitStr, Path, Token, braced, bracketed,
     parse::{Parse, ParseStream, Parser},
-    parse_quote, parse2,
-    punctuated::Punctuated,
+    parse_quote,
     spanned::Spanned,
 };
 
 #[derive(Debug)]
 struct ModularStruct {
-    ident: Ident,
+    ident: Option<Ident>,
     fields: HashMap<String, FieldValue>,
     span: Span,
 }
@@ -28,7 +27,9 @@ impl ModularStruct {
     ) -> syn::Result<Self> {
         let modular_struct = Self::parse_everything(input)?;
 
-        if modular_struct.ident != struct_ident {
+        if let Some(ident) = &modular_struct.ident
+            && ident != struct_ident
+        {
             return Err(Error::new_spanned(
                 modular_struct.ident,
                 format!("Expected identifier '{struct_ident}'"),
@@ -77,7 +78,9 @@ impl ModularStruct {
         let base_struct: ExprStruct = input.parse()?;
         let span = base_struct.span();
 
-        let Some(ident) = base_struct.path.get_ident().cloned() else {
+        let ident = base_struct.path.get_ident().cloned();
+
+        if ident.is_none() {
             return Err(Error::new_spanned(
                 base_struct.path,
                 "This modular struct needs to have an identifier.",
@@ -96,6 +99,46 @@ impl ModularStruct {
         Ok(ModularStruct {
             ident,
             fields: fields_map,
+            span,
+        })
+    }
+
+    fn parse_no_ident(
+        input: ParseStream,
+        mandatory_fields: Vec<&str>,
+        optional_fields: Vec<&str>,
+    ) -> syn::Result<Self> {
+        let span = input.span();
+        let contents;
+        braced!(contents in input);
+
+        let all_fields: HashSet<&str> = mandatory_fields
+            .iter()
+            .chain(&optional_fields)
+            .copied()
+            .collect();
+
+        let fields = contents
+            .parse_terminated(FieldValue::parse, Token![,])?
+            .into_iter()
+            .flat_map(|field| match &field.member {
+                syn::Member::Named(ident) => {
+                    if all_fields.contains(ident.to_string().as_str()) {
+                        Some(Err(Error::new_spanned(
+                            ident,
+                            format!("Unexpected field '{ident}'"),
+                        )))
+                    } else {
+                        Some(Ok((ident.to_string(), field)))
+                    }
+                }
+                syn::Member::Unnamed(_) => None,
+            })
+            .collect::<syn::Result<HashMap<String, FieldValue>>>()?;
+
+        Ok(Self {
+            ident: None,
+            fields,
             span,
         })
     }
@@ -126,6 +169,7 @@ impl ModularStruct {
         }
     }
 }
+
 fn expr_to_array<T>(input: Expr, parser: fn(ParseStream) -> syn::Result<T>) -> syn::Result<Vec<T>> {
     let array_parse = |input: ParseStream| {
         let array_contents;
@@ -559,6 +603,8 @@ impl Parse for ShaderBufferConstructor {
 struct EntityDescriptor {
     id: Option<LitStr>,
     components: Vec<ComponentOptions>,
+    material: Option<MaterialDescriptor>,
+    computes: Vec<ComputeDescriptor>,
 }
 
 impl Parse for EntityDescriptor {
@@ -572,32 +618,38 @@ impl Parse for EntityDescriptor {
 
         let _equal_token: Token![=] = input.parse()?;
 
-        let entity_contents;
-        braced!(entity_contents in input);
+        let entity_contents = ModularStruct::parse_no_ident(
+            input,
+            Vec::new(),
+            vec!["material", "components", "computes"],
+        )?;
 
-        let mut fields: HashMap<String, FieldValue> = entity_contents
-            .parse_terminated(FieldValue::parse, Token![,])?
-            .into_iter()
-            .flat_map(|field| match &field.member {
-                syn::Member::Named(ident) => Some((ident.to_string(), field)),
-                syn::Member::Unnamed(_) => None,
-            })
-            .collect();
-
-        let components = if let Some(components_field) = fields.remove("components") {
-            expr_to_array(components_field.expr.clone(), ComponentOptions::parse)?
+        let components = if let Some(components_field) =
+            entity_contents.get_optional_field::<Expr>("components")?
+        {
+            expr_to_array(components_field.clone(), ComponentOptions::parse)?
         } else {
             Vec::new()
         };
 
-        if let Some((field_name, extraneous_field)) = fields.into_iter().next() {
-            Err(Error::new_spanned(
-                extraneous_field,
-                format!("Unexpected field '{field_name}'"),
-            ))
-        } else {
-            Ok(Self { id, components })
-        }
+        let material = entity_contents
+            .get_optional_field_with("material", |input: ParseStream| {
+                MaterialDescriptor::parse(input, false)
+            })?;
+
+        let computes =
+            if let Some(computes_field) = entity_contents.get_optional_field::<Expr>("computes")? {
+                expr_to_array(computes_field.clone(), ComputeDescriptor::parse)?
+            } else {
+                Vec::new()
+            };
+
+        Ok(Self {
+            id,
+            components,
+            material,
+            computes,
+        })
     }
 }
 
@@ -641,7 +693,7 @@ impl Parse for ComponentDescriptor {
                 })
                 .collect(),
             id: modular_struct.get_optional_field("ID")?,
-            ident: modular_struct.ident,
+            ident: modular_struct.ident.unwrap(),
         })
     }
 }
@@ -682,5 +734,49 @@ impl Parse for ComponentConstructor {
                 id: None,
             })
         }
+    }
+}
+
+#[derive(Debug)]
+struct ComputeDescriptor {
+    shader_path: LitStr,
+    workgroup_counts: Expr,
+    attachments: Vec<ShaderAttachmentOptions>,
+    is_spirv: Option<LitBool>,
+    iterate_count: Option<Expr>,
+    continuous_execution: Option<LitBool>,
+    id: Option<LitStr>,
+}
+
+impl Parse for ComputeDescriptor {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let modular_struct = ModularStruct::parse(
+            input,
+            "Compute",
+            vec!["shader_path", "workgroup_counts"],
+            vec![
+                "attachments",
+                "is_spirv",
+                "iterate_count",
+                "continuous_execution",
+                "ID",
+            ],
+        )?;
+
+        Ok(Self {
+            shader_path: modular_struct.get_mandatory_field("shader_path")?,
+            workgroup_counts: modular_struct.get_mandatory_field("workgroup_counts")?,
+            attachments: if let Some(attachments_expr) =
+                modular_struct.get_optional_field("attachments")?
+            {
+                expr_to_array(attachments_expr, ShaderAttachmentOptions::parse)?
+            } else {
+                Vec::new()
+            },
+            is_spirv: modular_struct.get_optional_field("is_spirv")?,
+            iterate_count: modular_struct.get_optional_field("iterate_count")?,
+            continuous_execution: modular_struct.get_optional_field("continuous_execution")?,
+            id: modular_struct.get_optional_field("ID")?,
+        })
     }
 }
