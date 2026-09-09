@@ -5,8 +5,8 @@ use egui_wgpu_backend::{RenderPass as EguiRenderPass, ScreenDescriptor};
 use egui_winit_platform::Platform;
 use smaa::SmaaTarget;
 use wgpu::{
-    Adapter, BindGroup, Buffer, CommandEncoder, ComputePass, Device, Instance, Queue,
-    RenderPipeline, Texture, TextureFormat, TextureUsages, TextureView,
+    Adapter, BindGroup, Buffer, CommandEncoder, Device, Instance, Queue, RenderPipeline, Texture,
+    TextureFormat, TextureUsages, TextureView,
     rwh::{HasDisplayHandle, HasWindowHandle},
     util::DeviceExt,
 };
@@ -16,9 +16,8 @@ use thiserror::Error;
 
 use crate::{
     ecs::{
-        component::{Component, ComponentDetails, ComponentId, ComponentSystem},
-        compute::{Compute, ComputeError},
-        scene::Scene,
+        component::{Component, ComponentDetails, ComponentSystem},
+        scene::{Id, Scene},
     },
     engine_management::pipeline::{PipelineDescriptor, PipelineError, create_render_pipeline},
     engine_support::texture_support,
@@ -35,7 +34,7 @@ pub enum RendererError {
     #[error("No active camera has been set")]
     NoActiveCamera,
     #[error("Material ID '{0}' does not correspond to a material")]
-    InvalidMaterialId(ComponentId),
+    InvalidMaterialId(Id),
     #[error("Failed to prepare text renderer")]
     TextPreparationFailure(glyphon::PrepareError),
     #[error("Failed to render text elements")]
@@ -319,7 +318,7 @@ impl RenderingManager {
             }
         }
 
-        for material in scene.materials().iter().filter(|mat| mat.is_enabled()) {
+        for material in scene.materials().values().filter(|mat| mat.is_enabled()) {
             material.command_encoder_operations(
                 &self.device,
                 &self.queue,

@@ -1,4 +1,4 @@
-use std::ops::Range;
+use std::{collections::HashMap, ops::Range};
 
 use wgpu::{
     BindGroup, BindGroupEntry, BindGroupLayout, BindGroupLayoutEntry, Buffer, CommandEncoder,
@@ -6,15 +6,15 @@ use wgpu::{
 };
 
 use crate::{
-    ecs::compute::Compute,
     engine_management::pipeline::PipelineDescriptor,
     engine_support::texture_support::{TextureBundle, TextureProperties},
 };
 
 use super::{
     actions::ActionQueue,
-    component::{Component, ComponentDetails, ComponentId, ComponentSystem, UpdateParams},
-    entity::EntityId,
+    component::{Component, ComponentDetails, ComponentSystem, UpdateParams},
+    compute::Compute,
+    scene::Id,
 };
 
 #[derive(Debug, Clone)]
@@ -83,9 +83,9 @@ pub enum ShaderAttachment {
 
 #[derive(Debug)]
 pub struct Material {
-    id: ComponentId,
+    id: Id,
     pipeline_id: PipelineDescriptor,
-    entities_attached: Vec<EntityId>,
+    entities_attached: Vec<Id>,
     component_ranges: Vec<Range<usize>>,
     attachments: Vec<ShaderAttachment>,
     bind_group_layout: Option<BindGroupLayout>,
@@ -93,14 +93,15 @@ pub struct Material {
     immediate_data: Vec<u8>,
     is_initialized: bool,
     is_enabled: bool,
+    parent_entity: Id,
 }
 
 impl Material {
     pub fn new(
-        id: ComponentId,
+        id: Id,
         pipeline_id: PipelineDescriptor,
         attachments: Vec<ShaderAttachment>,
-        entities_attached: Vec<EntityId>,
+        entities_attached: Vec<Id>,
         immediate_data: Vec<u8>,
         is_enabled: bool,
     ) -> Self {
@@ -115,6 +116,7 @@ impl Material {
             immediate_data,
             is_initialized: false,
             is_enabled,
+            parent_entity: Id::nil(),
         }
     }
 
@@ -262,7 +264,7 @@ impl Material {
             .collect()
     }
 
-    pub fn attach_entity(&mut self, entity_id: EntityId) {
+    pub fn attach_entity(&mut self, entity_id: Id) {
         self.entities_attached.push(entity_id);
     }
 
@@ -411,7 +413,7 @@ impl ComponentSystem for Material {
         queue: &Queue,
         encoder: &mut CommandEncoder,
         other_components: &[&Component],
-        materials: &[Material],
+        materials: &HashMap<Id, Material>,
         computes: &[Compute],
     ) {
         for range in &self.component_ranges {
@@ -430,7 +432,7 @@ impl ComponentSystem for Material {
 }
 
 impl ComponentDetails for Material {
-    fn id(&self) -> ComponentId {
+    fn id(&self) -> Id {
         self.id
     }
 
@@ -442,11 +444,11 @@ impl ComponentDetails for Material {
         self.is_initialized = true;
     }
 
-    fn parent_entity_id(&self) -> EntityId {
-        0
+    fn parent_entity_id(&self) -> Id {
+        self.parent_entity
     }
 
-    fn set_parent_entity(&mut self, _parent_id: EntityId) {}
+    fn set_parent_entity(&mut self, _parent_id: Id) {}
 
     fn is_enabled(&self) -> bool {
         self.is_enabled

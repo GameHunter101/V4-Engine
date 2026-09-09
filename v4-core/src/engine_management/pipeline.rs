@@ -170,10 +170,10 @@ pub fn create_render_pipeline(
     });
 
     let vertex_shader_module =
-        load_shader_module_descriptor(device, &id.vertex_shader, is_vert_spirv)?;
+        load_shader_module_descriptor(device, id.vertex_shader, is_vert_spirv)?;
 
     let fragment_shader_module =
-        load_shader_module_descriptor(device, &id.fragment_shader, is_frag_spirv)?;
+        load_shader_module_descriptor(device, id.fragment_shader, is_frag_spirv)?;
 
     Ok(
         device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {

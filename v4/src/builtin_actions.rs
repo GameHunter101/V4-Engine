@@ -3,10 +3,9 @@ use std::fmt::Debug;
 use v4_core::{
     ecs::{
         actions::Action,
-        component::{Component, ComponentId},
+        component::Component,
         compute::Compute,
-        entity::EntityId,
-        scene::{Scene, SceneError, Workload},
+        scene::{Id, Scene, SceneError, Workload},
     },
     engine_management::{
         engine_action::{
@@ -16,11 +15,12 @@ use v4_core::{
         font_management::{TextAttributes, TextComponentProperties, TextDisplayInfo},
     },
 };
+
 use wgpu::{Device, Queue, util::DeviceExt};
 
 use crate::builtin_components::camera_component::RawCameraData;
 
-pub struct WorkloadAction(pub ComponentId, pub Workload);
+pub struct WorkloadAction(pub Id, pub Workload);
 
 impl Debug for WorkloadAction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -46,7 +46,7 @@ impl Action for WorkloadAction {
 }
 
 #[derive(Debug)]
-pub struct WorkloadOutputFreeAction(pub ComponentId, pub usize);
+pub struct WorkloadOutputFreeAction(pub Id, pub usize);
 
 #[async_trait::async_trait]
 impl Action for WorkloadOutputFreeAction {
@@ -61,7 +61,7 @@ impl Action for WorkloadOutputFreeAction {
 }
 
 #[derive(Debug)]
-pub struct EntityToggleAction(pub EntityId, pub Option<bool>);
+pub struct EntityToggleAction(pub Id, pub Option<bool>);
 
 impl Action for EntityToggleAction {
     fn execute(
@@ -83,7 +83,7 @@ impl Action for EntityToggleAction {
 }
 
 #[derive(Debug)]
-pub struct ComponentToggleAction(pub ComponentId, pub Option<bool>);
+pub struct ComponentToggleAction(pub Id, pub Option<bool>);
 
 impl Action for ComponentToggleAction {
     fn execute(
@@ -107,7 +107,7 @@ impl Action for ComponentToggleAction {
 
 #[derive(Debug)]
 pub struct RegisterUiComponentAction {
-    pub component_id: ComponentId,
+    pub component_id: Id,
     pub text_component_properties: Option<TextComponentProperties>,
 }
 
@@ -132,7 +132,7 @@ impl Action for RegisterUiComponentAction {
 
 #[derive(Debug)]
 pub struct UpdateTextComponentAction {
-    pub component_id: ComponentId,
+    pub component_id: Id,
     pub text: Option<String>,
     pub text_attributes: Option<TextAttributes>,
     pub text_metrics: Option<glyphon::Metrics>,
@@ -164,7 +164,7 @@ impl Action for UpdateTextComponentAction {
 }
 
 #[derive(Debug)]
-pub struct SetEntityActiveMaterialAction(pub EntityId, pub ComponentId);
+pub struct SetEntityActiveMaterialAction(pub Id, pub Id);
 
 impl Action for SetEntityActiveMaterialAction {
     fn execute(
@@ -183,11 +183,12 @@ impl Action for SetEntityActiveMaterialAction {
 
 #[derive(Debug)]
 pub struct CreateEntityAction {
-    pub entity_parent_id: Option<EntityId>,
+    pub entity_parent_id: Option<Id>,
     pub components: Vec<Component>,
     pub computes: Vec<Compute>,
-    pub active_material: Option<ComponentId>,
+    pub active_material: Option<Id>,
     pub is_enabled: bool,
+    pub id: Option<Id>,
 }
 
 impl Action for CreateEntityAction {
@@ -203,6 +204,7 @@ impl Action for CreateEntityAction {
             self.computes,
             self.active_material,
             self.is_enabled,
+            self.id,
         )?;
 
         Ok(())
@@ -210,7 +212,7 @@ impl Action for CreateEntityAction {
 }
 
 #[derive(Debug)]
-pub struct SetActiveCameraAction(pub ComponentId);
+pub struct SetActiveCameraAction(pub Id);
 
 impl Action for SetActiveCameraAction {
     fn execute(

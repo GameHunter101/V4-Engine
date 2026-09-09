@@ -2,7 +2,7 @@ use v4::{
     V4,
     builtin_actions::UpdateTextComponentAction,
     component,
-    ecs::component::{ComponentDetails, ComponentId, ComponentSystem, UpdateParams},
+    ecs::component::{ComponentDetails, ComponentSystem, UpdateParams},
     engine_management::font_management::{TextComponentProperties, TextDisplayInfo},
     scene,
 };

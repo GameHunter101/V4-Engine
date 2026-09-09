@@ -1,6 +1,6 @@
 use downcast_rs::{impl_downcast, DowncastSync};
 use egui::Context;
-use uuid::Uuid;
+use super::scene::Id;
 use std::{collections::HashMap, fmt::Debug, ops::Range};
 use wgpu::{CommandEncoder, Device, Queue, RenderPass};
 use winit_input_helper::WinitInputHelper;
@@ -23,12 +23,12 @@ pub struct UpdateParams<'a: 'b, 'b> {
     pub input_manager: &'a WinitInputHelper,
     pub other_components: &'a mut[&'b mut Component],
     pub computes: &'a mut [Compute],
-    pub materials: &'a mut HashMap<Uuid, Material>,
+    pub materials: &'a mut HashMap<Id, Material>,
     pub engine_details: &'a EngineDetails,
-    pub workload_outputs: &'a HashMap<Uuid, Vec<WorkloadOutput>>,
-    pub entities: &'a HashMap<Uuid, Entity>,
-    pub entity_component_groupings: HashMap<Uuid, Range<usize>>,
-    pub active_camera: Option<Uuid>,
+    pub workload_outputs: &'a HashMap<Id, Vec<WorkloadOutput>>,
+    pub entities: &'a HashMap<Id, Entity>,
+    pub entity_component_groupings: HashMap<Id, Range<usize>>,
+    pub active_camera: Option<Id>,
 }
 
 #[allow(unused)]
@@ -57,7 +57,7 @@ pub trait ComponentSystem: ComponentDetails + Debug + DowncastSync + Send + Sync
         queue: &Queue,
         encoder: &mut CommandEncoder,
         other_components: &[&Component],
-        materials: &[Material],
+        materials: &HashMap<Id, Material>,
         computes: &[Compute],
     ) {
     }
@@ -67,15 +67,15 @@ pub trait ComponentSystem: ComponentDetails + Debug + DowncastSync + Send + Sync
 impl_downcast!(sync ComponentSystem);
 
 pub trait ComponentDetails {
-    fn id(&self) -> Uuid;
+    fn id(&self) -> Id;
 
     fn is_initialized(&self) -> bool;
 
     fn set_initialized(&mut self);
 
-    fn parent_entity_id(&self) -> Uuid;
+    fn parent_entity_id(&self) -> Id;
 
-    fn set_parent_entity(&mut self, parent_id: Uuid);
+    fn set_parent_entity(&mut self, parent_id: Id);
 
     fn is_enabled(&self) -> bool;
 

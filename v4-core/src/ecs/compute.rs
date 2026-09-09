@@ -1,17 +1,14 @@
-use uuid::Uuid;
 use wgpu::{
-    BindGroup, BindGroupEntry, BindGroupLayout, BindGroupLayoutEntry, ComputePass,
-    ComputePipeline, Device, Queue, ShaderStages,
+    BindGroup, BindGroupEntry, BindGroupLayout, BindGroupLayoutEntry, ComputePass, ComputePipeline,
+    Device, Queue, ShaderStages,
 };
 
-use crate::engine_management::pipeline::{
-    PipelineError, load_shader_module_descriptor,
-};
+use crate::engine_management::pipeline::{PipelineError, load_shader_module_descriptor};
 
 use super::{
     component::{ComponentDetails, ComponentSystem},
-    entity::EntityId,
     material::ShaderAttachment,
+    scene::Id,
 };
 
 use thiserror::Error;
@@ -21,7 +18,7 @@ pub enum ComputeError {
     #[error(
         "The compute pipeline was not created. Remember to initialize the compute before executing it. (Compute {0})"
     )]
-    PipelineNotInitialized(Uuid),
+    PipelineNotInitialized(Id),
     #[error("No workgroup counts provided.")]
     NoWorkgroupCounts,
 }
@@ -45,10 +42,10 @@ pub struct Compute {
     bind_group_layout: Option<BindGroupLayout>,
     bind_group: Option<BindGroup>,
     pipeline: Option<ComputePipeline>,
-    id: Uuid,
+    id: Id,
     is_enabled: bool,
     is_initialized: bool,
-    parent_entity: EntityId,
+    parent_entity: Id,
     iterate_count: usize,
     continuous_execution: bool,
 }
@@ -129,7 +126,7 @@ impl Compute {
         device: &Device,
         bind_group_layout: &BindGroupLayout,
         shader_path: &'static str,
-        compute_id: Uuid,
+        compute_id: Id,
         is_spirv: bool,
     ) -> Result<ComputePipeline, PipelineError> {
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -138,8 +135,7 @@ impl Compute {
             immediate_size: 0,
         });
 
-        let module =
-            load_shader_module_descriptor(device, shader_path, is_spirv)?;
+        let module = load_shader_module_descriptor(device, shader_path, is_spirv)?;
 
         Ok(
             device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
@@ -279,7 +275,7 @@ impl ComponentSystem for Compute {
 }
 
 impl ComponentDetails for Compute {
-    fn id(&self) -> Uuid {
+    fn id(&self) -> Id {
         self.id
     }
 
@@ -291,11 +287,11 @@ impl ComponentDetails for Compute {
         self.is_initialized = true;
     }
 
-    fn parent_entity_id(&self) -> EntityId {
+    fn parent_entity_id(&self) -> Id {
         self.parent_entity
     }
 
-    fn set_parent_entity(&mut self, parent_id: EntityId) {
+    fn set_parent_entity(&mut self, parent_id: Id) {
         self.parent_entity = parent_id;
     }
 
@@ -314,7 +310,7 @@ pub struct ComputeBuilder {
     shader_path: &'static str,
     is_spirv: bool,
     workgroup_counts: Option<WorkgroupCounts>,
-    id: Uuid,
+    id: Id,
     enabled: bool,
     iterate_count: usize,
     continuous_execution: bool,
@@ -327,7 +323,7 @@ impl Default for ComputeBuilder {
             shader_path: "",
             is_spirv: false,
             workgroup_counts: None,
-            id: Uuid::nil(),
+            id: Id::nil(),
             enabled: true,
             iterate_count: 1,
             continuous_execution: true,
@@ -356,7 +352,7 @@ impl ComputeBuilder {
         self
     }
 
-    pub fn id(mut self, id: Uuid) -> Self {
+    pub fn id(mut self, id: Id) -> Self {
         self.id = id;
         self
     }
@@ -392,13 +388,13 @@ impl ComputeBuilder {
             bind_group: None,
             pipeline: None,
             id: if self.id.is_nil() {
-                Uuid::new_v4()
+                Id::new_v4()
             } else {
                 self.id
             },
             is_enabled: self.enabled,
             is_initialized: false,
-            parent_entity: 0,
+            parent_entity: Id::nil(),
             iterate_count: self.iterate_count,
             continuous_execution: self.continuous_execution,
         })

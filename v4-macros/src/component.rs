@@ -45,12 +45,12 @@ pub fn component_impl(args: TokenStream, item: TokenStream) -> TokenStream {
     let added_component_fields = [
         Field::parse_named
             .parse2(quote! {
-                id: v4::ecs::component::ComponentId
+                id: v4::ecs::scene::Id
             })
             .unwrap(),
         Field::parse_named
             .parse2(quote! {
-                parent_entity_id: v4::ecs::entity::EntityId
+                parent_entity_id: v4::ecs::scene::Id
             })
             .unwrap(),
         Field::parse_named
@@ -82,7 +82,7 @@ pub fn component_impl(args: TokenStream, item: TokenStream) -> TokenStream {
         #builder
 
         impl #generics v4::ecs::component::ComponentDetails for #ident #component_generics {
-            fn id(&self) -> v4::ecs::component::ComponentId {
+            fn id(&self) -> v4::ecs::scene::Id {
                 self.id
             }
 
@@ -94,11 +94,11 @@ pub fn component_impl(args: TokenStream, item: TokenStream) -> TokenStream {
                 self.is_initialized = true;
             }
 
-            fn parent_entity_id(&self) -> v4::ecs::entity::EntityId {
+            fn parent_entity_id(&self) -> v4::ecs::scene::Id {
                 self.parent_entity_id
             }
 
-            fn set_parent_entity(&mut self, parent_id: v4::ecs::entity::EntityId) {
+            fn set_parent_entity(&mut self, parent_id: v4::ecs::scene::Id) {
                 self.parent_entity_id = parent_id;
             }
 
@@ -162,7 +162,7 @@ fn builder_struct_construction(
     let added_builder_fields = [
         Field::parse_named
             .parse2(quote! {
-                id: v4::ecs::component::ComponentId
+                id: v4::ecs::scene::Id
             })
             .unwrap(),
         Field::parse_named
@@ -464,7 +464,7 @@ fn builder_methods_constructor(
                 Self {is_enabled, ..self}
             }
 
-            pub fn id(self, id: v4::ecs::component::ComponentId) -> Self {
+            pub fn id(self, id: v4::ecs::scene::Id) -> Self {
                 Self {id, ..self}
             }
         }
@@ -493,23 +493,15 @@ fn build_method_constructor(
         impl #full_builder_generics #builder_ident #full_builder_generics_no_bounds
         where #(#builder_required_fields_generics_arr: #required_fields_trait_idents),* {
             pub fn build(self) -> #component_ident #component_generics_no_bounds {
-                use std::hash::{DefaultHasher, Hash, Hasher};
-
-                let mut hasher = DefaultHasher::new();
-
-                std::time::Instant::now().hash(&mut hasher);
-
-                let id = hasher.finish();
-
                 #component_ident {
                     #(#required_fields_idents: self.#required_fields_idents.unwrap(),)*
                     #(#optional_fields_idents: self.#optional_fields_idents,)*
-                    id: if self.id == 0 {
-                            id
+                    id: if self.id.is_nil() {
+                            v4::ecs::scene::Id::new_v4()
                         } else {
                             self.id
                         },
-                    parent_entity_id: 0,
+                    parent_entity_id: v4::ecs::scene::Id::nil(),
                     is_initialized: false,
                     is_enabled: self.is_enabled,
                 }
@@ -635,7 +627,7 @@ fn builder_construction(builder_ident: Ident, component_struct: &ItemStruct) -> 
                 Self {
                     #field_defaults
                     is_enabled: true,
-                    id: 0,
+                    id: v4::ecs::scene::Id::nil(),
                     _marker: std::marker::PhantomData,
                 }
             }

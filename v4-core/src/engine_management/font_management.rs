@@ -1,7 +1,6 @@
-use crate::ecs::component::ComponentId;
-
 use glyphon::{FontSystem, SwashCache, TextAtlas, TextRenderer};
 use std::{collections::HashMap, fmt::Debug};
+use crate::ecs::scene::Id;
 
 pub struct FontState {
     pub font_system: FontSystem,
@@ -9,7 +8,7 @@ pub struct FontState {
     pub viewport: glyphon::Viewport,
     pub atlas: TextAtlas,
     pub text_renderer: TextRenderer,
-    pub text_buffers: HashMap<ComponentId, TextRenderInfo>,
+    pub text_buffers: HashMap<Id, TextRenderInfo>,
 }
 
 impl std::fmt::Debug for FontState {
@@ -26,7 +25,7 @@ impl std::fmt::Debug for FontState {
 impl FontState {
     pub fn create_text_buffer(
         &mut self,
-        component_id: ComponentId,
+        component_id: Id,
         text: &str,
         text_attributes: TextAttributes,
         text_metrics: glyphon::Metrics,
@@ -68,7 +67,7 @@ impl FontState {
 
     pub fn update_text_buffer(
         &mut self,
-        component_id: ComponentId,
+        component_id: Id,
         text: Option<String>,
         text_attributes: Option<TextAttributes>,
         text_metrics: Option<glyphon::Metrics>,

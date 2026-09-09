@@ -1,22 +1,22 @@
-use uuid::Uuid;
+use super::scene::Id;
 
 #[derive(Debug)]
 pub struct Entity {
-    id: Uuid,
-    children_ids: Vec<Uuid>,
+    id: Id,
+    children_ids: Vec<Id>,
     /// If this is set to nil then the entity is top-level and does not have a parent
-    parent_entity_id: Uuid,
+    parent_entity_id: Id,
     is_enabled: bool,
-    active_material: Option<Uuid>,
+    active_material: Option<Id>,
 }
 
 impl Entity {
     pub fn new(
-        id: Uuid,
-        children_ids: Vec<Uuid>,
-        parent_entity_id: Uuid,
+        id: Id,
+        children_ids: Vec<Id>,
+        parent_entity_id: Id,
         is_enabled: bool,
-        active_material: Option<Uuid>,
+        active_material: Option<Id>,
     ) -> Self {
         Self {
             id,
@@ -27,15 +27,15 @@ impl Entity {
         }
     }
 
-    pub fn active_material(&self) -> Option<Uuid> {
+    pub fn active_material(&self) -> Option<Id> {
         self.active_material
     }
 
-    pub fn set_active_material(&mut self, active_material: Uuid) {
+    pub fn set_active_material(&mut self, active_material: Id) {
         self.active_material = Some(active_material);
     }
 
-    pub fn id(&self) -> Uuid {
+    pub fn id(&self) -> Id {
         self.id
     }
 
@@ -51,16 +51,16 @@ impl Entity {
         self.is_enabled
     }
 
-    pub fn children_ids(&self) -> &[Uuid] {
+    pub fn children_ids(&self) -> &[Id] {
         &self.children_ids
     }
 
     /// If this returns 0 then the entity is top-level and does not have a parent
-    pub fn parent_entity_id(&self) -> Uuid {
+    pub fn parent_entity_id(&self) -> Id {
         self.parent_entity_id
     }
 
-    pub fn push_child(&mut self, child: Uuid) {
+    pub fn push_child(&mut self, child: Id) {
         self.children_ids.push(child);
     }
 }
