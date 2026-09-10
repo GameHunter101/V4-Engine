@@ -84,7 +84,7 @@ pub enum ShaderAttachment {
 #[derive(Debug)]
 pub struct Material {
     id: Id,
-    pipeline_id: PipelineDescriptor,
+    pipeline_id: Id,
     entities_attached: Vec<Id>,
     component_ranges: Vec<Range<usize>>,
     attachments: Vec<ShaderAttachment>,
@@ -96,10 +96,15 @@ pub struct Material {
     parent_entity: Id,
 }
 
+pub enum PipelineOptions {
+    Descriptor(PipelineDescriptor),
+    Id(Id),
+}
+
 impl Material {
     pub fn new(
         id: Id,
-        pipeline_id: PipelineDescriptor,
+        pipeline_id: Id,
         attachments: Vec<ShaderAttachment>,
         entities_attached: Vec<Id>,
         immediate_data: Vec<u8>,
@@ -288,8 +293,8 @@ impl Material {
         self.pipeline_id.uses_camera
     }
 
-    pub fn pipeline_id(&self) -> &PipelineDescriptor {
-        &self.pipeline_id
+    pub fn pipeline_id(&self) -> Id {
+        self.pipeline_id
     }
 
     pub fn get_immediate_data(&self) -> &[u8] {

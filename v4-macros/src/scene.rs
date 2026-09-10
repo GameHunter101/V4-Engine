@@ -1,7 +1,7 @@
 #![allow(clippy::large_enum_variant)]
 use std::collections::{HashMap, HashSet};
 
-use proc_macro2::{Span, TokenTree};
+use proc_macro2::{Span, TokenStream, TokenTree};
 use quote::{ToTokens, quote};
 use syn::{
     Error, Expr, ExprCall, ExprMethodCall, ExprStruct, FieldValue, Ident, ItemMacro, LitBool,
@@ -10,6 +10,23 @@ use syn::{
     parse_quote,
     spanned::Spanned,
 };
+use uuid::Uuid;
+
+#[derive(Debug)]
+enum Id {
+    Raw(LitStr),
+    Processed(Uuid),
+}
+
+impl Parse for Id {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        Ok(Id::Raw(input.parse()?))
+    }
+}
+
+trait GetId {
+    fn populate_id_map(&mut self, id_map: &mut HashMap<LitStr, Uuid>);
+}
 
 #[derive(Debug)]
 struct ModularStruct {
@@ -185,6 +202,26 @@ fn expr_to_array<T>(input: Expr, parser: fn(ParseStream) -> syn::Result<T>) -> s
 pub struct SceneDescriptor {
     attributes: SceneAttributes,
     entities: Vec<EntityDescriptor>,
+    id_map: HashMap<LitStr, Uuid>,
+}
+
+impl SceneDescriptor {
+    fn get_all_ids(
+        screenspace_materials: &mut [MaterialDescriptor],
+        entities: &mut [EntityDescriptor],
+    ) -> HashMap<LitStr, Uuid> {
+        let mut id_map = HashMap::new();
+
+        for screenspace_mat in screenspace_materials {
+            screenspace_mat.populate_id_map(&mut id_map);
+        }
+
+        for entity in entities {
+            entity.populate_id_map(&mut id_map);
+        }
+
+        id_map
+    }
 }
 
 impl Parse for SceneDescriptor {
@@ -200,21 +237,50 @@ impl Parse for SceneDescriptor {
                 })
                 .unzip();
 
-        let attributes: Vec<FieldValue> = attributes.into_iter().flatten().collect();
-        let entities: Vec<EntityDescriptor> = entities.into_iter().flatten().collect();
+        let mut attributes =
+            SceneAttributes::validate_attributes(attributes.into_iter().flatten().collect())?;
+        let mut entities: Vec<EntityDescriptor> = entities.into_iter().flatten().collect();
+
+        let id_map = Self::get_all_ids(&mut attributes.screenspace_materials, &mut entities);
 
         Ok(SceneDescriptor {
-            attributes: SceneAttributes::validate_attributes(attributes)?,
+            attributes,
             entities,
+            id_map,
         })
     }
 }
 
 impl ToTokens for SceneDescriptor {
     fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
+        let active_cam = if let Some(active_cam) = &self.attributes.active_camera {
+            quote! {Some(#active_cam)}
+        } else {
+            quote! {None}
+        };
+
+        let id_macro_fields: TokenStream = self.id_map.iter().map(|(raw, id)| {
+            let id = id.to_u128_le();
+            quote!{(#raw) => {#id};}
+        }).collect();
+
+        let id_macro = quote!{
+            macro_rules! ID {
+                #id_macro_fields
+                ($($fallback:tt)*) => {compile_error!("Invalid ID provided")};
+            }
+        };
+
+        let entities = self.entities;
+
         tokens.extend(quote! {
             {
+                #id_macro
+
                 let mut scene = v4::ecs::scene::Scene::default();
+                scene.set_active_camera(#active_cam);
+
+                #(#entities)*
             }
         });
     }
@@ -222,7 +288,7 @@ impl ToTokens for SceneDescriptor {
 
 pub struct SceneAttributes {
     active_camera: Option<ItemMacro>,
-    screen_space_materials: Vec<MaterialDescriptor>,
+    screenspace_materials: Vec<MaterialDescriptor>,
 }
 
 impl SceneAttributes {
@@ -260,7 +326,7 @@ impl SceneAttributes {
 
         Ok(SceneAttributes {
             active_camera,
-            screen_space_materials,
+            screenspace_materials: screen_space_materials,
         })
     }
 }
@@ -287,7 +353,7 @@ struct MaterialDescriptor {
     attachments: Vec<ShaderAttachmentOptions>,
     immediate_data: Option<Expr>,
     enabled: Option<Expr>,
-    id: Option<LitStr>,
+    id: Option<Id>,
 }
 
 impl MaterialDescriptor {
@@ -340,6 +406,31 @@ impl MaterialDescriptor {
     }
 }
 
+impl GetId for MaterialDescriptor {
+    fn populate_id_map(&mut self, id_map: &mut HashMap<LitStr, Uuid>) {
+        if let Some(id) = self.id.as_mut() {
+            let Id::Raw(raw_id) = id else {
+                return;
+            };
+            let new_uuid = Uuid::new_v4();
+            id_map.insert(raw_id.clone(), new_uuid);
+
+            *id = Id::Processed(new_uuid);
+        }
+    }
+}
+
+impl ToTokens for MaterialDescriptor {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        let pipeline = 
+        quote! {
+            scene.create_material(
+
+            )
+        }
+    }
+}
+
 #[derive(Debug)]
 enum PipelineOptions {
     Screenspace(ScreenspacePipelineDescriptor),
@@ -366,7 +457,7 @@ struct ScreenspacePipelineDescriptor {
     spirv_shader: Option<LitBool>,
     immediate_size: Option<Expr>,
     span: Span,
-    id: Option<LitStr>,
+    id: Option<Id>,
 }
 
 impl Parse for ScreenspacePipelineDescriptor {
@@ -400,7 +491,7 @@ struct NormalPipelineDescriptor {
     immediate_size: Option<Expr>,
     render_priority: Option<Expr>,
     span: Span,
-    id: Option<LitStr>,
+    id: Option<Id>,
 }
 
 impl Parse for NormalPipelineDescriptor {
@@ -607,7 +698,8 @@ impl Parse for ShaderBufferConstructor {
 
 #[derive(Debug)]
 struct EntityDescriptor {
-    id: Option<LitStr>,
+    parent: Option<ItemMacro>,
+    id: Option<Id>,
     components: Vec<ComponentOptions>,
     material: Option<MaterialDescriptor>,
     computes: Vec<ComputeDescriptor>,
@@ -615,7 +707,7 @@ struct EntityDescriptor {
 
 impl Parse for EntityDescriptor {
     fn parse(input: ParseStream) -> syn::Result<Self> {
-        let id: Option<LitStr> = if input.peek(Token![_]) {
+        let id: Option<Id> = if input.peek(Token![_]) {
             let _underscore_token: Token![_] = input.parse()?;
             None
         } else {
@@ -627,7 +719,7 @@ impl Parse for EntityDescriptor {
         let entity_contents = ModularStruct::parse_no_ident(
             input,
             Vec::new(),
-            vec!["material", "components", "computes"],
+            vec!["material", "components", "computes", "parent"],
         )?;
 
         let components = if let Some(components_field) =
@@ -649,9 +741,12 @@ impl Parse for EntityDescriptor {
             } else {
                 Vec::new()
             };
+        
+        let parent = entity_contents.get_optional_field::<ItemMacro>("parent")?;
 
         Ok(Self {
             id,
+            parent,
             components,
             material,
             computes,
@@ -659,10 +754,78 @@ impl Parse for EntityDescriptor {
     }
 }
 
+impl GetId for EntityDescriptor {
+    fn populate_id_map(&mut self, id_map: &mut HashMap<LitStr, Uuid>) {
+        if let Some(id) = self.id.as_mut() {
+            let Id::Raw(raw_id) = id else {
+                return;
+            };
+            let new_uuid = Uuid::new_v4();
+            id_map.insert(raw_id.clone(), new_uuid);
+
+            *id = Id::Processed(new_uuid);
+        }
+
+        if let Some(material) = &mut self.material {
+            material.populate_id_map(id_map);
+        }
+
+        for component in &mut self.components {
+            component.populate_id_map(id_map);
+        }
+
+        for compute in &mut self.computes {
+            compute.populate_id_map(id_map);
+        }
+    }
+}
+
+impl ToTokens for EntityDescriptor {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        let parent = if let Some(parent) = self.parent {
+            quote!{Some(#parent)}
+        } else {
+            quote!{None}
+        };
+
+        let components = self.components;
+
+        let material = if let Some(material) = self.material {
+            quote!{#material}
+        };
+
+        tokens.extend(quote! {
+            scene.create_entity(
+                #parent,
+                vec![#(#components),*],
+
+            );
+        });
+    }
+}
+
 #[derive(Debug)]
 enum ComponentOptions {
     Descriptor(ComponentDescriptor),
     Constructor(ComponentConstructor),
+}
+
+impl GetId for ComponentOptions {
+    fn populate_id_map(&mut self, id_map: &mut HashMap<LitStr, Uuid>) {
+        let id_option = match self {
+            ComponentOptions::Descriptor(descriptor) => descriptor.id.as_mut(),
+            ComponentOptions::Constructor(constructor) => constructor.id.as_mut(),
+        };
+
+        if let Some(id) = id_option {
+            let Id::Raw(raw_id) = id else {
+                return;
+            };
+            let new_uuid = Uuid::new_v4();
+            id_map.insert(raw_id.clone(), new_uuid);
+            *id = Id::Processed(new_uuid);
+        }
+    }
 }
 
 impl Parse for ComponentOptions {
@@ -679,7 +842,7 @@ impl Parse for ComponentOptions {
 struct ComponentDescriptor {
     ident: Ident,
     fields: Vec<FieldValue>,
-    id: Option<LitStr>,
+    id: Option<Id>,
 }
 
 impl Parse for ComponentDescriptor {
@@ -707,7 +870,7 @@ impl Parse for ComponentDescriptor {
 #[derive(Debug)]
 struct ComponentConstructor {
     constructor: Expr,
-    id: Option<LitStr>,
+    id: Option<Id>,
 }
 
 impl Parse for ComponentConstructor {
@@ -720,7 +883,7 @@ impl Parse for ComponentConstructor {
         } else if input.fork().parse::<ExprMethodCall>().is_ok() {
             let method_call: ExprMethodCall = input.parse()?;
             let (id, filtered_constructor) = if method_call.method == "ID" {
-                let expr_parser = |input: ParseStream| input.parse::<LitStr>();
+                let expr_parser = |input: ParseStream| input.parse::<Id>();
 
                 (
                     Some(expr_parser.parse2(quote! {method_call.args[0]})?),
@@ -751,7 +914,7 @@ struct ComputeDescriptor {
     is_spirv: Option<LitBool>,
     iterate_count: Option<Expr>,
     continuous_execution: Option<LitBool>,
-    id: Option<LitStr>,
+    id: Option<Id>,
 }
 
 impl Parse for ComputeDescriptor {
@@ -784,5 +947,18 @@ impl Parse for ComputeDescriptor {
             continuous_execution: modular_struct.get_optional_field("continuous_execution")?,
             id: modular_struct.get_optional_field("ID")?,
         })
+    }
+}
+
+impl GetId for ComputeDescriptor {
+    fn populate_id_map(&mut self, id_map: &mut HashMap<LitStr, Uuid>) {
+        if let Some(id) = self.id.as_mut() {
+            let Id::Raw(raw_id) = id else {
+                return;
+            };
+            let new_uuid = Uuid::new_v4();
+            id_map.insert(raw_id.clone(), new_uuid);
+            *id = Id::Processed(new_uuid);
+        }
     }
 }

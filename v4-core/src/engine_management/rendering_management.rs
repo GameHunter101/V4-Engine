@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt::Debug};
+use std::fmt::Debug;
 
 use egui::TexturesDelta;
 use egui_wgpu_backend::{RenderPass as EguiRenderPass, ScreenDescriptor};
@@ -19,7 +19,7 @@ use crate::{
         component::{Component, ComponentDetails, ComponentSystem},
         scene::{Id, Scene},
     },
-    engine_management::pipeline::{PipelineDescriptor, PipelineError, create_render_pipeline},
+    engine_management::pipeline::{PipelineDescriptor, PipelineError, PipelineManager},
     engine_support::texture_support,
 };
 
@@ -60,7 +60,7 @@ pub struct SurfaceData {
     config: wgpu::SurfaceConfiguration,
     smaa_target: SmaaTarget,
     depth_texture: texture_support::CompleteTexture,
-    screen_space_attachments: ScreenSpaceAttachments,
+    screenspace_attachments: ScreenSpaceAttachments,
     egui_render_pass: EguiRenderPass,
     egui_screen_descriptor: ScreenDescriptor,
 }
@@ -73,7 +73,7 @@ impl Debug for SurfaceData {
             .field("config", &self.config)
             .field("smaa_target", &"smaa_target")
             .field("depth_texture", &self.depth_texture)
-            .field("screen_space_attachments", &self.screen_space_attachments)
+            .field("screenspace_attachments", &self.screenspace_attachments)
             .finish()
     }
 }
@@ -184,7 +184,7 @@ impl RenderingManager {
             },
         );
 
-        let screen_space_attachments =
+        let screenspace_attachments =
             ScreenSpaceAttachments::new(&self.device, self.width, self.height, format)?;
 
         let egui_render_pass = EguiRenderPass::new(&self.device, format, 1);
@@ -200,7 +200,7 @@ impl RenderingManager {
             config,
             smaa_target,
             depth_texture,
-            screen_space_attachments,
+            screenspace_attachments,
             egui_render_pass,
             egui_screen_descriptor,
         });
@@ -211,16 +211,16 @@ impl RenderingManager {
     pub async fn render(
         &mut self,
         scene: &mut Scene,
-        pipelines: &HashMap<PipelineDescriptor, RenderPipeline>,
+        pipeline_manager: &PipelineManager,
         font_state: &mut FontState,
         egui_platform: &mut Platform,
         window: Option<&dyn Window>,
         egui_clear_color: Option<wgpu::Color>,
     ) -> Result<(), RendererError> {
-        let screen_space_materials = scene.screen_space_materials();
+        let screenspace_materials = scene.screenspace_materials();
         let surface_data = self.surface_data.as_mut().unwrap();
         let output = surface_data.surface.get_current_texture().unwrap();
-        let raw_render_tex = if screen_space_materials.is_empty() {
+        let raw_render_tex = if screenspace_materials.is_empty() {
             &output.texture
         } else {
             &self.device.create_texture(&wgpu::TextureDescriptor {
@@ -283,16 +283,14 @@ impl RenderingManager {
                 multiview_mask: None,
             });
 
-            let mut sorted_pipelines: Vec<(&PipelineDescriptor, &RenderPipeline)> =
-                Vec::from_iter(pipelines);
-            sorted_pipelines.sort_by_key(|(pipeline, _)| pipeline.render_priority);
-
-            for (pipeline_id, pipeline) in sorted_pipelines {
-                if pipeline_id.is_screen_space {
+            for (pipeline_id, pipeline_descriptor, pipeline) in pipeline_manager.sorted_pipelines()
+            {
+                if pipeline_descriptor.is_screenspace {
                     continue;
                 }
                 render_pass.set_pipeline(pipeline);
                 let materials_for_pipeline = scene.get_pipeline_materials(pipeline_id);
+
                 for material in materials_for_pipeline
                     .iter()
                     .filter(|mat| scene.is_component_enabled(**mat))
@@ -309,7 +307,7 @@ impl RenderingManager {
                         );
                     }
 
-                    if pipeline_id.immediate_size != 0 {
+                    if pipeline_descriptor.immediate_size != 0 {
                         render_pass.set_immediates(0, material.get_immediate_data());
                     }
 
@@ -331,7 +329,7 @@ impl RenderingManager {
 
         smaa_frame.resolve();
 
-        let output_view = if screen_space_materials.is_empty() {
+        let output_view = if screenspace_materials.is_empty() {
             view
         } else {
             output
@@ -339,12 +337,12 @@ impl RenderingManager {
                 .create_view(&wgpu::TextureViewDescriptor::default())
         };
 
-        if !screen_space_materials.is_empty() {
-            Self::render_screen_space_effects(
+        if !screenspace_materials.is_empty() {
+            Self::render_screenspace_effects(
                 scene,
                 self.width,
                 self.height,
-                pipelines,
+                pipeline_manager,
                 &output_view,
                 &self.device,
                 raw_render_tex,
@@ -441,11 +439,11 @@ impl RenderingManager {
         Ok(())
     }
 
-    fn render_screen_space_effects(
+    fn render_screenspace_effects(
         scene: &Scene,
         width: u32,
         height: u32,
-        pipelines: &HashMap<PipelineDescriptor, RenderPipeline>,
+        pipeline_manager: &PipelineManager,
         output_view: &TextureView,
         device: &Device,
         raw_render_tex: &Texture,
@@ -455,8 +453,8 @@ impl RenderingManager {
         encoder.copy_texture_to_texture(
             raw_render_tex.as_image_copy(),
             surface_data
-                .screen_space_attachments
-                .screen_space_input_texture
+                .screenspace_attachments
+                .screenspace_input_texture
                 .as_image_copy(),
             wgpu::Extent3d {
                 width,
@@ -464,7 +462,7 @@ impl RenderingManager {
                 depth_or_array_layers: 1,
             },
         );
-        let screen_space_output = device.create_texture(&wgpu::TextureDescriptor {
+        let screenspace_output = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("Screen space effect output texture"),
             size: wgpu::Extent3d {
                 width,
@@ -479,42 +477,40 @@ impl RenderingManager {
             view_formats: &[],
         });
 
-        let screen_space_output_view =
-            screen_space_output.create_view(&wgpu::TextureViewDescriptor::default());
+        let screenspace_output_view =
+            screenspace_output.create_view(&wgpu::TextureViewDescriptor::default());
 
-        for material_id in scene.screen_space_materials() {
-            let material = if let Some(mat) = scene.get_material(*material_id) {
-                Ok(mat)
-            } else {
-                Err(RendererError::InvalidMaterialId(*material_id))
-            }?;
+        for (pipeline_id, pipeline_descriptor, pipeline) in pipeline_manager.sorted_pipelines() {
+            if !pipeline_descriptor.is_screenspace {
+                continue;
+            }
 
-            if let Some(pipeline) = pipelines.get(material.pipeline_id()) {
+            for material in scene.get_pipeline_materials(pipeline_id) {
                 surface_data
-                    .screen_space_attachments
+                    .screenspace_attachments
                     .execute_effect_render_pass(
                         encoder,
-                        &screen_space_output_view,
+                        &screenspace_output_view,
                         pipeline,
                         material.bind_group().unwrap(),
                     );
+                encoder.copy_texture_to_texture(
+                    screenspace_output.as_image_copy(),
+                    surface_data
+                        .screenspace_attachments
+                        .screenspace_input_texture
+                        .as_image_copy(),
+                    wgpu::Extent3d {
+                        width,
+                        height,
+                        depth_or_array_layers: 1,
+                    },
+                );
             }
-            encoder.copy_texture_to_texture(
-                screen_space_output.as_image_copy(),
-                surface_data
-                    .screen_space_attachments
-                    .screen_space_input_texture
-                    .as_image_copy(),
-                wgpu::Extent3d {
-                    width,
-                    height,
-                    depth_or_array_layers: 1,
-                },
-            );
         }
 
         surface_data
-            .screen_space_attachments
+            .screenspace_attachments
             .execute_output_render_pass(encoder, output_view);
 
         Ok(())
@@ -608,10 +604,10 @@ impl RenderingManager {
 
 #[derive(Debug)]
 struct ScreenSpaceAttachments {
-    screen_space_input_texture: Texture,
-    screen_space_bind_group: BindGroup,
+    screenspace_input_texture: Texture,
+    screenspace_bind_group: BindGroup,
     screen_triangle_buffer: Buffer,
-    screen_space_output_pipeline: RenderPipeline,
+    screenspace_output_pipeline: PipelineManager,
 }
 
 impl ScreenSpaceAttachments {
@@ -621,7 +617,7 @@ impl ScreenSpaceAttachments {
         height: u32,
         format: TextureFormat,
     ) -> Result<Self, PipelineError> {
-        let screen_space_bind_group_layout =
+        let screenspace_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("Screen-space render output bind group layout"),
                 entries: &[
@@ -644,7 +640,7 @@ impl ScreenSpaceAttachments {
                 ],
             });
 
-        let screen_space_texture_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+        let screenspace_texture_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("Screen-space render output sampler"),
             address_mode_u: wgpu::AddressMode::ClampToEdge,
             address_mode_v: wgpu::AddressMode::ClampToEdge,
@@ -657,7 +653,7 @@ impl ScreenSpaceAttachments {
             ..Default::default()
         });
 
-        let screen_space_input_texture = device.create_texture(&wgpu::TextureDescriptor {
+        let screenspace_input_texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("Screen-space effect output texture"),
             size: wgpu::Extent3d {
                 width,
@@ -672,25 +668,25 @@ impl ScreenSpaceAttachments {
             view_formats: &[],
         });
 
-        let screen_space_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        let screenspace_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Screen-space render bind group"),
-            layout: &screen_space_bind_group_layout,
+            layout: &screenspace_bind_group_layout,
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
                     resource: wgpu::BindingResource::TextureView(
-                        &screen_space_input_texture
+                        &screenspace_input_texture
                             .create_view(&wgpu::TextureViewDescriptor::default()),
                     ),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&screen_space_texture_sampler),
+                    resource: wgpu::BindingResource::Sampler(&screenspace_texture_sampler),
                 },
             ],
         });
 
-        const SCREEN_SPACE_VERTEX_ATTRIBUTES: &[wgpu::VertexAttribute] =
+        const screenspace_VERTEX_ATTRIBUTES: &[wgpu::VertexAttribute] =
             &wgpu::vertex_attr_array![0=>Float32x3, 1=>Float32x2];
 
         let screen_triangle: [[f32; 5]; 3] = [
@@ -704,51 +700,51 @@ impl ScreenSpaceAttachments {
             usage: wgpu::BufferUsages::VERTEX,
         });
 
-        let screen_space_output_pipeline_id = PipelineDescriptor {
-            vertex_shader: "../default_shaders/screen_space_vertex.wgsl",
+        let screenspace_output_pipeline_descriptor = PipelineDescriptor {
+            vertex_shader: "../default_shaders/screenspace_vertex.wgsl",
             spirv_vertex_shader: false,
-            fragment_shader: "../default_shaders/screen_space_output_fragment.wgsl",
+            fragment_shader: "../default_shaders/screenspace_output_fragment.wgsl",
             spirv_fragment_shader: false,
             vertex_layouts: vec![wgpu::VertexBufferLayout {
                 array_stride: 4 * 5,
                 step_mode: wgpu::VertexStepMode::Vertex,
-                attributes: SCREEN_SPACE_VERTEX_ATTRIBUTES,
+                attributes: screenspace_VERTEX_ATTRIBUTES,
             }],
             uses_camera: false,
-            is_screen_space: true,
+            is_screenspace: true,
             geometry_details: Default::default(),
             immediate_size: 0,
             render_priority: i32::MAX,
         };
 
-        let screen_space_output_pipeline = create_render_pipeline(
+        let mut screenspace_output_pipeline = PipelineManager::default();
+        screenspace_output_pipeline.create_render_pipeline(
+            Some(Id::nil()),
             device,
-            &screen_space_output_pipeline_id,
+            &screenspace_output_pipeline_descriptor,
             None,
             format,
-            false,
-            false,
         )?;
 
         Ok(ScreenSpaceAttachments {
-            screen_space_input_texture,
-            screen_space_bind_group,
+            screenspace_input_texture,
+            screenspace_bind_group,
             screen_triangle_buffer,
-            screen_space_output_pipeline,
+            screenspace_output_pipeline,
         })
     }
 
     fn execute_effect_render_pass(
         &self,
         encoder: &mut CommandEncoder,
-        screen_space_output_view: &TextureView,
+        screenspace_output_view: &TextureView,
         pipeline: &RenderPipeline,
         material_bind_group: &BindGroup,
     ) {
         let mut effect_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("Effect render pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: screen_space_output_view,
+                view: screenspace_output_view,
                 resolve_target: None,
                 ops: wgpu::Operations {
                     load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
@@ -764,7 +760,7 @@ impl ScreenSpaceAttachments {
 
         effect_pass.set_pipeline(pipeline);
 
-        effect_pass.set_bind_group(0, &self.screen_space_bind_group, &[]);
+        effect_pass.set_bind_group(0, &self.screenspace_bind_group, &[]);
 
         effect_pass.set_bind_group(1, material_bind_group, &[]);
 
@@ -773,7 +769,7 @@ impl ScreenSpaceAttachments {
     }
 
     fn execute_output_render_pass(&self, encoder: &mut CommandEncoder, output_view: &TextureView) {
-        let mut screen_space_application_render_pass =
+        let mut screenspace_application_render_pass =
             encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Screen-space display render pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -791,10 +787,16 @@ impl ScreenSpaceAttachments {
                 multiview_mask: None,
             });
 
-        screen_space_application_render_pass.set_pipeline(&self.screen_space_output_pipeline);
-        screen_space_application_render_pass.set_bind_group(0, &self.screen_space_bind_group, &[]);
-        screen_space_application_render_pass
+        screenspace_application_render_pass.set_pipeline(
+            &self
+                .screenspace_output_pipeline
+                .get_pipeline(Id::nil())
+                .unwrap()
+                .1,
+        );
+        screenspace_application_render_pass.set_bind_group(0, &self.screenspace_bind_group, &[]);
+        screenspace_application_render_pass
             .set_vertex_buffer(0, self.screen_triangle_buffer.slice(..));
-        screen_space_application_render_pass.draw(0..3, 0..1);
+        screenspace_application_render_pass.draw(0..3, 0..1);
     }
 }

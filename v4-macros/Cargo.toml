@@ -1,6 +1,6 @@
 [package]
 name = "v4-macros"
-version = "0.3.18"
+version = "0.3.19"
 edition = "2024"
 
 [lib]
@@ -12,3 +12,4 @@ proc-macro = true
 "proc-macro2" = "*"
 "v4-core" = { path = "../v4-core" }
 "darling" = "0.20.10"
+uuid.workspace = true

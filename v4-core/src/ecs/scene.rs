@@ -9,14 +9,14 @@ use std::{
 
 use crossbeam_channel::{Receiver, Sender};
 use uuid::Uuid;
-use wgpu::{BindGroup, Buffer, Device, Queue};
+use wgpu::{BindGroup, Buffer, Device, Queue, RenderPipeline};
 use winit_input_helper::WinitInputHelper;
 
 use thiserror::Error;
 
 use crate::{
     EngineDetails,
-    engine_management::{engine_action::EngineAction, pipeline::PipelineDescriptor},
+    engine_management::{engine_action::EngineAction, pipeline::PipelineManager},
 };
 
 use super::{
@@ -44,7 +44,9 @@ pub enum SceneError {
     #[error("Failed to send engine action: {0}")]
     SendEngineActionFailure(#[from] crossbeam_channel::TrySendError<Box<dyn EngineAction>>),
     #[error("The specified entity ID ({0}) is invalid")]
-    InvalidId(Id),
+    InvalidEntityId(Id),
+    #[error("The specified pipeline ID ({0}) is invalid")]
+    InvalidPipelineId(Id),
 }
 
 pub struct Scene {
@@ -54,9 +56,8 @@ pub struct Scene {
     entity_component_groupings: HashMap<Id, Range<usize>>,
     ui_components: Vec<Id>,
     materials: HashMap<Id, Material>,
-    screen_space_materials: Vec<Id>,
-    pipeline_to_corresponding_materials: HashMap<PipelineDescriptor, Vec<Id>>,
-    total_entities_created: u32,
+    pipeline_manager: PipelineManager,
+    pipeline_to_corresponding_materials: HashMap<Id, Vec<Id>>,
     workload_sender: Option<Sender<WorkloadPacket>>,
     workload_output_receiver: Option<Receiver<(Id, WorkloadOutput)>>,
     workload_outputs: WorkloadOutputCollection,
@@ -100,9 +101,8 @@ impl Default for Scene {
             entity_component_groupings: HashMap::new(),
             ui_components: Vec::new(),
             materials: HashMap::new(),
-            screen_space_materials: Vec::new(),
+            pipeline_manager: PipelineManager::default(),
             pipeline_to_corresponding_materials: HashMap::new(),
-            total_entities_created: 0,
             workload_sender: None,
             workload_output_receiver: None,
             engine_action_sender: None,
@@ -309,85 +309,64 @@ impl Scene {
 
     pub fn create_material(
         &mut self,
-        pipeline_descriptor: PipelineDescriptor,
+        device: &Device,
+        pipeline: super::material::PipelineOptions,
         attachments: Vec<ShaderAttachment>,
         entities_attached: Vec<Id>,
         immediate_data: Vec<u8>,
         is_enabled: bool,
         id: Option<Id>,
-    ) -> Id {
+    ) -> Result<Id, SceneError> {
         let id = id.unwrap_or(Id::new_v4());
 
-        if pipeline_descriptor.is_screen_space {
-            self.screen_space_materials.push(id);
-        }
+        let (pipeline_descriptor, pipeline_id) = match pipeline {
+            super::material::PipelineOptions::Descriptor(descriptor) => (descriptor, Id::new_v4()),
+            super::material::PipelineOptions::Id(uuid) => {
+                let Some((descriptor, _)) = self.pipeline_manager.get_pipeline(uuid) else {
+                    return Err(SceneError::InvalidPipelineId(uuid));
+                };
+
+                (descriptor.clone(), uuid)
+            }
+        };
 
         let new_material = Material::new(
             id,
-            pipeline_descriptor.clone(),
+            pipeline_id,
             attachments,
             entities_attached,
             immediate_data,
             is_enabled,
         );
 
-        if let Some(entry) = self
+        if let Some(pipeline_materials) = self
             .pipeline_to_corresponding_materials
-            .get_mut(&pipeline_descriptor)
+            .get_mut(&pipeline_id)
         {
-            entry.push(new_material.id());
+            pipeline_materials.push(id);
         } else {
             self.pipeline_to_corresponding_materials
-                .insert(pipeline_descriptor, vec![new_material.id()]);
-            self.new_pipelines_needed = true;
+                .insert(pipeline_id, vec![new_material.id()]);
+            self.pipeline_manager.create_render_pipeline(
+                Some(pipeline_id),
+                device,
+                &pipeline_descriptor,
+                new_material.bind_group_layout(),
+            );
         }
 
         self.materials.insert(id, new_material);
 
-        id
+        Ok(id)
     }
 
-    pub fn get_pipeline_ids(&self) -> Vec<&PipelineDescriptor> {
-        self.pipeline_to_corresponding_materials.keys().collect()
-    }
-
-    pub fn get_pipeline_materials(&self, pipeline_id: &PipelineDescriptor) -> Vec<&Material> {
-        let material_ids = self.pipeline_to_corresponding_materials.get(pipeline_id);
-        match material_ids {
-            Some(material_ids) => self
-                .materials
-                .values()
-                .filter(|mat| material_ids.contains(&mat.id()))
-                .collect(),
-            None => Vec::new(),
-        }
-    }
-
-    pub fn get_components_per_material(&self) -> HashMap<Id, Vec<&Component>> {
-        self.materials
-            .values()
-            .flat_map(|material| {
-                if material.pipeline_id().is_screen_space {
-                    return None;
-                }
-                let components: Vec<&Component> = self
-                    .entities
-                    .iter()
-                    .flat_map(|(id, ent)| {
-                        if let Some(mat) = ent.active_material() {
-                            if mat == material.id() {
-                                Some(&self.components[self.entity_component_groupings[id].clone()])
-                            } else {
-                                None
-                            }
-                        } else {
-                            None
-                        }
-                    })
-                    .flatten()
-                    .collect();
-                Some((material.id(), components))
-            })
+    pub fn get_pipeline_materials(&self, pipeline_id: Id) -> Vec<&Material> {
+        self.pipeline_to_corresponding_materials
+            .get(&pipeline_id)
+            .cloned()
+            .unwrap_or_default()
+            .iter()
+            .flat_map(|id| self.materials.get(id))
             .collect()
     }
 
@@ -411,13 +390,12 @@ impl Scene {
 
         if let Some(parent) = parent {
             let Some(parent_entity) = self.entities.get_mut(&parent) else {
-                return Err(SceneError::InvalidId(parent));
+                return Err(SceneError::InvalidEntityId(parent));
             };
             parent_entity.push_child(id);
         }
 
         self.entities.insert(id, entity);
-        self.total_entities_created += 1;
 
         components
             .iter_mut()
@@ -536,8 +514,19 @@ impl Scene {
         self.scene_index
     }
 
-    pub fn screen_space_materials(&self) -> &[Id] {
-        &self.screen_space_materials
+    pub fn screen_space_materials(&self) -> Vec<Id> {
+        self.pipeline_to_corresponding_materials
+            .iter()
+            .flat_map(|(pipeline_id, materials)| {
+                if let Some((descriptor, _)) = self.pipeline_manager.get_pipeline(*pipeline_id)
+                    && descriptor.is_screen_space
+                {
+                    materials.clone()
+                } else {
+                    Vec::new()
+                }
+            })
+            .collect()
     }
 
     pub fn all_components(&self) -> Vec<&Component> {
@@ -578,5 +567,9 @@ impl Scene {
         } else {
             self.is_entity_enabled(component.parent_entity_id())
         }
+    }
+
+    pub fn pipeline_manager(&self) -> &PipelineManager {
+        &self.pipeline_manager
     }
 }

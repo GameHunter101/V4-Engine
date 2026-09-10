@@ -33,8 +33,7 @@ use winit_input_helper::WinitInputHelper;
 use thiserror::Error;
 
 use crate::{
-    engine_management::{pipeline::PipelineError, rendering_management::RenderingManagerDetails},
-    engine_support::core_communication_support::{CommunicationError, CoreCommunication},
+    ecs::scene::Id, engine_management::{pipeline::PipelineError, rendering_management::RenderingManagerDetails}, engine_support::core_communication_support::{CommunicationError, CoreCommunication}
 };
 
 pub mod engine_management;
@@ -68,7 +67,7 @@ struct V4App {
     initialized_scene: bool,
     window: Option<Box<dyn Window>>,
     details: EngineDetails,
-    pipelines: HashMap<PipelineDescriptor, RenderPipeline>,
+    pipelines: HashMap<Id, RenderPipeline>,
     font_state: Option<FontState>,
     hide_cursor: bool,
     core_communication: CoreCommunication,
@@ -135,7 +134,6 @@ impl V4 {
         device: &Device,
         render_format: TextureFormat,
         active_scene: &mut Scene,
-        pipelines: &mut HashMap<PipelineDescriptor, RenderPipeline>,
     ) -> Result<(), PipelineError> {
         if active_scene.new_pipelines_needed {
             let active_scene_pipelines = active_scene.get_pipeline_ids();
