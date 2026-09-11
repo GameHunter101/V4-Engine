@@ -9,14 +9,17 @@ use std::{
 
 use crossbeam_channel::{Receiver, Sender};
 use uuid::Uuid;
-use wgpu::{BindGroup, Buffer, Device, Queue, RenderPipeline};
+use wgpu::{BindGroup, Buffer, Device, Queue};
 use winit_input_helper::WinitInputHelper;
 
 use thiserror::Error;
 
 use crate::{
     EngineDetails,
-    engine_management::{engine_action::EngineAction, pipeline::PipelineManager},
+    engine_management::{
+        engine_action::EngineAction,
+        pipeline::{PipelineError, PipelineManager},
+    },
 };
 
 use super::{
@@ -47,6 +50,8 @@ pub enum SceneError {
     InvalidEntityId(Id),
     #[error("The specified pipeline ID ({0}) is invalid")]
     InvalidPipelineId(Id),
+    #[error("Failed to build a render pipeline: {0}")]
+    PipelineError(#[from] PipelineError),
 }
 
 pub struct Scene {
@@ -309,7 +314,6 @@ impl Scene {
 
     pub fn create_material(
         &mut self,
-        device: &Device,
         pipeline: super::material::PipelineOptions,
         attachments: Vec<ShaderAttachment>,
         entities_attached: Vec<Id>,
@@ -332,7 +336,6 @@ impl Scene {
 
         let new_material = Material::new(
             id,
-            pipeline_id,
             attachments,
             entities_attached,
             immediate_data,
@@ -347,11 +350,10 @@ impl Scene {
         } else {
             self.pipeline_to_corresponding_materials
                 .insert(pipeline_id, vec![new_material.id()]);
-            self.pipeline_manager.create_render_pipeline(
-                Some(pipeline_id),
-                device,
-                &pipeline_descriptor,
-                new_material.bind_group_layout(),
+            self.pipeline_manager.add_pipeline_to_creation_queue(
+                pipeline_id,
+                pipeline_descriptor,
+                new_material.bind_group_layout().cloned(),
             );
         }
 
@@ -514,12 +516,12 @@ impl Scene {
         self.scene_index
     }
 
-    pub fn screen_space_materials(&self) -> Vec<Id> {
+    pub fn screenspace_materials(&self) -> Vec<Id> {
         self.pipeline_to_corresponding_materials
             .iter()
             .flat_map(|(pipeline_id, materials)| {
                 if let Some((descriptor, _)) = self.pipeline_manager.get_pipeline(*pipeline_id)
-                    && descriptor.is_screen_space
+                    && descriptor.is_screenspace
                 {
                     materials.clone()
                 } else {
@@ -571,5 +573,9 @@ impl Scene {
 
     pub fn pipeline_manager(&self) -> &PipelineManager {
         &self.pipeline_manager
+    }
+
+    pub fn pipeline_manager_mut(&mut self) -> &mut PipelineManager {
+        &mut self.pipeline_manager
     }
 }

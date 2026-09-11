@@ -271,7 +271,7 @@ impl ToTokens for SceneDescriptor {
             }
         };
 
-        let entities = self.entities;
+        let entities = &self.entities;
 
         tokens.extend(quote! {
             {
@@ -422,12 +422,12 @@ impl GetId for MaterialDescriptor {
 
 impl ToTokens for MaterialDescriptor {
     fn to_tokens(&self, tokens: &mut TokenStream) {
-        let pipeline = 
-        quote! {
+        // let pipeline = 
+        tokens.extend(quote! {
             scene.create_material(
 
             )
-        }
+        });
     }
 }
 
@@ -782,7 +782,7 @@ impl GetId for EntityDescriptor {
 
 impl ToTokens for EntityDescriptor {
     fn to_tokens(&self, tokens: &mut TokenStream) {
-        let parent = if let Some(parent) = self.parent {
+        /* let parent = if let Some(parent) = self.parent {
             quote!{Some(#parent)}
         } else {
             quote!{None}
@@ -800,7 +800,8 @@ impl ToTokens for EntityDescriptor {
                 vec![#(#components),*],
 
             );
-        });
+        }); */
+        todo!()
     }
 }
 

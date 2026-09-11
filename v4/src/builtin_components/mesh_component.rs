@@ -3,10 +3,10 @@ use std::{fmt::Debug, ops::Range};
 use crate::v4;
 use bytemuck::{Pod, Zeroable};
 use nalgebra::Vector3;
-use v4_core::ecs::{
+use v4_core::{ecs::{
     component::{Component, ComponentDetails, ComponentSystem},
     scene::Id,
-};
+}, engine_management::pipeline::PipelineParameters};
 use v4_macros::component;
 use wgpu::{
     Buffer, Device, Queue, RenderPass, VertexAttribute,
@@ -271,6 +271,7 @@ impl<V: VertexDescriptor + Send + Sync> ComponentSystem for MeshComponent<V> {
         _queue: &Queue,
         render_pass: &mut RenderPass,
         _other_components: &[&Component],
+        _pipeline_parameters: &PipelineParameters,
     ) {
         for (index, range_opt) in &self.enabled_models {
             render_pass.set_vertex_buffer(

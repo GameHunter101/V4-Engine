@@ -19,7 +19,7 @@ use crate::{
         component::{Component, ComponentDetails, ComponentSystem},
         scene::{Id, Scene},
     },
-    engine_management::pipeline::{PipelineDescriptor, PipelineError, PipelineManager},
+    engine_management::pipeline::{PipelineError, PipelineManager, PipelineParameters},
     engine_support::texture_support,
 };
 
@@ -211,7 +211,6 @@ impl RenderingManager {
     pub async fn render(
         &mut self,
         scene: &mut Scene,
-        pipeline_manager: &PipelineManager,
         font_state: &mut FontState,
         egui_platform: &mut Platform,
         window: Option<&dyn Window>,
@@ -258,6 +257,8 @@ impl RenderingManager {
 
         let all_components = scene.all_components();
 
+        let pipeline_manager = scene.pipeline_manager();
+
         {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Main render pass"),
@@ -283,9 +284,9 @@ impl RenderingManager {
                 multiview_mask: None,
             });
 
-            for (pipeline_id, pipeline_descriptor, pipeline) in pipeline_manager.sorted_pipelines()
+            for (pipeline_id, pipeline_parameters, pipeline) in pipeline_manager.sorted_pipelines()
             {
-                if pipeline_descriptor.is_screenspace {
+                if pipeline_parameters.is_screenspace {
                     continue;
                 }
                 render_pass.set_pipeline(pipeline);
@@ -295,7 +296,7 @@ impl RenderingManager {
                     .iter()
                     .filter(|mat| scene.is_component_enabled(**mat))
                 {
-                    if material.uses_camera() {
+                    if pipeline_parameters.uses_camera {
                         render_pass.set_bind_group(
                             0,
                             if let Some(bind_group) = scene.active_camera_bind_group() {
@@ -307,11 +308,17 @@ impl RenderingManager {
                         );
                     }
 
-                    if pipeline_descriptor.immediate_size != 0 {
+                    if pipeline_parameters.immediate_size != 0 {
                         render_pass.set_immediates(0, material.get_immediate_data());
                     }
 
-                    material.render(&self.device, &self.queue, &mut render_pass, &all_components);
+                    material.render(
+                        &self.device,
+                        &self.queue,
+                        &mut render_pass,
+                        &all_components,
+                        pipeline_parameters,
+                    );
                 }
             }
         }
@@ -686,7 +693,7 @@ impl ScreenSpaceAttachments {
             ],
         });
 
-        const screenspace_VERTEX_ATTRIBUTES: &[wgpu::VertexAttribute] =
+        const SCREENSPACE_VERTEX_ATTRIBUTES: &[wgpu::VertexAttribute] =
             &wgpu::vertex_attr_array![0=>Float32x3, 1=>Float32x2];
 
         let screen_triangle: [[f32; 5]; 3] = [
@@ -700,7 +707,7 @@ impl ScreenSpaceAttachments {
             usage: wgpu::BufferUsages::VERTEX,
         });
 
-        let screenspace_output_pipeline_descriptor = PipelineDescriptor {
+        let screenspace_output_pipeline_descriptor = PipelineParameters {
             vertex_shader: "../default_shaders/screenspace_vertex.wgsl",
             spirv_vertex_shader: false,
             fragment_shader: "../default_shaders/screenspace_output_fragment.wgsl",
@@ -708,7 +715,7 @@ impl ScreenSpaceAttachments {
             vertex_layouts: vec![wgpu::VertexBufferLayout {
                 array_stride: 4 * 5,
                 step_mode: wgpu::VertexStepMode::Vertex,
-                attributes: screenspace_VERTEX_ATTRIBUTES,
+                attributes: SCREENSPACE_VERTEX_ATTRIBUTES,
             }],
             uses_camera: false,
             is_screenspace: true,

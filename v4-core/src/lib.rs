@@ -7,10 +7,7 @@ use ecs::scene::Scene;
 use egui::{FontDefinitions, Style};
 use egui_winit_platform::{Platform, PlatformDescriptor};
 use engine_management::{
-    engine_action::V4Mutable,
-    font_management::FontState,
-    pipeline::{PipelineDescriptor, create_render_pipeline},
-    rendering_management::RenderingManager,
+    engine_action::V4Mutable, font_management::FontState, rendering_management::RenderingManager,
 };
 use glyphon::{FontSystem, SwashCache, TextAtlas, TextRenderer};
 use std::{
@@ -18,8 +15,6 @@ use std::{
     fmt::Debug,
     time::Instant,
 };
-use wgpu::Device;
-use wgpu::{RenderPipeline, TextureFormat};
 
 use winit::{
     application::ApplicationHandler,
@@ -33,7 +28,8 @@ use winit_input_helper::WinitInputHelper;
 use thiserror::Error;
 
 use crate::{
-    ecs::scene::Id, engine_management::{pipeline::PipelineError, rendering_management::RenderingManagerDetails}, engine_support::core_communication_support::{CommunicationError, CoreCommunication}
+    engine_management::rendering_management::RenderingManagerDetails,
+    engine_support::core_communication_support::{CommunicationError, CoreCommunication},
 };
 
 pub mod engine_management;
@@ -67,7 +63,6 @@ struct V4App {
     initialized_scene: bool,
     window: Option<Box<dyn Window>>,
     details: EngineDetails,
-    pipelines: HashMap<Id, RenderPipeline>,
     font_state: Option<FontState>,
     hide_cursor: bool,
     core_communication: CoreCommunication,
@@ -129,37 +124,6 @@ impl V4 {
     pub fn rendering_manager(&self) -> &RenderingManager {
         &self.app.rendering_manager
     }
-
-    fn create_new_pipelines(
-        device: &Device,
-        render_format: TextureFormat,
-        active_scene: &mut Scene,
-    ) -> Result<(), PipelineError> {
-        if active_scene.new_pipelines_needed {
-            let active_scene_pipelines = active_scene.get_pipeline_ids();
-            for pipeline_id in active_scene_pipelines {
-                if !pipelines.contains_key(pipeline_id) {
-                    let attachment_bind_group_layout =
-                        active_scene.get_pipeline_materials(pipeline_id)[0].bind_group_layout();
-
-                    pipelines.insert(
-                        pipeline_id.clone(),
-                        create_render_pipeline(
-                            device,
-                            pipeline_id,
-                            attachment_bind_group_layout,
-                            render_format,
-                            pipeline_id.spirv_vertex_shader,
-                            pipeline_id.spirv_fragment_shader,
-                        )?,
-                    );
-                }
-            }
-            active_scene.new_pipelines_needed = false;
-        }
-
-        Ok(())
-    }
 }
 
 impl V4App {
@@ -199,9 +163,11 @@ impl ApplicationHandler for V4App {
             .create_window(self.window_attributes.clone())
             .expect("Failed to create window.");
 
-        self.rendering_manager
-            .initialize_surface_data(&*window)
-            .unwrap();
+        if let Err(err) = self.rendering_manager.initialize_surface_data(&*window) {
+            eprintln!("{err}");
+            event_loop.exit();
+            return;
+        }
 
         let device = self.rendering_manager.device();
         let queue = self.rendering_manager.queue();
@@ -357,48 +323,49 @@ impl ApplicationHandler for V4App {
 
                 scene.update_materials(device, queue, &self.input_manager, &self.details);
 
-                let mut compute_encoder =
-                    device.create_command_encoder(&wgpu::wgt::CommandEncoderDescriptor {
-                        label: Some("Automatic compute encoder"),
-                    });
-
-                {
-                    let mut compute_pass = compute_encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                        label: Some("Compute pass"),
-                        timestamp_writes: None,
-                    });
-
-                    for compute in scene
-                        .computes()
-                            .iter()
-                            .filter(|compute| compute.continuous_execution())
-                            {
-                                if let Err(err) = ecs::compute::Compute::individual_compute_execution(
-                                    compute, device, queue, Some(&mut compute_pass),
-                                ) {
-                                    eprintln!("{err}");
-                                    event_loop.exit();
-                                    return;
-                                }
-                            }
-                }
-
-                queue.submit(Some(compute_encoder.finish()));
-
-                if let Err(err) = V4::create_new_pipelines(
+                if let Err(err) = scene.pipeline_manager_mut().construct_from_pipeline_queue(
                     device,
                     rendering_manager.format().unwrap(),
-                    scene,
-                    &mut self.pipelines,
                 ) {
                     eprintln!("{err}");
                     event_loop.exit();
                     return;
                 }
 
+                let mut compute_encoder =
+                    device.create_command_encoder(&wgpu::wgt::CommandEncoderDescriptor {
+                        label: Some("Automatic compute encoder"),
+                    });
+
+                {
+                    let mut compute_pass =
+                        compute_encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                            label: Some("Compute pass"),
+                            timestamp_writes: None,
+                        });
+
+                    for compute in scene
+                        .computes()
+                        .iter()
+                        .filter(|compute| compute.continuous_execution())
+                    {
+                        if let Err(err) = ecs::compute::Compute::individual_compute_execution(
+                            compute,
+                            device,
+                            queue,
+                            Some(&mut compute_pass),
+                        ) {
+                            eprintln!("{err}");
+                            event_loop.exit();
+                            return;
+                        }
+                    }
+                }
+
+                queue.submit(Some(compute_encoder.finish()));
+
                 if let Err(err) = pollster::block_on(rendering_manager.render(
                     scene,
-                    &self.pipelines,
                     self.font_state.as_mut().unwrap(),
                     egui_platform,
                     self.window.as_deref(),
@@ -424,11 +391,8 @@ impl ApplicationHandler for V4App {
         event: DeviceEvent,
     ) {
         self.input_manager.process_device_event(&event);
-        match event {
-            DeviceEvent::PointerMotion { delta } => {
-                self.details.cursor_delta = (delta.0 as f32, delta.1 as f32);
-            }
-            _ => {}
+        if let DeviceEvent::PointerMotion { delta } = event {
+            self.details.cursor_delta = (delta.0 as f32, delta.1 as f32);
         }
     }
 
@@ -454,7 +418,6 @@ impl Debug for V4App {
             .field("initialized_scene", &self.initialized_scene)
             .field("window", &self.window)
             .field("details", &self.details)
-            .field("pipelines", &self.pipelines)
             .field("font_state", &self.font_state)
             .field("hide_cursor", &self.hide_cursor)
             .field("core_communication", &self.core_communication)
@@ -562,7 +525,6 @@ impl V4Builder {
             initialized_scene: false,
             window: None,
             details: Default::default(),
-            pipelines: HashMap::new(),
             font_state: None,
             hide_cursor: self.hide_cursor,
             core_communication: CoreCommunication::new()?,

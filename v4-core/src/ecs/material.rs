@@ -6,7 +6,7 @@ use wgpu::{
 };
 
 use crate::{
-    engine_management::pipeline::PipelineDescriptor,
+    engine_management::pipeline::PipelineParameters,
     engine_support::texture_support::{TextureBundle, TextureProperties},
 };
 
@@ -84,7 +84,6 @@ pub enum ShaderAttachment {
 #[derive(Debug)]
 pub struct Material {
     id: Id,
-    pipeline_id: Id,
     entities_attached: Vec<Id>,
     component_ranges: Vec<Range<usize>>,
     attachments: Vec<ShaderAttachment>,
@@ -96,15 +95,15 @@ pub struct Material {
     parent_entity: Id,
 }
 
+#[derive(Debug)]
 pub enum PipelineOptions {
-    Descriptor(PipelineDescriptor),
+    Descriptor(PipelineParameters),
     Id(Id),
 }
 
 impl Material {
     pub fn new(
         id: Id,
-        pipeline_id: Id,
         attachments: Vec<ShaderAttachment>,
         entities_attached: Vec<Id>,
         immediate_data: Vec<u8>,
@@ -115,7 +114,6 @@ impl Material {
             attachments,
             entities_attached,
             component_ranges: Vec::new(),
-            pipeline_id,
             bind_group_layout: None,
             bind_group: None,
             immediate_data,
@@ -289,14 +287,6 @@ impl Material {
         self.attachments.as_mut()
     }
 
-    pub fn uses_camera(&self) -> bool {
-        self.pipeline_id.uses_camera
-    }
-
-    pub fn pipeline_id(&self) -> Id {
-        self.pipeline_id
-    }
-
     pub fn get_immediate_data(&self) -> &[u8] {
         &self.immediate_data
     }
@@ -397,8 +387,9 @@ impl ComponentSystem for Material {
         queue: &Queue,
         render_pass: &mut wgpu::RenderPass,
         other_components: &[&Component],
+        pipeline_parameters: &PipelineParameters,
     ) {
-        let bind_group_offset = if self.uses_camera() { 1 } else { 0 };
+        let bind_group_offset = pipeline_parameters.uses_camera as u32;
         let bind_group = self.bind_group.as_ref().expect("The material bind group was not created. Remember to initialize the material before executing it.");
         render_pass.set_bind_group(bind_group_offset, bind_group, &[]);
 
@@ -407,7 +398,13 @@ impl ComponentSystem for Material {
                 if !component.is_enabled() {
                     continue;
                 }
-                component.render(device, queue, render_pass, other_components);
+                component.render(
+                    device,
+                    queue,
+                    render_pass,
+                    other_components,
+                    pipeline_parameters,
+                );
             }
         }
     }

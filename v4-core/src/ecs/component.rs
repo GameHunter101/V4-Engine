@@ -5,7 +5,7 @@ use std::{collections::HashMap, fmt::Debug, ops::Range};
 use wgpu::{CommandEncoder, Device, Queue, RenderPass};
 use winit_input_helper::WinitInputHelper;
 
-use crate::EngineDetails;
+use crate::{EngineDetails, engine_management::pipeline::PipelineParameters};
 
 use super::{
     actions::ActionQueue,
@@ -48,6 +48,7 @@ pub trait ComponentSystem: ComponentDetails + Debug + DowncastSync + Send + Sync
         queue: &Queue,
         render_pass: &mut RenderPass,
         other_components: &[&Component],
+        pipeline_parameters: &PipelineParameters,
     ) {
     }
 
