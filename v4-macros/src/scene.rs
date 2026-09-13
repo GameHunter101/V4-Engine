@@ -4,8 +4,8 @@ use std::collections::{HashMap, HashSet};
 use proc_macro2::{Span, TokenStream, TokenTree};
 use quote::{ToTokens, quote};
 use syn::{
-    Error, Expr, ExprCall, ExprMethodCall, ExprStruct, FieldValue, Ident, ItemMacro, LitBool,
-    LitStr, Path, Token, braced, bracketed,
+    Error, Expr, ExprMethodCall, ExprStruct, FieldValue, Ident, LitBool, LitStr, Macro,
+    Path, Token, braced, bracketed,
     parse::{Parse, ParseStream, Parser},
     parse_quote,
     spanned::Spanned,
@@ -199,6 +199,15 @@ fn expr_to_array<T>(input: Expr, parser: fn(ParseStream) -> syn::Result<T>) -> s
     array_parse.parse2(quote! {#input})
 }
 
+fn id_to_tokens(id: Uuid) -> TokenStream {
+    let raw_id = id.to_u128_le();
+    quote! {v4::ecs::scene::Id::from_u128_le(#raw_id)}
+}
+
+fn quote_or<T: ToTokens>(val: Option<&T>, default: TokenStream) -> TokenStream {
+    val.map(|v| quote! {#v}).unwrap_or(default)
+}
+
 pub struct SceneDescriptor {
     attributes: SceneAttributes,
     entities: Vec<EntityDescriptor>,
@@ -259,12 +268,23 @@ impl ToTokens for SceneDescriptor {
             quote! {None}
         };
 
-        let id_macro_fields: TokenStream = self.id_map.iter().map(|(raw, id)| {
-            let id = id.to_u128_le();
-            quote!{(#raw) => {#id};}
-        }).collect();
+        let screenspace_materials: TokenStream = self
+            .attributes
+            .screenspace_materials
+            .iter()
+            .map(|mat| quote! {#mat;})
+            .collect();
 
-        let id_macro = quote!{
+        let id_macro_fields: TokenStream = self
+            .id_map
+            .iter()
+            .map(|(raw, id)| {
+                let id_tokens = id_to_tokens(*id);
+                quote! {(#raw) => {#id_tokens};}
+            })
+            .collect();
+
+        let id_macro = quote! {
             macro_rules! ID {
                 #id_macro_fields
                 ($($fallback:tt)*) => {compile_error!("Invalid ID provided")};
@@ -280,14 +300,18 @@ impl ToTokens for SceneDescriptor {
                 let mut scene = v4::ecs::scene::Scene::default();
                 scene.set_active_camera(#active_cam);
 
+                #screenspace_materials
+
                 #(#entities)*
+
+                scene
             }
         });
     }
 }
 
 pub struct SceneAttributes {
-    active_camera: Option<ItemMacro>,
+    active_camera: Option<Macro>,
     screenspace_materials: Vec<MaterialDescriptor>,
 }
 
@@ -300,7 +324,8 @@ impl SceneAttributes {
             match attribute.member {
                 syn::Member::Named(ref ident) => match ident.to_string().as_str() {
                     "active_camera" => {
-                        active_camera = Some(parse_quote!(quote! {#(attribute.expr)}))
+                        let expr = attribute.expr;
+                        active_camera = Some(parse_quote!(#expr));
                     }
                     "screen_space_materials" => {
                         let array_contents =
@@ -417,16 +442,45 @@ impl GetId for MaterialDescriptor {
 
             *id = Id::Processed(new_uuid);
         }
+
+        self.pipeline.populate_id_map(id_map);
     }
 }
 
 impl ToTokens for MaterialDescriptor {
     fn to_tokens(&self, tokens: &mut TokenStream) {
-        // let pipeline = 
+        let Self {
+            pipeline,
+            attachments,
+            immediate_data,
+            enabled,
+            id,
+        } = self;
+
+        let immediate_data = quote_or(immediate_data.as_ref(), quote! {Vec::new()});
+
+        let enabled = quote_or(enabled.as_ref(), quote! {true});
+
+        let id = id
+            .as_ref()
+            .map(|id| {
+                if let Id::Processed(uuid) = id {
+                    let id_tokens = id_to_tokens(*uuid);
+                    quote! {Some(#id_tokens)}
+                } else {
+                    quote! {None}
+                }
+            })
+            .unwrap_or(quote! {None});
+
         tokens.extend(quote! {
             scene.create_material(
-
-            )
+                #pipeline,
+                vec![#(#attachments),*],
+                #immediate_data,
+                #enabled,
+                #id,
+            ).unwrap()
         });
     }
 }
@@ -435,7 +489,7 @@ impl ToTokens for MaterialDescriptor {
 enum PipelineOptions {
     Screenspace(ScreenspacePipelineDescriptor),
     Normal(NormalPipelineDescriptor),
-    Id(ItemMacro),
+    Id(Macro),
 }
 
 impl Parse for PipelineOptions {
@@ -448,6 +502,30 @@ impl Parse for PipelineOptions {
             "ID" => Ok(Self::Id(input.parse()?)),
             _ => Err(Error::new_spanned(ident, "Invalid pipeline specified.")),
         }
+    }
+}
+
+impl GetId for PipelineOptions {
+    fn populate_id_map(&mut self, id_map: &mut HashMap<LitStr, Uuid>) {
+        match self {
+            PipelineOptions::Screenspace(screenspace) => screenspace.populate_id_map(id_map),
+            PipelineOptions::Normal(normal) => normal.populate_id_map(id_map),
+            _ => {}
+        }
+    }
+}
+
+impl ToTokens for PipelineOptions {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        tokens.extend(match self {
+            PipelineOptions::Screenspace(screenspace) => {
+                quote! {v4::ecs::material::PipelineOptions::Descriptor(#screenspace)}
+            }
+            PipelineOptions::Normal(normal) => {
+                quote! {v4::ecs::material::PipelineOptions::Descriptor(#normal)}
+            }
+            PipelineOptions::Id(id) => quote! {v4::ecs::material::PipelineOptions::Id(#id)},
+        });
     }
 }
 
@@ -476,6 +554,43 @@ impl Parse for ScreenspacePipelineDescriptor {
             span: modular_struct.span,
             id: modular_struct.get_optional_field("ID")?,
         })
+    }
+}
+
+impl GetId for ScreenspacePipelineDescriptor {
+    fn populate_id_map(&mut self, id_map: &mut HashMap<LitStr, Uuid>) {
+        if let Some(id) = self.id.as_mut() {
+            let Id::Raw(raw_id) = id else {
+                return;
+            };
+            let new_uuid = Uuid::new_v4();
+            id_map.insert(raw_id.clone(), new_uuid);
+
+            *id = Id::Processed(new_uuid);
+        }
+    }
+}
+
+impl ToTokens for ScreenspacePipelineDescriptor {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        let Self {
+            shader_path,
+            spirv_shader,
+            immediate_size,
+            ..
+        } = self;
+
+        let spirv_shader = quote_or(spirv_shader.as_ref(), quote! {false});
+
+        let immediate_size = quote_or(immediate_size.as_ref(), quote! {0});
+
+        tokens.extend(quote! {
+            v4::engine_management::pipeline::PipelineParameters::new_screenspace(
+                #shader_path,
+                #spirv_shader,
+                #immediate_size,
+            )
+        });
     }
 }
 
@@ -531,14 +646,72 @@ impl Parse for NormalPipelineDescriptor {
     }
 }
 
+impl GetId for NormalPipelineDescriptor {
+    fn populate_id_map(&mut self, id_map: &mut HashMap<LitStr, Uuid>) {
+        if let Some(id) = self.id.as_mut() {
+            let Id::Raw(raw_id) = id else {
+                return;
+            };
+            let new_uuid = Uuid::new_v4();
+            id_map.insert(raw_id.clone(), new_uuid);
+
+            *id = Id::Processed(new_uuid);
+        }
+    }
+}
+
+impl ToTokens for NormalPipelineDescriptor {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        let Self {
+            vertex_shader,
+            spirv_vertex_shader,
+            fragment_shader,
+            spirv_fragment_shader,
+            vertex_layouts,
+            uses_camera,
+            geometry_details,
+            immediate_size,
+            render_priority,
+            ..
+        } = self;
+
+        let spirv_vertex_shader = quote_or(spirv_vertex_shader.as_ref(), quote! {false});
+        let spirv_fragment_shader = quote_or(spirv_fragment_shader.as_ref(), quote! {false});
+
+        let geometry_details = quote_or(
+            geometry_details.as_ref(),
+            quote! {
+                v4::engine_management::pipeline::GeometryDetails::default()
+            },
+        );
+
+        let immediate_size = quote_or(immediate_size.as_ref(), quote! {0});
+        let render_priority = quote_or(render_priority.as_ref(), quote! {i32::MAX});
+
+        tokens.extend(quote! {
+            v4::engine_management::pipeline::PipelineParameters {
+                vertex_shader: #vertex_shader,
+                spirv_vertex_shader: #spirv_vertex_shader,
+                fragment_shader: #fragment_shader,
+                spirv_fragment_shader: #spirv_fragment_shader,
+                vertex_layouts: #vertex_layouts,
+                uses_camera: #uses_camera,
+                geometry_details: #geometry_details,
+                immediate_size: #immediate_size,
+                render_priority: #render_priority,
+                is_screenspace: false,
+            }
+        });
+    }
+}
+
 #[derive(Debug)]
 struct GeometryDetailsDescriptor {
-    topology: Option<Path>,
+    topology: Option<Expr>,
     strip_index_format: Option<Path>,
     front_face: Option<Path>,
     cull_mode: Option<Path>,
     polygon_mode: Option<Path>,
-    span: Span,
 }
 
 impl Parse for GeometryDetailsDescriptor {
@@ -562,8 +735,52 @@ impl Parse for GeometryDetailsDescriptor {
             front_face: modular_struct.get_optional_field("front_face")?,
             cull_mode: modular_struct.get_optional_field("cull_mode")?,
             polygon_mode: modular_struct.get_optional_field("polygon_mode")?,
-            span: modular_struct.span,
         })
+    }
+}
+
+impl ToTokens for GeometryDetailsDescriptor {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        let Self {
+            topology,
+            strip_index_format,
+            front_face,
+            cull_mode,
+            polygon_mode,
+            ..
+        } = self;
+
+        let topology = topology
+            .as_ref()
+            .map(|val| quote! {topology: #val,})
+            .unwrap_or_default();
+        let strip_index_format = strip_index_format
+            .as_ref()
+            .map(|val| quote! {strip_index_format: #val,})
+            .unwrap_or_default();
+        let front_face = front_face
+            .as_ref()
+            .map(|val| quote! {front_face: #val,})
+            .unwrap_or_default();
+        let cull_mode = cull_mode
+            .as_ref()
+            .map(|val| quote! {cull_mode: #val,})
+            .unwrap_or_default();
+        let polygon_mode = polygon_mode
+            .as_ref()
+            .map(|val| quote! {polygon_mode: #val,})
+            .unwrap_or_default();
+
+        tokens.extend(quote! {
+            v4::engine_management::pipeline::GeometryDetails {
+                #topology
+                #strip_index_format
+                #front_face
+                #cull_mode
+                #polygon_mode
+                ..std::default::Default::default()
+            }
+        });
     }
 }
 
@@ -589,11 +806,19 @@ impl Parse for ShaderAttachmentOptions {
     }
 }
 
+impl ToTokens for ShaderAttachmentOptions {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        tokens.extend(match self {
+            ShaderAttachmentOptions::Texture(texture) => quote! {#texture},
+            ShaderAttachmentOptions::Buffer(buffer) => quote! {#buffer},
+        });
+    }
+}
+
 #[derive(Debug)]
 struct ShaderTextureDescriptor {
     texture_bundle: Expr,
     visibility: Expr,
-    span: Span,
 }
 
 impl Parse for ShaderTextureDescriptor {
@@ -608,8 +833,26 @@ impl Parse for ShaderTextureDescriptor {
         Ok(Self {
             texture_bundle: modular_struct.get_mandatory_field("texture_bundle")?,
             visibility: modular_struct.get_mandatory_field("visibility")?,
-            span: modular_struct.span,
         })
+    }
+}
+
+impl ToTokens for ShaderTextureDescriptor {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        let Self {
+            texture_bundle,
+            visibility,
+            ..
+        } = self;
+
+        tokens.extend(quote! {
+            v4::ecs::material::ShaderAttachment::Texture(
+                v4::ecs::material::ShaderTextureAttachment {
+                    texture_bundle: #texture_bundle,
+                    visibility: #visibility
+                }
+            )
+        });
     }
 }
 
@@ -631,6 +874,15 @@ impl Parse for ShaderBufferOptions {
                 "Invalid shader buffer variant found. Use either the buffer descriptor (buffer, visibility, buffer_type), or the constructor (device, data, buffer_type, visibility, extra_usages)",
             ))
         }
+    }
+}
+
+impl ToTokens for ShaderBufferOptions {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        tokens.extend(match self {
+            ShaderBufferOptions::Descriptor(descriptor) => quote! {#descriptor},
+            ShaderBufferOptions::Constructor(constructor) => quote! {#constructor},
+        });
     }
 }
 
@@ -659,6 +911,26 @@ impl Parse for ShaderBufferDescriptor {
             visibility,
             buffer_type,
         })
+    }
+}
+
+impl ToTokens for ShaderBufferDescriptor {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        let Self {
+            buffer,
+            visibility,
+            buffer_type,
+        } = self;
+
+        tokens.extend(quote! {
+            v4::ecs::material::ShaderAttachment::Buffer(
+                v4::ecs::material::ShaderBufferAttachment {
+                    buffer: #buffer,
+                    visibility: #visibility,
+                    buffer_type: #buffer_type,
+                }
+            )
+        });
     }
 }
 
@@ -696,13 +968,38 @@ impl Parse for ShaderBufferConstructor {
     }
 }
 
+impl ToTokens for ShaderBufferConstructor {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        let Self {
+            device,
+            data,
+            buffer_type,
+            visibility,
+            extra_usages,
+        } = self;
+
+        tokens.extend(quote! {
+            v4::ecs::material::ShaderAttachment::Buffer(
+                v4::ecs::material::ShaderBufferAttachment::new(
+                    #device,
+                    #data,
+                    #buffer_type,
+                    #visibility,
+                    #extra_usages,
+                )
+            )
+        });
+    }
+}
+
 #[derive(Debug)]
 struct EntityDescriptor {
-    parent: Option<ItemMacro>,
+    parent: Option<Macro>,
     id: Option<Id>,
     components: Vec<ComponentOptions>,
     material: Option<MaterialDescriptor>,
     computes: Vec<ComputeDescriptor>,
+    is_enabled: Option<LitBool>,
 }
 
 impl Parse for EntityDescriptor {
@@ -719,7 +1016,7 @@ impl Parse for EntityDescriptor {
         let entity_contents = ModularStruct::parse_no_ident(
             input,
             Vec::new(),
-            vec!["material", "components", "computes", "parent"],
+            vec!["material", "components", "computes", "parent", "is_enabled"],
         )?;
 
         let components = if let Some(components_field) =
@@ -741,15 +1038,14 @@ impl Parse for EntityDescriptor {
             } else {
                 Vec::new()
             };
-        
-        let parent = entity_contents.get_optional_field::<ItemMacro>("parent")?;
 
         Ok(Self {
             id,
-            parent,
+            parent: entity_contents.get_optional_field("parent")?,
             components,
             material,
             computes,
+            is_enabled: entity_contents.get_optional_field("is_enabled")?,
         })
     }
 }
@@ -782,26 +1078,47 @@ impl GetId for EntityDescriptor {
 
 impl ToTokens for EntityDescriptor {
     fn to_tokens(&self, tokens: &mut TokenStream) {
-        /* let parent = if let Some(parent) = self.parent {
-            quote!{Some(#parent)}
+        let Self {
+            parent,
+            id,
+            components,
+            material,
+            computes,
+            is_enabled,
+        } = self;
+
+        let parent = parent
+            .as_ref()
+            .map(|parent| quote! {Some(#parent)})
+            .unwrap_or(quote! {None});
+
+        let material = material
+            .as_ref()
+            .map(|material| {
+                quote! {Some(#material)}
+            })
+            .unwrap_or(quote! {None});
+
+        let is_enabled = quote_or(is_enabled.as_ref(), quote! {true});
+
+        let id = if let Some(Id::Processed(id)) = id {
+            let id_tokens = id_to_tokens(*id);
+            quote! {Some(#id_tokens)}
         } else {
-            quote!{None}
-        };
-
-        let components = self.components;
-
-        let material = if let Some(material) = self.material {
-            quote!{#material}
+            quote! {None}
         };
 
         tokens.extend(quote! {
+            let material_id = #material;
             scene.create_entity(
                 #parent,
-                vec![#(#components),*],
-
-            );
-        }); */
-        todo!()
+                vec![#(Box::new(#components)),*],
+                vec![#(#computes),*],
+                material_id,
+                #is_enabled,
+                #id,
+            ).unwrap();
+        });
     }
 }
 
@@ -831,11 +1148,20 @@ impl GetId for ComponentOptions {
 
 impl Parse for ComponentOptions {
     fn parse(input: ParseStream) -> syn::Result<Self> {
-        if input.fork().parse::<ComponentConstructor>().is_ok() {
-            Ok(Self::Constructor(input.parse()?))
-        } else {
+        if input.fork().parse::<ComponentDescriptor>().is_ok() {
             Ok(Self::Descriptor(input.parse()?))
+        } else {
+            Ok(Self::Constructor(input.parse()?))
         }
+    }
+}
+
+impl ToTokens for ComponentOptions {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        tokens.extend(match self {
+            ComponentOptions::Descriptor(descriptor) => quote! {#descriptor},
+            ComponentOptions::Constructor(constructor) => quote! {#constructor},
+        });
     }
 }
 
@@ -868,6 +1194,30 @@ impl Parse for ComponentDescriptor {
     }
 }
 
+impl ToTokens for ComponentDescriptor {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        let ident = &self.ident;
+        let fields: Vec<_> = self
+            .fields
+            .iter()
+            .flat_map(|field| {
+                let name = &field.member;
+                let expr = if field.colon_token.is_some() {
+                    let val = &field.expr;
+                    quote! {#val}
+                } else {
+                    quote! {#name}
+                };
+                quote! {.#name(#expr)}
+            })
+            .collect();
+
+        tokens.extend(quote! {
+            #ident::builder()#(#fields)*.build(),
+        });
+    }
+}
+
 #[derive(Debug)]
 struct ComponentConstructor {
     constructor: Expr,
@@ -876,20 +1226,19 @@ struct ComponentConstructor {
 
 impl Parse for ComponentConstructor {
     fn parse(input: ParseStream) -> syn::Result<Self> {
-        if input.fork().parse::<ExprCall>().is_ok() {
-            Ok(Self {
-                constructor: input.parse()?,
-                id: None,
-            })
-        } else if input.fork().parse::<ExprMethodCall>().is_ok() {
+        if input.fork().parse::<ExprMethodCall>().is_ok() {
             let method_call: ExprMethodCall = input.parse()?;
             let (id, filtered_constructor) = if method_call.method == "ID" {
-                let expr_parser = |input: ParseStream| input.parse::<Id>();
-
-                (
-                    Some(expr_parser.parse2(quote! {method_call.args[0]})?),
-                    *method_call.receiver,
-                )
+                if let Expr::Lit(syn::PatLit { lit, .. }) = &method_call.args[0]
+                    && let syn::Lit::Str(lit_str) = lit
+                {
+                    Ok((Some(Id::Raw(lit_str.clone())), *method_call.receiver))
+                } else {
+                    Err(Error::new_spanned(
+                        &method_call.args[0],
+                        "Invalid ID created",
+                    ))
+                }?
             } else {
                 (None, Expr::MethodCall(method_call))
             };
@@ -904,6 +1253,12 @@ impl Parse for ComponentConstructor {
                 id: None,
             })
         }
+    }
+}
+
+impl ToTokens for ComponentConstructor {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        self.constructor.to_tokens(tokens);
     }
 }
 
@@ -961,5 +1316,49 @@ impl GetId for ComputeDescriptor {
             id_map.insert(raw_id.clone(), new_uuid);
             *id = Id::Processed(new_uuid);
         }
+    }
+}
+
+impl ToTokens for ComputeDescriptor {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        let Self {
+            shader_path,
+            workgroup_counts,
+            attachments,
+            is_spirv,
+            iterate_count,
+            continuous_execution,
+            ..
+        } = self;
+
+        let is_spirv = is_spirv
+            .as_ref()
+            .map(|is_spirv| {
+                quote! {.is_spirv(#is_spirv)}
+            })
+            .unwrap_or_default();
+
+        let iterate_count = iterate_count
+            .as_ref()
+            .map(|count| {
+                quote! {.iterate_count(#count)}
+            })
+            .unwrap_or_default();
+
+        let continuous_execution = continuous_execution
+            .as_ref()
+            .map(|execution| quote! {.continuous_execution(#execution)})
+            .unwrap_or_default();
+
+        tokens.extend(quote! {
+            v4::ecs::compute::Compute::builder()
+                .shader_path(#shader_path)
+                .workgroup_counts(#workgroup_counts)
+                .attachments(vec![#(#attachments),*])
+                #is_spirv
+                #iterate_count
+                #continuous_execution
+                .build().unwrap()
+        });
     }
 }

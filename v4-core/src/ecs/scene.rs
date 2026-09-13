@@ -27,7 +27,7 @@ use super::{
     component::{Component, ComponentDetails, ComponentSystem},
     compute::Compute,
     entity::Entity,
-    material::{Material, ShaderAttachment},
+    material::{Material, PipelineOptions, ShaderAttachment},
 };
 
 static mut SCENE_COUNT: usize = 0;
@@ -314,9 +314,8 @@ impl Scene {
 
     pub fn create_material(
         &mut self,
-        pipeline: super::material::PipelineOptions,
+        pipeline: PipelineOptions,
         attachments: Vec<ShaderAttachment>,
-        entities_attached: Vec<Id>,
         immediate_data: Vec<u8>,
         is_enabled: bool,
         id: Option<Id>,
@@ -324,8 +323,8 @@ impl Scene {
         let id = id.unwrap_or(Id::new_v4());
 
         let (pipeline_descriptor, pipeline_id) = match pipeline {
-            super::material::PipelineOptions::Descriptor(descriptor) => (descriptor, Id::new_v4()),
-            super::material::PipelineOptions::Id(uuid) => {
+            PipelineOptions::Descriptor(descriptor) => (descriptor, Id::new_v4()),
+            PipelineOptions::Id(uuid) => {
                 let Some((descriptor, _)) = self.pipeline_manager.get_pipeline(uuid) else {
                     return Err(SceneError::InvalidPipelineId(uuid));
                 };
@@ -337,7 +336,6 @@ impl Scene {
         let new_material = Material::new(
             id,
             attachments,
-            entities_attached,
             immediate_data,
             is_enabled,
         );

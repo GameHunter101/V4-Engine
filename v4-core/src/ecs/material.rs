@@ -1,4 +1,4 @@
-use std::{collections::HashMap, ops::Range};
+use std::{collections::{HashMap, HashSet}, ops::Range};
 
 use wgpu::{
     BindGroup, BindGroupEntry, BindGroupLayout, BindGroupLayoutEntry, Buffer, CommandEncoder,
@@ -84,7 +84,7 @@ pub enum ShaderAttachment {
 #[derive(Debug)]
 pub struct Material {
     id: Id,
-    entities_attached: Vec<Id>,
+    entities_attached: HashSet<Id>,
     component_ranges: Vec<Range<usize>>,
     attachments: Vec<ShaderAttachment>,
     bind_group_layout: Option<BindGroupLayout>,
@@ -105,14 +105,13 @@ impl Material {
     pub fn new(
         id: Id,
         attachments: Vec<ShaderAttachment>,
-        entities_attached: Vec<Id>,
         immediate_data: Vec<u8>,
         is_enabled: bool,
     ) -> Self {
         Self {
             id,
             attachments,
-            entities_attached,
+            entities_attached: HashSet::new(),
             component_ranges: Vec::new(),
             bind_group_layout: None,
             bind_group: None,
@@ -268,7 +267,11 @@ impl Material {
     }
 
     pub fn attach_entity(&mut self, entity_id: Id) {
-        self.entities_attached.push(entity_id);
+        self.entities_attached.insert(entity_id);
+    }
+
+    pub fn remove_entity(&mut self, entity_id: Id) {
+        self.entities_attached.remove(&entity_id);
     }
 
     pub fn bind_group_layout(&self) -> Option<&BindGroupLayout> {

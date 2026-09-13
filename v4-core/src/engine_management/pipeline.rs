@@ -284,7 +284,7 @@ impl PipelineParameters {
         &self.geometry_details
     }
 
-    pub fn screenspace_shader(
+    pub fn new_screenspace(
         shader_path: &'static str,
         spirv_shader: bool,
         immediate_size: u32,

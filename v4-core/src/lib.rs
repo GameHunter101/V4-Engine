@@ -220,7 +220,9 @@ impl ApplicationHandler for V4App {
         _window_id: winit::window::WindowId,
         event: WindowEvent,
     ) {
-        let egui_platform = self.egui_platform.as_mut().unwrap();
+        let Some(egui_platform) = self.egui_platform.as_mut() else {
+            return;
+        };
         egui_platform.handle_event(&event);
         self.input_manager.process_window_event(&event);
         if self.input_manager.close_requested() || self.input_manager.destroyed() {

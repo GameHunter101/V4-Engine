@@ -30,12 +30,11 @@ pub async fn main() {
         .await
         .unwrap();
 
-    scene! {
-        scene: egui_scene,
+    let egui_scene = scene! {
         "ui" = {
             components: [
-            EguiUiComponent()
-            ]
+                EguiUiComponent {}
+            ],
         }
     };
 
