@@ -7,7 +7,7 @@ use wgpu::{
 
 use thiserror::Error;
 
-use crate::{ecs::scene::Id, engine_support::texture_support::TextureBundle};
+use crate::{ecs::{material::Material, scene::Id}, engine_support::texture_support::TextureBundle};
 
 #[derive(Error, Debug)]
 pub enum PipelineError {
@@ -20,7 +20,7 @@ pub struct PipelineManager {
     /// Ready pipelines that have been constructed
     pipelines: HashMap<Id, (PipelineParameters, RenderPipeline)>,
     /// Pipelines that have been specified but are yet to be constructed
-    pipelines_queue: Vec<(Id, PipelineParameters, Option<BindGroupLayout>)>,
+    pipelines_queue: Vec<(Id, PipelineParameters, Id)>,
 }
 
 impl PipelineManager {
@@ -90,12 +90,12 @@ impl PipelineManager {
         &mut self,
         pipeline_id: Id,
         pipeline_parameters: PipelineParameters,
-        attachment_bind_group_layout: Option<BindGroupLayout>,
+        material_of_pipeline: Id,
     ) {
         self.pipelines_queue.push((
             pipeline_id,
             pipeline_parameters,
-            attachment_bind_group_layout,
+            material_of_pipeline,
         ));
     }
 
@@ -103,14 +103,15 @@ impl PipelineManager {
         &mut self,
         device: &Device,
         render_format: TextureFormat,
+        materials: &HashMap<Id, Material>,
     ) -> Result<(), PipelineError> {
-        for (id, pipeline_parameters, attachment_bind_group_layout) in self.pipelines_queue.clone()
+        for (id, pipeline_parameters, material_of_pipeline) in self.pipelines_queue.clone()
         {
             self.create_render_pipeline(
                 Some(id),
                 device,
                 &pipeline_parameters,
-                attachment_bind_group_layout.as_ref(),
+                materials[&material_of_pipeline].bind_group_layout(),
                 render_format,
             )?;
         }
@@ -143,13 +144,13 @@ impl PipelineManager {
 
         let vertex_shader_module = Self::load_shader_module_descriptor(
             device,
-            descriptor.vertex_shader,
+            &descriptor.vertex_shader,
             descriptor.spirv_vertex_shader,
         )?;
 
         let fragment_shader_module = Self::load_shader_module_descriptor(
             device,
-            descriptor.fragment_shader,
+            &descriptor.fragment_shader,
             descriptor.spirv_fragment_shader,
         )?;
 
@@ -221,11 +222,14 @@ impl PipelineManager {
         shader_path: &str,
         spirv: bool,
     ) -> Result<wgpu::ShaderModule, PipelineError> {
-        let shader_contents_bytes =
+        let shader_contents_bytes = if let Some(raw_shader) = shader_path.strip_prefix("raw:") {
+            raw_shader.as_bytes().to_vec()
+        } else {
             std::fs::read(shader_path).map_err(|err| PipelineError::ShaderModuleError {
                 path: shader_path.to_string(),
                 err,
-            })?;
+            })?
+        };
 
         Ok(device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: None,
@@ -263,9 +267,9 @@ pub enum PipelineAttachments {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PipelineParameters {
-    pub vertex_shader: &'static str,
+    pub vertex_shader: String,
     pub spirv_vertex_shader: bool,
-    pub fragment_shader: &'static str,
+    pub fragment_shader: String,
     pub spirv_fragment_shader: bool,
     pub vertex_layouts: Vec<wgpu::VertexBufferLayout<'static>>,
     pub uses_camera: bool,
@@ -284,11 +288,7 @@ impl PipelineParameters {
         &self.geometry_details
     }
 
-    pub fn new_screenspace(
-        shader_path: &'static str,
-        spirv_shader: bool,
-        immediate_size: u32,
-    ) -> Self {
+    pub fn new_screenspace(shader_path: String, spirv_shader: bool, immediate_size: u32) -> Self {
         const ATTRIBUTES: &[wgpu::VertexAttribute] =
             &wgpu::vertex_attr_array![0=>Float32x3, 1=>Float32x2];
         let vertex_layouts = vec![wgpu::VertexBufferLayout {
@@ -298,12 +298,13 @@ impl PipelineParameters {
         }];
 
         Self {
-            vertex_shader: "../default_shaders/screenspace_vertex.wgsl",
+            vertex_shader: "raw:".to_string()
+                + include_str!("../default_shaders/screenspace_vertex.wgsl"),
             spirv_vertex_shader: false,
             fragment_shader: shader_path,
             spirv_fragment_shader: spirv_shader,
             vertex_layouts,
-            uses_camera: true,
+            uses_camera: false,
             is_screenspace: true,
             geometry_details: Default::default(),
             immediate_size,

@@ -4,8 +4,8 @@ use std::collections::{HashMap, HashSet};
 use proc_macro2::{Span, TokenStream, TokenTree};
 use quote::{ToTokens, quote};
 use syn::{
-    Error, Expr, ExprMethodCall, ExprStruct, FieldValue, Ident, LitBool, LitStr, Macro,
-    Path, Token, braced, bracketed,
+    Error, Expr, ExprMethodCall, ExprStruct, FieldValue, Ident, LitBool, LitStr, Macro, Path,
+    Token, braced, bracketed,
     parse::{Parse, ParseStream, Parser},
     parse_quote,
     spanned::Spanned,
@@ -298,11 +298,12 @@ impl ToTokens for SceneDescriptor {
                 #id_macro
 
                 let mut scene = v4::ecs::scene::Scene::default();
-                scene.set_active_camera(#active_cam);
 
                 #screenspace_materials
 
                 #(#entities)*
+
+                scene.set_active_camera(#active_cam);
 
                 scene
             }
@@ -586,7 +587,7 @@ impl ToTokens for ScreenspacePipelineDescriptor {
 
         tokens.extend(quote! {
             v4::engine_management::pipeline::PipelineParameters::new_screenspace(
-                #shader_path,
+                #shader_path.to_string(),
                 #spirv_shader,
                 #immediate_size,
             )
@@ -690,9 +691,9 @@ impl ToTokens for NormalPipelineDescriptor {
 
         tokens.extend(quote! {
             v4::engine_management::pipeline::PipelineParameters {
-                vertex_shader: #vertex_shader,
+                vertex_shader: #vertex_shader.to_string(),
                 spirv_vertex_shader: #spirv_vertex_shader,
-                fragment_shader: #fragment_shader,
+                fragment_shader: #fragment_shader.to_string(),
                 spirv_fragment_shader: #spirv_fragment_shader,
                 vertex_layouts: #vertex_layouts,
                 uses_camera: #uses_camera,
@@ -1212,8 +1213,15 @@ impl ToTokens for ComponentDescriptor {
             })
             .collect();
 
+        let id = if let Some(Id::Processed(id)) = self.id {
+            let id_tokens = id_to_tokens(id);
+            quote! {.id(#id_tokens)}
+        } else {
+            TokenStream::new()
+        };
+
         tokens.extend(quote! {
-            #ident::builder()#(#fields)*.build(),
+            #ident::builder()#(#fields)*#id.build(),
         });
     }
 }
@@ -1258,7 +1266,19 @@ impl Parse for ComponentConstructor {
 
 impl ToTokens for ComponentConstructor {
     fn to_tokens(&self, tokens: &mut TokenStream) {
-        self.constructor.to_tokens(tokens);
+        if let Some(Id::Processed(id)) = &self.id {
+            let constructor = &self.constructor;
+            let id_tokens = id_to_tokens(*id);
+            tokens.extend(quote! {
+                {
+                    let mut comp = #constructor;
+                    comp.set_id(#id_tokens);
+                    comp
+                }
+            });
+        } else {
+            self.constructor.to_tokens(tokens);
+        }
     }
 }
 

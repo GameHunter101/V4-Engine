@@ -70,6 +70,8 @@ impl_downcast!(sync ComponentSystem);
 pub trait ComponentDetails {
     fn id(&self) -> Id;
 
+    fn set_id(&mut self, id: Id);
+
     fn is_initialized(&self) -> bool;
 
     fn set_initialized(&mut self);

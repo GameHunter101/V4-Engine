@@ -269,19 +269,30 @@ impl ApplicationHandler for V4App {
                     let workload_output_receiver =
                         self.core_communication.workload_output_receiver();
 
-                    let action_queue = self.scenes[self.active_scene].initialize(
+                    let scene = &mut self.scenes[self.active_scene];
+
+                    let action_queue = scene.initialize(
                         device,
                         self.core_communication.workload_sender(),
                         workload_output_receiver,
                         self.core_communication.engine_action_sender(),
                     );
                     TokioScope::scope_and_block(|scope| {
-                        scope.spawn(self.scenes[self.active_scene].execute_action_queue(
+                        scope.spawn(scene.execute_action_queue(
                             action_queue,
                             device,
                             queue,
                         ));
                     });
+
+                    if let Err(err) =
+                        scene.construct_missing_pipelines(device, rendering_manager.format().unwrap())
+                    {
+                        eprintln!("{err}");
+                        event_loop.exit();
+                        return;
+                    }
+
                     self.initialized_scene = true;
                 }
                 if self.active_scene != self.last_active_scene_index {
@@ -324,15 +335,6 @@ impl ApplicationHandler for V4App {
                 }
 
                 scene.update_materials(device, queue, &self.input_manager, &self.details);
-
-                if let Err(err) = scene.pipeline_manager_mut().construct_from_pipeline_queue(
-                    device,
-                    rendering_manager.format().unwrap(),
-                ) {
-                    eprintln!("{err}");
-                    event_loop.exit();
-                    return;
-                }
 
                 let mut compute_encoder =
                     device.create_command_encoder(&wgpu::wgt::CommandEncoderDescriptor {

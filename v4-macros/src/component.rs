@@ -86,6 +86,10 @@ pub fn component_impl(args: TokenStream, item: TokenStream) -> TokenStream {
                 self.id
             }
 
+            fn set_id(&mut self, id: v4::ecs::scene::Id) {
+                self.id = id;
+            }
+
             fn is_initialized(&self) -> bool {
                 self.is_initialized
             }

@@ -299,7 +299,9 @@ impl RenderingManager {
                     if pipeline_parameters.uses_camera {
                         render_pass.set_bind_group(
                             0,
-                            if let Some(bind_group) = scene.active_camera_bind_group() {
+                            if let Some(active_camera) = scene.active_camera()
+                                && let Some(bind_group) = active_camera.camera_bind_group()
+                            {
                                 Ok(bind_group)
                             } else {
                                 Err(RendererError::NoActiveCamera)
@@ -693,9 +695,6 @@ impl ScreenSpaceAttachments {
             ],
         });
 
-        const SCREENSPACE_VERTEX_ATTRIBUTES: &[wgpu::VertexAttribute] =
-            &wgpu::vertex_attr_array![0=>Float32x3, 1=>Float32x2];
-
         let screen_triangle: [[f32; 5]; 3] = [
             [-1.0, 3.0, 0.0, 0.0, 2.0],
             [-1.0, -1.0, 0.0, 0.0, 0.0],
@@ -707,22 +706,12 @@ impl ScreenSpaceAttachments {
             usage: wgpu::BufferUsages::VERTEX,
         });
 
-        let screenspace_output_pipeline_descriptor = PipelineParameters {
-            vertex_shader: "../default_shaders/screenspace_vertex.wgsl",
-            spirv_vertex_shader: false,
-            fragment_shader: "../default_shaders/screenspace_output_fragment.wgsl",
-            spirv_fragment_shader: false,
-            vertex_layouts: vec![wgpu::VertexBufferLayout {
-                array_stride: 4 * 5,
-                step_mode: wgpu::VertexStepMode::Vertex,
-                attributes: SCREENSPACE_VERTEX_ATTRIBUTES,
-            }],
-            uses_camera: false,
-            is_screenspace: true,
-            geometry_details: Default::default(),
-            immediate_size: 0,
-            render_priority: i32::MAX,
-        };
+        let screenspace_output_pipeline_descriptor = PipelineParameters::new_screenspace(
+            "raw:".to_string()
+                + include_str!("../default_shaders/screenspace_output_fragment.wgsl"),
+            false,
+            0,
+        );
 
         let mut screenspace_output_pipeline = PipelineManager::default();
         screenspace_output_pipeline.create_render_pipeline(

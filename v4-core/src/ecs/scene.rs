@@ -9,7 +9,7 @@ use std::{
 
 use crossbeam_channel::{Receiver, Sender};
 use uuid::Uuid;
-use wgpu::{BindGroup, Buffer, Device, Queue};
+use wgpu::{BindGroup, Buffer, Device, Queue, TextureFormat};
 use winit_input_helper::WinitInputHelper;
 
 use thiserror::Error;
@@ -68,10 +68,33 @@ pub struct Scene {
     workload_outputs: WorkloadOutputCollection,
     engine_action_sender: Option<Sender<Box<dyn EngineAction>>>,
     pub new_pipelines_needed: bool,
-    active_camera: Option<Id>,
-    active_camera_buffer: Option<Buffer>,
-    active_camera_bind_group: Option<BindGroup>,
     computes: Vec<Compute>,
+    active_camera: Option<ActiveCamera>,
+}
+
+#[derive(Debug)]
+pub struct ActiveCamera {
+    camera_id: Id,
+    camera_buffer: Option<Buffer>,
+    camera_bind_group: Option<BindGroup>,
+}
+
+impl ActiveCamera {
+    pub fn set_camera_buffer(&mut self, camera_buffer: Option<Buffer>) {
+        self.camera_buffer = camera_buffer;
+    }
+
+    pub fn set_camera_bind_group(&mut self, camera_bind_group: Option<BindGroup>) {
+        self.camera_bind_group = camera_bind_group;
+    }
+
+    pub fn camera_buffer(&self) -> Option<&Buffer> {
+        self.camera_buffer.as_ref()
+    }
+
+    pub fn camera_bind_group(&self) -> Option<&BindGroup> {
+        self.camera_bind_group.as_ref()
+    }
 }
 
 impl Debug for Scene {
@@ -114,8 +137,6 @@ impl Default for Scene {
             workload_outputs: HashMap::new(),
             new_pipelines_needed: false,
             active_camera: None,
-            active_camera_buffer: None,
-            active_camera_bind_group: None,
             computes: Vec::new(),
         }
     }
@@ -185,7 +206,7 @@ impl Scene {
             }
         }
 
-        let active_camera = self.active_camera();
+        let active_camera = self.active_camera().map(|cam| cam.camera_id);
         let entities = &self.entities;
 
         let enabled_components: Vec<usize> = (0..self.components.len())
@@ -243,7 +264,7 @@ impl Scene {
         input_manager: &WinitInputHelper,
         engine_details: &EngineDetails,
     ) {
-        let active_camera = self.active_camera();
+        let active_camera = self.active_camera.as_ref().map(|cam| cam.camera_id);
         let entities = &self.entities;
         let entity_component_groupings: HashMap<Id, Range<usize>> = self
             .entity_component_groupings
@@ -333,12 +354,7 @@ impl Scene {
             }
         };
 
-        let new_material = Material::new(
-            id,
-            attachments,
-            immediate_data,
-            is_enabled,
-        );
+        let new_material = Material::new(id, attachments, immediate_data, is_enabled);
 
         if let Some(pipeline_materials) = self
             .pipeline_to_corresponding_materials
@@ -351,7 +367,7 @@ impl Scene {
             self.pipeline_manager.add_pipeline_to_creation_queue(
                 pipeline_id,
                 pipeline_descriptor,
-                new_material.bind_group_layout().cloned(),
+                id,
             );
         }
 
@@ -487,27 +503,19 @@ impl Scene {
     }
 
     pub fn set_active_camera(&mut self, camera: Option<Id>) {
-        self.active_camera = camera;
+        self.active_camera = camera.map(|camera_id| ActiveCamera {
+            camera_id,
+            camera_buffer: None,
+            camera_bind_group: None,
+        });
     }
 
-    pub fn active_camera(&self) -> Option<Id> {
-        self.active_camera
+    pub fn active_camera(&self) -> Option<&ActiveCamera> {
+        self.active_camera.as_ref()
     }
 
-    pub fn active_camera_buffer(&self) -> Option<&Buffer> {
-        self.active_camera_buffer.as_ref()
-    }
-
-    pub fn active_camera_bind_group(&self) -> Option<&BindGroup> {
-        self.active_camera_bind_group.as_ref()
-    }
-
-    pub fn set_active_camera_buffer(&mut self, active_camera_buffer: Option<Buffer>) {
-        self.active_camera_buffer = active_camera_buffer;
-    }
-
-    pub fn set_active_camera_bind_group(&mut self, active_camera_bind_group: Option<BindGroup>) {
-        self.active_camera_bind_group = active_camera_bind_group;
+    pub fn active_camera_mut(&mut self) -> Option<&mut ActiveCamera> {
+        self.active_camera.as_mut()
     }
 
     pub fn scene_index(&self) -> usize {
@@ -575,5 +583,14 @@ impl Scene {
 
     pub fn pipeline_manager_mut(&mut self) -> &mut PipelineManager {
         &mut self.pipeline_manager
+    }
+
+    pub fn construct_missing_pipelines(
+        &mut self,
+        device: &Device,
+        render_format: TextureFormat,
+    ) -> Result<(), PipelineError> {
+        self.pipeline_manager
+            .construct_from_pipeline_queue(device, render_format, &self.materials)
     }
 }

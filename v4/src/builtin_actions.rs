@@ -255,7 +255,8 @@ impl Action for UpdateCameraBufferAction {
     ) -> Result<(), SceneError> {
         let arr = [self.0];
         let buf = bytemuck::cast_slice(&arr);
-        if let Some(camera_buffer) = scene.active_camera_buffer() {
+
+        if let Some(camera_buffer) = scene.active_camera().unwrap().camera_buffer() {
             queue.write_buffer(camera_buffer, 0, buf);
         } else {
             let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -286,8 +287,10 @@ impl Action for UpdateCameraBufferAction {
                     resource: wgpu::BindingResource::Buffer(buffer.as_entire_buffer_binding()),
                 }],
             });
-            scene.set_active_camera_bind_group(Some(bind_group));
-            scene.set_active_camera_buffer(Some(buffer));
+
+            let active_camera = scene.active_camera_mut().unwrap();
+            active_camera.set_camera_bind_group(Some(bind_group));
+            active_camera.set_camera_buffer(Some(buffer));
         }
 
         Ok(())

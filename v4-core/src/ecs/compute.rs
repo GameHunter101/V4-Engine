@@ -279,6 +279,10 @@ impl ComponentDetails for Compute {
         self.id
     }
 
+    fn set_id(&mut self, id: Id) {
+        self.id = id;
+    }
+
     fn is_initialized(&self) -> bool {
         self.is_initialized
     }

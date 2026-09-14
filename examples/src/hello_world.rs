@@ -1,23 +1,24 @@
 use algoe::bivector::Bivector;
 use nalgebra::Vector3;
-use v4::builtin_components::mesh_component::VertexData;
-use v4::ecs::compute::Compute;
-use v4::ecs::material::{ShaderAttachment, ShaderTextureAttachment};
-use v4::ecs::scene::Id;
-use v4::engine_support::texture_support::TextureProperties;
 use v4::{
     V4,
     builtin_actions::EntityToggleAction,
     builtin_components::{
         camera_component::CameraComponent,
-        mesh_component::{MeshComponent, VertexDescriptor},
+        mesh_component::{MeshComponent, VertexData, VertexDescriptor},
         transform_component::TransformComponent,
     },
     component,
-    ecs::component::{ComponentSystem, UpdateParams},
-    engine_support::texture_support::TextureBundle,
+    ecs::{
+        component::{ComponentDetails, ComponentSystem, UpdateParams},
+        compute::Compute,
+        material::{ShaderAttachment, ShaderTextureAttachment},
+        scene::Id,
+    },
+    engine_support::texture_support::{TextureBundle, TextureProperties},
     scene,
 };
+
 use wgpu::vertex_attr_array;
 use winit::window::WindowAttributes;
 
@@ -216,7 +217,7 @@ pub async fn main() {
                 },
             ],
         },
-        /* _ = {
+        _ = {
             material: Material {
                 pipeline: Pipeline {
                     vertex_shader: "shaders/hello_world/vertex.wgsl",
@@ -259,14 +260,14 @@ pub async fn main() {
                     position: Vector3::new(0.0, 0.0, 0.0),
                     ID: "thing"
                 },
-                MeshComponent::<Vertex>::from_obj("assets/models/basic_cube.obj", true).await.unwrap().ID("unused ident"),
-                // MeshComponent::<Vertex>::from_obj("C:/Users/liors/CodingProjects/shaderbox/assets/shaderball.obj", true).await.unwrap().ID("unused ident"),
+                // MeshComponent::<Vertex>::from_obj("assets/models/basic_cube.obj", true).await.unwrap().ID("unused ident"),
+                MeshComponent::<Vertex>::from_obj("C:/Users/liors/CodingProjects/shaderbox/assets/shaderball.obj", true).await.unwrap().ID("unused ident"),
                 HideComponent {
                     entity: ID!("test_ent"),
                     immediate_mat: ID!("immediate_mat"),
                 }
             ],
-        }, */
+        },
     };
 
     engine.attach_scene(hello_scene);
