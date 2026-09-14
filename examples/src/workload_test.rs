@@ -13,15 +13,15 @@ use v4::{
 pub async fn main() {
     let mut engine = V4::builder().build().await.unwrap();
 
-    scene! {
+    let scene = scene! {
         _ = {
             components: [
-                WorkloadTesterComponent(initialized_time: std::time::Instant::now(), duration: 2),
-                WorkloadTesterComponent(initialized_time: std::time::Instant::now(), duration: 3),
-                TempComponent()
+                WorkloadTesterComponent {initialized_time: std::time::Instant::now(), duration: 2},
+                WorkloadTesterComponent {initialized_time: std::time::Instant::now(), duration: 3},
+                TempComponent {}
             ]
         }
-    }
+    };
 
     engine.attach_scene(scene);
 
@@ -86,6 +86,7 @@ impl ComponentSystem for WorkloadTesterComponent {
                 computes: Vec::new(),
                 active_material: None,
                 is_enabled: true,
+                id: None,
             })];
         }
         Vec::new()

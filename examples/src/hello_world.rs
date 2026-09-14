@@ -1,25 +1,24 @@
 use algoe::bivector::Bivector;
 use nalgebra::Vector3;
-use v4::builtin_components::mesh_component::VertexData;
-use v4::ecs::compute::Compute;
-use v4::ecs::material::{ShaderAttachment, ShaderTextureAttachment};
-use v4::engine_support::texture_support::TextureProperties;
 use v4::{
     V4,
     builtin_actions::EntityToggleAction,
     builtin_components::{
         camera_component::CameraComponent,
-        mesh_component::{MeshComponent, VertexDescriptor},
+        mesh_component::{MeshComponent, VertexData, VertexDescriptor},
         transform_component::TransformComponent,
     },
     component,
     ecs::{
-        component::{ComponentDetails, ComponentId, ComponentSystem, UpdateParams},
-        entity::EntityId,
+        component::{ComponentDetails, ComponentSystem, UpdateParams},
+        compute::Compute,
+        material::{ShaderAttachment, ShaderTextureAttachment},
+        scene::Id,
     },
-    engine_support::texture_support::TextureBundle,
+    engine_support::texture_support::{TextureBundle, TextureProperties},
     scene,
 };
+
 use wgpu::vertex_attr_array;
 use winit::window::WindowAttributes;
 
@@ -110,48 +109,60 @@ pub async fn main() {
             1024_u32.div_ceil(16),
             6,
         ))
-        .build().unwrap();
+        .build()
+        .unwrap();
 
     skybox_compute.initialize(device);
 
     Compute::individual_compute_execution(&skybox_compute, device, queue, None).unwrap();
 
-    scene! {
-        scene: hello_scene,
-        active_camera: "cam",
+    let hello_scene = scene! {
+        active_camera: ID!("cam"),
         /* screen_space_materials: [
-            {
-                pipeline: {
-                    fragment_shader_path: "shaders/hello_world/screen_space.wgsl",
+            Material {
+                pipeline: ScreenSpacePipeline {
+                    shader_path: "shaders/hello_world/screen_space.wgsl",
                 }
             },
-            {
-                pipeline: {
-                    fragment_shader_path: "shaders/hello_world/screen_space_blur.wgsl"
+            Material {
+                pipeline: ScreenSpacePipeline {
+                    shader_path: "shaders/hello_world/screen_space_blur.wgsl"
                 }
             }
         ], */
         "cam_ent" = {
             components: [
-                CameraComponent(field_of_view: 80.0, aspect_ratio: 1.0, near_plane: 0.1, far_plane: 50.0, sensitivity: 0.002, movement_speed: 0.01, ident: "cam"),
-                TransformComponent(position: Vector3::new(0.0, 5.0, -5.0), rotation: Bivector::new(0.0, -std::f32::consts::FRAC_PI_4 / 2.0, 0.0).exponentiate(), uses_buffer: false),
+                CameraComponent {
+                    field_of_view: 80.0,
+                    aspect_ratio: 1.0,
+                    near_plane: 0.1,
+                    far_plane: 50.0,
+                    sensitivity: 0.002,
+                    movement_speed: 0.01,
+                    ID: "cam",
+                },
+                TransformComponent {
+                    position: Vector3::new(0.0, 5.0, -5.0),
+                    rotation: Bivector::new(0.0, -std::f32::consts::FRAC_PI_4 / 2.0, 0.0).exponentiate(),
+                    uses_buffer: false,
+                },
             ]
         },
         "test_ent" = {
-            material: {
-                pipeline: {
-                    vertex_shader_path: "shaders/hello_world/point_vert.wgsl",
-                    fragment_shader_path: "shaders/hello_world/point_frag.wgsl",
-                    vertex_layouts: [Vertex::vertex_layout()],
+            material: Material {
+                pipeline: Pipeline {
+                    vertex_shader: "shaders/hello_world/point_vert.wgsl",
+                    fragment_shader: "shaders/hello_world/point_frag.wgsl",
+                    vertex_layouts: vec![Vertex::vertex_layout()],
                     uses_camera: false,
-                    geometry_details: {
+                    geometry_details: GeometryDetails {
                         topology: wgpu::PrimitiveTopology::LineList,
                         polygon_mode: wgpu::PolygonMode::Line,
                     },
                 },
             },
             components: [
-                MeshComponent(
+                MeshComponent {
                     vertices: vec![vec![
                         Vertex::blank([0.0, 0.0, 0.0]),
                         Vertex::blank([0.0, 0.5, 0.0]),
@@ -159,8 +170,8 @@ pub async fn main() {
                         Vertex::blank([-0.3, -0.3, 0.0])
                     ]],
                     enabled_models: vec![(0, None)]
-                ),
-                MeshComponent(
+                },
+                MeshComponent {
                     vertices: vec![vec![
                         Vertex::blank([-0.7, 0.0, 0.0]),
                         Vertex::blank([0.0, 0.2, 0.0]),
@@ -168,30 +179,30 @@ pub async fn main() {
                         Vertex::blank([-0.3, -0.3, 0.0])
                     ]],
                     enabled_models: vec![(0, None)]
-                ),
+                },
             ],
             is_enabled: false,
         },
         "skybox" = {
-            material: {
-                pipeline: {
-                    vertex_shader_path: "shaders/hello_world/skybox_vertex.wgsl",
-                    fragment_shader_path: "shaders/hello_world/skybox_fragment.wgsl",
-                    vertex_layouts: [Vertex::vertex_layout()],
+            material: Material {
+                pipeline: Pipeline {
+                    vertex_shader: "shaders/hello_world/skybox_vertex.wgsl",
+                    fragment_shader: "shaders/hello_world/skybox_fragment.wgsl",
+                    vertex_layouts: vec![Vertex::vertex_layout()],
                     uses_camera: true,
                     render_priority: -1,
                 },
                 attachments: [
-                    Texture(
+                    Texture {
                         texture_bundle: skybox_display_bundle,
                         visibility: wgpu::ShaderStages::FRAGMENT,
-                    )
+                    }
                 ],
-                ident: "skybox_mat"
+                ID: "skybox_mat"
             },
             components: [
 
-                MeshComponent(
+                MeshComponent {
                     vertices: vec![
                         vec![
                             Vertex::blank([-1.0, 3.0, 1.0]),
@@ -203,21 +214,21 @@ pub async fn main() {
                         vec![0, 1, 2],
                     ],
                     enabled_models: vec![(0, None)]
-                ),
+                },
             ],
         },
         _ = {
-            material: {
-                pipeline: {
-                    vertex_shader_path: "shaders/hello_world/vertex.wgsl",
-                    fragment_shader_path: "shaders/hello_world/fragment.wgsl",
-                    vertex_layouts: [Vertex::vertex_layout(), TransformComponent::vertex_layout::<5>()],
+            material: Material {
+                pipeline: Pipeline {
+                    vertex_shader: "shaders/hello_world/vertex.wgsl",
+                    fragment_shader: "shaders/hello_world/fragment.wgsl",
+                    vertex_layouts: vec![Vertex::vertex_layout(), TransformComponent::vertex_layout::<5>()],
                     uses_camera: true,
                     immediate_size: 4,
                 },
                 immediate_data: bytemuck::cast_slice(&[0.5_f32]).to_vec(),
                 attachments: [
-                    Texture(
+                    Texture {
                         texture_bundle: TextureBundle::from_path(
                             "./assets/testing_textures/cube-diffuse.jpg",
                             device,
@@ -228,8 +239,8 @@ pub async fn main() {
                             }
                         ).await.unwrap().1,
                         visibility: wgpu::ShaderStages::FRAGMENT,
-                    ),
-                    Texture(
+                    },
+                    Texture {
                         texture_bundle: TextureBundle::from_path(
                             "C:/Users/liors/CodingProjects/shaderbox/assets/shaderball_normal.jpg",
                             device,
@@ -240,18 +251,24 @@ pub async fn main() {
                             }
                         ).await.unwrap().1,
                         visibility: wgpu::ShaderStages::FRAGMENT,
-                    )
+                    }
                 ],
-                ident: "immediate_mat"
+                ID: "immediate_mat"
             },
             components: [
-                TransformComponent(position: Vector3::new(0.0, 0.0, 0.0), ident: "thing"),
-                // MeshComponent<Vertex>::from_obj("assets/models/basic_cube.obj", true).ident("unused ident").await.unwrap(),
-                MeshComponent<Vertex>::from_obj("C:/Users/liors/CodingProjects/shaderbox/assets/shaderball.obj", true).ident("unused ident").await.unwrap(),
-                HideComponent(entity: ident("test_ent"), immediate_mat: ident("immediate_mat"))
+                TransformComponent {
+                    position: Vector3::new(0.0, 0.0, 0.0),
+                    ID: "thing"
+                },
+                // MeshComponent::<Vertex>::from_obj("assets/models/basic_cube.obj", true).await.unwrap().ID("unused ident"),
+                MeshComponent::<Vertex>::from_obj("C:/Users/liors/CodingProjects/shaderbox/assets/shaderball.obj", true).await.unwrap().ID("unused ident"),
+                HideComponent {
+                    entity: ID!("test_ent"),
+                    immediate_mat: ID!("immediate_mat"),
+                }
             ],
         },
-    }
+    };
 
     engine.attach_scene(hello_scene);
 
@@ -305,8 +322,8 @@ impl VertexDescriptor for Vertex {
 struct HideComponent {
     #[default(false)]
     showing: bool,
-    entity: EntityId,
-    immediate_mat: ComponentId,
+    entity: Id,
+    immediate_mat: Id,
 }
 
 impl ComponentSystem for HideComponent {
@@ -327,9 +344,9 @@ impl ComponentSystem for HideComponent {
             {
                 mat.set_enabled_state(self.showing);
             } */
-            if let Some(mat) = materials
+            if let Some((_, mat)) = materials
                 .iter_mut()
-                .find(|mat| mat.id() == self.immediate_mat)
+                .find(|(id, _)| **id == self.immediate_mat)
             {
                 mat.set_immediate_data(bytemuck::cast_slice(&[if self.showing {
                     1.0_f32

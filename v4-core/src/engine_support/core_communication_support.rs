@@ -3,10 +3,7 @@ use crossbeam_channel::{Receiver, Sender};
 use thiserror::Error;
 
 use crate::{
-    ecs::{
-        component::ComponentId,
-        scene::{WorkloadOutput, WorkloadPacket},
-    },
+    ecs::scene::{WorkloadOutput, WorkloadPacket, Id},
     engine_management::engine_action::EngineAction,
 };
 
@@ -16,15 +13,15 @@ pub enum CommunicationError {
     RuntimeInitError(#[from] std::io::Error),
     #[error("Failed to send workload output for component {id}")]
     WorkloadOutputSendError {
-        id: ComponentId,
-        err: crossbeam_channel::SendError<(u64, Box<dyn std::any::Any + Send + Sync>)>,
+        id: Id,
+        err: crossbeam_channel::SendError<(Id, Box<dyn std::any::Any + Send + Sync>)>,
     },
 }
 
 #[derive(Debug)]
 pub struct CoreCommunication {
     workload_sender: Sender<WorkloadPacket>,
-    workload_output_receiver: Receiver<(ComponentId, WorkloadOutput)>,
+    workload_output_receiver: Receiver<(Id, WorkloadOutput)>,
     _workload_thread_handle: std::thread::JoinHandle<Result<(), CommunicationError>>,
     engine_action_sender: Sender<Box<dyn EngineAction>>,
     engine_action_receiver: Receiver<Box<dyn EngineAction>>,
@@ -38,7 +35,7 @@ impl CoreCommunication {
         ) = crossbeam_channel::unbounded();
 
         let (workload_output_sender, workload_output_receiver): (
-            Sender<(ComponentId, WorkloadOutput)>,
+            Sender<(Id, WorkloadOutput)>,
             Receiver<_>,
         ) = crossbeam_channel::unbounded();
 
@@ -85,7 +82,7 @@ impl CoreCommunication {
         self.workload_sender.clone()
     }
 
-    pub fn workload_output_receiver(&self) -> Receiver<(ComponentId, WorkloadOutput)> {
+    pub fn workload_output_receiver(&self) -> Receiver<(Id, WorkloadOutput)> {
         self.workload_output_receiver.clone()
     }
 

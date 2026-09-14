@@ -1,6 +1,5 @@
+use crate::ecs::scene::Id;
 use winit::window::Window;
-
-use crate::ecs::component::ComponentId;
 
 use super::font_management::{FontState, TextAttributes, TextComponentProperties, TextDisplayInfo};
 
@@ -16,7 +15,7 @@ pub trait EngineAction: Send + Sync {
 }
 
 pub struct CreateTextBufferEngineAction {
-    pub component_id: ComponentId,
+    pub component_id: Id,
     pub text_component_properties: TextComponentProperties,
 }
 
@@ -33,7 +32,7 @@ impl EngineAction for CreateTextBufferEngineAction {
 }
 
 pub struct UpdateTextBufferEngineAction {
-    pub component_id: ComponentId,
+    pub component_id: Id,
     pub text: Option<String>,
     pub text_attributes: Option<TextAttributes>,
     pub text_metrics: Option<glyphon::Metrics>,

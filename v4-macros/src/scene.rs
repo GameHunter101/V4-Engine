@@ -1,1432 +1,672 @@
-use std::collections::HashMap;
+#![allow(clippy::large_enum_variant)]
+use std::collections::{HashMap, HashSet};
 
-use proc_macro2::{TokenStream as TokenStream2, TokenTree};
-use quote::{ToTokens, format_ident, quote};
+use proc_macro2::{Span, TokenStream, TokenTree};
+use quote::{ToTokens, quote};
 use syn::{
-    AngleBracketedGenericArguments, Expr, ExprCall, ExprPath, Ident, Lit, LitBool, LitStr, Token,
-    braced, bracketed, parenthesized,
-    parse::{Parse, ParseStream, discouraged::Speculative},
-    parse2,
-    punctuated::Punctuated,
+    Error, Expr, ExprMethodCall, ExprStruct, FieldValue, Ident, LitBool, LitStr, Macro, Path,
+    Token, braced, bracketed,
+    parse::{Parse, ParseStream, Parser},
+    parse_quote,
     spanned::Spanned,
 };
-use v4_core::ecs::{component::ComponentId, entity::EntityId};
+use uuid::Uuid;
+
+#[derive(Debug)]
+enum Id {
+    Raw(LitStr),
+    Processed(Uuid),
+}
+
+impl Parse for Id {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        Ok(Id::Raw(input.parse()?))
+    }
+}
+
+trait GetId {
+    fn populate_id_map(&mut self, id_map: &mut HashMap<LitStr, Uuid>);
+}
+
+#[derive(Debug)]
+struct ModularStruct {
+    ident: Option<Ident>,
+    fields: HashMap<String, FieldValue>,
+    span: Span,
+}
+
+impl ModularStruct {
+    fn parse(
+        input: ParseStream,
+        struct_ident: &str,
+        mandatory_fields: Vec<&str>,
+        optional_fields: Vec<&str>,
+    ) -> syn::Result<Self> {
+        let modular_struct = Self::parse_everything(input)?;
+
+        if let Some(ident) = &modular_struct.ident
+            && ident != struct_ident
+        {
+            return Err(Error::new_spanned(
+                modular_struct.ident,
+                format!("Expected identifier '{struct_ident}'"),
+            ));
+        }
+
+        let mandatory_fields_set = HashSet::<&str>::from_iter(mandatory_fields);
+        let optional_fields_set = HashSet::from_iter(optional_fields);
+
+        let complete_names_set: HashSet<&str> = mandatory_fields_set
+            .clone()
+            .union(&optional_fields_set)
+            .copied()
+            .collect();
+
+        if let Some(extraneous_field) = modular_struct
+            .fields
+            .keys()
+            .find(|ident| !complete_names_set.contains(ident.as_str()))
+        {
+            return Err(Error::new_spanned(
+                extraneous_field,
+                format!("No such field '{extraneous_field}'"),
+            ));
+        }
+
+        let field_names: HashSet<&str> = modular_struct
+            .fields
+            .keys()
+            .map(|ident| ident.as_str())
+            .collect();
+
+        let missing_fields: Vec<&&str> = mandatory_fields_set.difference(&field_names).collect();
+
+        if !missing_fields.is_empty() {
+            return Err(Error::new(
+                modular_struct.span,
+                format!("Missing modular struct fields: {missing_fields:?}"),
+            ));
+        }
+
+        Ok(modular_struct)
+    }
+
+    fn parse_everything(input: ParseStream) -> syn::Result<Self> {
+        let base_struct: ExprStruct = input.parse()?;
+        let span = base_struct.span();
+
+        let ident = base_struct.path.get_ident().cloned();
+
+        if ident.is_none() {
+            return Err(Error::new_spanned(
+                base_struct.path,
+                "This modular struct needs to have an identifier.",
+            ));
+        };
+
+        let fields_map: HashMap<String, FieldValue> = base_struct
+            .fields
+            .into_iter()
+            .flat_map(|field| match &field.member {
+                syn::Member::Named(ident) => Some((ident.to_string(), field)),
+                syn::Member::Unnamed(_) => None,
+            })
+            .collect();
+
+        Ok(ModularStruct {
+            ident,
+            fields: fields_map,
+            span,
+        })
+    }
+
+    fn parse_no_ident(
+        input: ParseStream,
+        mandatory_fields: Vec<&str>,
+        optional_fields: Vec<&str>,
+    ) -> syn::Result<Self> {
+        let span = input.span();
+        let contents;
+        braced!(contents in input);
+
+        let all_fields: HashSet<&str> = mandatory_fields
+            .iter()
+            .chain(&optional_fields)
+            .copied()
+            .collect();
+
+        let fields = contents
+            .parse_terminated(FieldValue::parse, Token![,])?
+            .into_iter()
+            .flat_map(|field| match &field.member {
+                syn::Member::Named(ident) => {
+                    if all_fields.contains(ident.to_string().as_str()) {
+                        Some(Ok((ident.to_string(), field)))
+                    } else {
+                        Some(Err(Error::new_spanned(
+                            ident,
+                            format!("Unexpected field '{ident}'"),
+                        )))
+                    }
+                }
+                syn::Member::Unnamed(_) => None,
+            })
+            .collect::<syn::Result<HashMap<String, FieldValue>>>()?;
+
+        Ok(Self {
+            ident: None,
+            fields,
+            span,
+        })
+    }
+
+    fn get_optional_field<T: Parse>(&self, field: &str) -> syn::Result<Option<T>> {
+        self.get_optional_field_with(field, T::parse)
+    }
+
+    fn get_optional_field_with<T>(
+        &self,
+        field: &str,
+        parser: impl Fn(ParseStream) -> syn::Result<T>,
+    ) -> syn::Result<Option<T>> {
+        let expr = self.fields.get(field).map(|field| &field.expr);
+
+        if let Some(expr) = expr {
+            Ok(Some(parser.parse2(quote! {#expr})?))
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn get_mandatory_field<T: Parse>(&self, field: &str) -> syn::Result<T> {
+        if let Some(val) = self.get_optional_field::<T>(field)? {
+            Ok(val)
+        } else {
+            Err(Error::new(self.span, format!("Field not found: '{field}'")))
+        }
+    }
+}
+
+fn expr_to_array<T>(input: Expr, parser: fn(ParseStream) -> syn::Result<T>) -> syn::Result<Vec<T>> {
+    let array_parse = |input: ParseStream| {
+        let array_contents;
+        bracketed!(array_contents in input);
+        Ok(Vec::from_iter(
+            array_contents.parse_terminated(parser, Token![,])?,
+        ))
+    };
+
+    array_parse.parse2(quote! {#input})
+}
+
+fn id_to_tokens(id: Uuid) -> TokenStream {
+    let raw_id = id.to_u128_le();
+    quote! {v4::ecs::scene::Id::from_u128_le(#raw_id)}
+}
+
+fn quote_or<T: ToTokens>(val: Option<&T>, default: TokenStream) -> TokenStream {
+    val.map(|v| quote! {#v}).unwrap_or(default)
+}
 
 pub struct SceneDescriptor {
-    scene_ident: Option<Ident>,
-    entities: Vec<TransformedEntityDescriptor>,
-    idents: HashMap<Lit, Id>,
-    materials: Vec<TransformedMaterialDescriptor>,
-    screen_space_materials: Vec<MaterialDescriptor>,
-    pipelines: Vec<PipelineIdDescriptor>,
-    active_camera: Option<Lit>,
+    attributes: SceneAttributes,
+    entities: Vec<EntityDescriptor>,
+    id_map: HashMap<LitStr, Uuid>,
 }
 
 impl SceneDescriptor {
-    fn get_scene_ident(input: ParseStream) -> syn::Result<Option<Ident>> {
-        if input.peek(Ident) && input.peek2(Token![:]) {
-            let keyword: Ident = input.parse()?;
-            if &keyword.to_string() != "scene" {
-                return Err(syn::Error::new(
-                    keyword.span(),
-                    "Invalid specifier found. If you meant to specify a scene name you can do so using 'scene: {name}'",
-                ));
-            }
-            let _: Token![:] = input.parse()?;
-            let ident: Ident = input.parse()?;
-            let _: Token![,] = input.parse()?;
-            Ok(Some(ident))
-        } else {
-            Ok(None)
-        }
-    }
+    fn get_all_ids(
+        screenspace_materials: &mut [MaterialDescriptor],
+        entities: &mut [EntityDescriptor],
+    ) -> HashMap<LitStr, Uuid> {
+        let mut id_map = HashMap::new();
 
-    fn get_active_camera(input: ParseStream) -> syn::Result<Option<Lit>> {
-        if input.peek(syn::Ident) {
-            let ident: Ident = input.parse()?;
-            if &ident.to_string() == "active_camera" {
-                let _: Token![:] = input.parse()?;
-                if input.peek(Token![_]) {
-                    input.parse::<Token![_]>()?;
-                    input.parse::<Token![,]>()?;
-                    Ok(None)
-                } else {
-                    let entity_ident: Lit = input.parse()?;
-                    let _: Token![,] = input.parse()?;
-                    Ok(Some(entity_ident))
-                }
-            } else {
-                Err(syn::Error::new(
-                    ident.span(),
-                    "Invalid specifier found. In order to specify the active camera, use the `active_camera` field",
-                ))
-            }
-        } else {
-            Ok(None)
+        for screenspace_mat in screenspace_materials {
+            screenspace_mat.populate_id_map(&mut id_map);
         }
-    }
 
-    fn get_screen_space_materials(input: ParseStream) -> syn::Result<Vec<MaterialDescriptor>> {
-        if input.peek(syn::Ident) && input.peek2(Token![:]) {
-            let ident: Ident = input.parse()?;
-            if &ident.to_string() == "screen_space_materials" {
-                let _: Token![:] = input.parse()?;
-                let content;
-                bracketed!(content in input);
-                let materials =
-                    content.parse_terminated(MaterialDescriptor::parse_screen_space, Token![,])?;
-                let _: Token![,] = input.parse()?;
-                Ok(materials.into_iter().collect())
-            } else {
-                Err(syn::Error::new(
-                    ident.span(),
-                    "Invalid specifier found. If you meant to specify screen-space materials, use the `screen_space_materials` field",
-                ))
-            }
-        } else {
-            Ok(Vec::new())
+        for entity in entities {
+            entity.populate_id_map(&mut id_map);
         }
+
+        id_map
     }
 }
 
 impl Parse for SceneDescriptor {
     fn parse(input: ParseStream) -> syn::Result<Self> {
-        let scene_ident: Option<Ident> = Self::get_scene_ident(input)?;
+        let items = input.parse_terminated(SceneItems::parse, Token![,])?;
 
-        let active_camera = Self::get_active_camera(input)?;
-
-        let screen_space_materials: Vec<MaterialDescriptor> =
-            Self::get_screen_space_materials(input)?;
-
-        let entities: Vec<EntityDescriptor> = input
-            .parse_terminated(EntityDescriptor::parse, Token![,])?
-            .into_iter()
-            .collect();
-
-        let mut idents: HashMap<Lit, Id> = HashMap::new();
-        let mut relationships: HashMap<EntityId, Vec<EntityId>> = HashMap::new();
-        let mut materials = Vec::new();
-        let mut pipelines = Vec::new();
-
-        let mut current_entity_id = 1;
-        let mut current_component_id = 1;
-        let transformed_entities = entities.into_iter().map(|entity| {
-            let material_id = if let Some(material) = entity.material {
-                Some(material.initialize_and_get_id(current_entity_id, input, &mut idents, &mut pipelines, &mut materials)?)
-            } else {
-                None
-            };
-
-            let mut parent: Option<EntityId> = None;
-
-            if let Some(parent_ident) = &entity.parent {
-                if let Some(parent_id) = idents.get(parent_ident) {
-                    let Id::Entity(parent_id) = parent_id else {
-                        return Err(syn::Error::new_spanned(
-                            parent_ident,
-                            format!("Two objects share the same identifier: \"{parent_ident:?}\""),
-                        ));
-                    };
-                    if let Some(children) = relationships.get_mut(parent_id) {
-                        children.push(current_entity_id);
-                    } else {
-                        relationships.insert(*parent_id, vec![current_entity_id]);
-                    }
-                    parent = Some(*parent_id);
-                } else {
-                    return Err(syn::Error::new_spanned(parent_ident, format!("The parent entity \"{parent_ident:?}\" could not be found. If you declared it, make sure it is declared above the current entity")));
-                }
-            }
-
-            let transformed_entity = TransformedEntityDescriptor {
-                components: entity.components,
-                computes: entity.computes,
-                material_id,
-                parent,
-                _id: current_entity_id,
-                is_enabled: entity.is_enabled,
-                ident: entity.ident,
-            };
-
-            if let Some(ident) = &transformed_entity.ident {
-                idents.insert(ident.clone(), Id::Entity(current_entity_id));
-                current_entity_id += 1;
-            }
-
-
-            for component in &transformed_entity.components {
-                if let Some(ident) = &component.ident {
-                    idents.insert(ident.clone(), Id::Component(current_component_id));
-                    current_component_id += 1;
-                }
-            }
-
-            for compute in &transformed_entity.computes {
-                if let Some(ident) = &compute.ident {
-                    idents.insert(ident.clone(), Id::Component(current_component_id));
-                    current_component_id += 1;
-                }
-            }
-
-            Ok(transformed_entity)
-        }).collect::<syn::Result<Vec<TransformedEntityDescriptor>>>()?;
-
-        if let Some(active_camera_ident) = active_camera.as_ref()
-            && !idents.contains_key(active_camera_ident)
-        {
-            return Err(syn::Error::new(
-                active_camera_ident.span(),
-                "The identifier was not found. Make sure to specify which the identifier on an entity",
-            ));
-        }
-
-        Ok(Self {
-            scene_ident,
-            entities: transformed_entities,
-            idents,
-            materials,
-            screen_space_materials,
-            pipelines,
-            active_camera,
-        })
-    }
-}
-
-impl quote::ToTokens for SceneDescriptor {
-    fn to_tokens(&self, tokens: &mut TokenStream2) {
-        let scene_name = match &self.scene_ident {
-            Some(ident) => quote! {#ident},
-            None => quote! {scene},
-        };
-
-        let screen_space_material_initializations: Vec<TokenStream2> = self
-            .screen_space_materials
-            .iter()
-            .map(|mat| {
-                let MaterialDescriptor {
-                    pipeline_id,
-                    attachments,
-                    ..
-                } = mat;
-                let PipelineIdVariants::ScreenSpace(pipeline_id) = pipeline_id else {
-                    panic!("Invalid pipeline ID found for a screen-space material");
-                };
-
-                quote! {
-                    #scene_name.create_material(
-                        #pipeline_id,
-                        vec![#(#attachments),*],
-                        Vec::new(),
-                    );
-                }
-            })
-            .collect();
-
-        let pipeline_id_initializations: Vec<TokenStream2> = self
-            .pipelines
-            .iter()
-            .map(|pipeline| {
-                quote! {#pipeline}
-            })
-            .collect();
-
-        let material_initializations = self.materials.iter().map(|mat| {
-            let pipeline_id_index = mat.pipeline_id;
-            let pipeline_id = &pipeline_id_initializations[pipeline_id_index];
-            let attachments = &mat.attachments;
-            let entities_attached = &mat.entities_attached;
-            let immediate_data = if let Some(data) = mat.immediate_data.as_ref() {
-                quote! {#data}
-            } else {
-                quote! {Vec::new()}
-            };
-            let is_enabled = if let Some(enabled_lit) = mat.is_enabled.as_ref() {
-                quote! {#enabled_lit}
-            } else {
-                quote! {true}
-            };
-
-            quote! {
-                #scene_name.create_material(
-                    #pipeline_id,
-                    vec![#(#attachments),*],
-                    vec![#(#entities_attached),*],
-                    #immediate_data,
-                    #is_enabled,
-                );
-            }
-        });
-
-        let entity_initializations = self.entities.iter().map(|entity| {
-            let parent_id = match entity.parent {
-                Some(id) => quote! {Some(#id)},
-                None => quote! {None},
-            };
-
-            let component_initializations = entity.components.iter().map(|component| {
-                let mut token_stream = TokenStream2::new();
-                component.to_tokens(&mut token_stream, &self.idents);
-                quote! {#token_stream}
-            });
-
-            let compute_initializations = entity.computes.iter().map(|compute| {
-                let mut token_stream = TokenStream2::new();
-                compute.to_tokens(&mut token_stream, &self.idents);
-                quote! {#token_stream}
-            });
-
-            let material = if let Some(material_id) = &entity.material_id {
-                quote! {Some(#material_id)}
-            } else {
-                quote! {None}
-            };
-
-            let is_enabled = entity.is_enabled;
-
-            let entity_ident = if let Some(ident) = &entity.ident {
-                let entity_name = match ident {
-                    Lit::Str(lit_str) => format!("entity_{}", lit_str.value()),
-                    Lit::ByteStr(lit_byte_str) => format!(
-                        "entity_{}",
-                        String::from_utf8(lit_byte_str.value()).unwrap()
-                    ),
-                    Lit::CStr(lit_cstr) => format!("entity_{}", lit_cstr.value().to_str().unwrap()),
-                    Lit::Byte(lit_byte) => format!("entity_{}", lit_byte.value()),
-                    Lit::Char(lit_char) => format!("entity_{}", lit_char.value()),
-                    Lit::Int(lit_int) => {
-                        format!("entity_{}", lit_int.base10_parse::<u32>().unwrap())
-                    }
-                    Lit::Float(lit_float) => {
-                        format!("entity_{}", lit_float.base10_parse::<f32>().unwrap())
-                    }
-                    Lit::Bool(lit_bool) => format!("entity_{}", lit_bool.value()),
-                    Lit::Verbatim(literal) => format!("entity_{}", literal),
-                    _ => "unnamed_entity".to_string(),
-                };
-                let ident = format_ident!("{}", entity_name);
-                quote! {#ident}
-            } else {
-                quote! {_}
-            };
-
-            quote! {
-                let #entity_ident = #scene_name.create_entity(
-                    #parent_id,
-                    vec![#(#component_initializations),*],
-                    vec![#(#compute_initializations),*],
-                    #material,
-                    #is_enabled,
-                );
-            }
-        });
-
-        let camera_set = if let Some(active_camera) = &self.active_camera {
-            let id = &self.idents[active_camera];
-            quote! {
-                #scene_name.set_active_camera(Some(#id));
-            }
-        } else {
-            quote! {}
-        };
-
-        tokens.extend(quote! {
-            let mut #scene_name = v4::ecs::scene::Scene::default();
-
-            #(#material_initializations)*
-
-            #(#screen_space_material_initializations)*
-
-            #(#entity_initializations)*
-
-            #camera_set
-        });
-    }
-}
-
-struct TransformedEntityDescriptor {
-    components: Vec<ComponentDescriptor>,
-    computes: Vec<ComputeDescriptor>,
-    material_id: Option<ComponentId>,
-    parent: Option<EntityId>,
-    _id: EntityId,
-    is_enabled: bool,
-    ident: Option<Lit>,
-}
-pub enum Id {
-    Entity(EntityId),
-    Component(ComponentId),
-    Material(ComponentId),
-    Pipeline(usize),
-}
-
-impl quote::ToTokens for Id {
-    fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
-        tokens.extend(match self {
-            Id::Entity(id) => quote! {#id},
-            Id::Component(id) => quote! {#id},
-            Id::Material(id) => quote! {#id},
-            Id::Pipeline(id) => quote! {#id},
-        });
-    }
-}
-
-struct EntityDescriptor {
-    ident: Option<Lit>,
-    components: Vec<ComponentDescriptor>,
-    computes: Vec<ComputeDescriptor>,
-    material: Option<MaterialDescriptor>,
-    parent: Option<Lit>,
-    is_enabled: bool,
-}
-
-impl Parse for EntityDescriptor {
-    fn parse(input: ParseStream) -> syn::Result<Self> {
-        let ident = {
-            if input.peek(Token![_]) {
-                let _: Token![_] = input.parse()?;
-                let _: Token![=] = input.parse()?;
-                None
-            } else if input.peek(syn::token::Brace) {
-                None
-            } else {
-                let raw_ident: Lit = input.parse()?;
-                let _: Token![=] = input.parse()?;
-                match raw_ident {
-                    Lit::Str(lit_str) => {
-                        if lit_str.value() == *"_" {
-                            None
-                        } else {
-                            Some(Lit::Str(lit_str))
-                        }
-                    }
-                    lit => Some(lit),
-                }
-            }
-        };
-
-        let mut entity_descriptor = EntityDescriptor {
-            ident,
-            components: Vec::new(),
-            computes: Vec::new(),
-            material: None,
-            parent: None,
-            is_enabled: true,
-        };
-
-        let content;
-        braced!(content in input);
-        let parameters = content.parse_terminated(EntityParameters::parse, Token![,])?;
-        for param in parameters {
-            match param {
-                EntityParameters::Components(vec) => entity_descriptor.components = vec,
-                EntityParameters::Computes(vec) => entity_descriptor.computes = vec,
-                EntityParameters::Material(material_descriptor) => {
-                    entity_descriptor.material = Some(material_descriptor)
-                }
-                EntityParameters::Parent(parent) => entity_descriptor.parent = Some(parent),
-                EntityParameters::Enabled(is_enabled) => entity_descriptor.is_enabled = is_enabled,
-            }
-        }
-
-        Ok(entity_descriptor)
-    }
-}
-
-enum EntityParameters {
-    Components(Vec<ComponentDescriptor>),
-    Computes(Vec<ComputeDescriptor>),
-    Material(MaterialDescriptor),
-    Parent(Lit),
-    Enabled(bool),
-}
-
-impl Parse for EntityParameters {
-    fn parse(input: ParseStream) -> syn::Result<Self> {
-        let param_type: Ident = input.parse()?;
-        input.parse::<Token![:]>()?;
-        match param_type.to_string().as_str() {
-            "components" => {
-                let content;
-                bracketed!(content in input);
-                let components = content.parse_terminated(ComponentDescriptor::parse, Token![,])?;
-                Ok(EntityParameters::Components(
-                    components.into_iter().collect(),
-                ))
-            }
-            "computes" => {
-                let content;
-                bracketed!(content in input);
-                let computes = content.parse_terminated(ComputeDescriptor::parse, Token![,])?;
-                Ok(EntityParameters::Computes(computes.into_iter().collect()))
-            }
-            "material" => Ok(EntityParameters::Material(input.parse()?)),
-            "parent" => Ok(EntityParameters::Parent(input.parse()?)),
-            "is_enabled" => {
-                let lit: Lit = input.parse()?;
-                if let Lit::Bool(lit_bool) = lit {
-                    Ok(EntityParameters::Enabled(lit_bool.value))
-                } else {
-                    Err(syn::Error::new_spanned(lit, "Expected a boolean literal"))
-                }
-            }
-            _ => Err(syn::Error::new_spanned(
-                param_type,
-                "Invalid argument passed into the entity descriptor",
-            )),
-        }
-    }
-}
-
-struct ComponentDescriptor {
-    component_type: Ident,
-    generics: Option<AngleBracketedGenericArguments>,
-    parameters: Vec<SimpleField>,
-    custom_constructor: Option<ComponentConstructor>,
-    ident: Option<Lit>,
-}
-
-impl ComponentDescriptor {
-    fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream, idents: &HashMap<Lit, Id>) {
-        let component_type = &self.component_type;
-        let component_generics = if let Some(generics) = &self.generics {
-            quote! {::#generics}
-        } else {
-            quote! {}
-        };
-
-        if let Some(constructor) = &self.custom_constructor {
-            let params = constructor.parameters.iter().map(|param| {
-                if let Expr::Call(ExprCall { func, args, .. }) = param
-                    && let Expr::Path(ExprPath { path, .. }) = *func.clone()
-                    && let Some(possible_ident) = path.get_ident()
-                    && &possible_ident.to_string() == "ident"
-                    && let Some(Expr::Lit(lit)) = args.first()
-                {
-                    let id = idents.get(&lit.lit).unwrap();
-                    return syn::Expr::Verbatim(quote! {#id});
-                }
-
-                param.clone()
-            });
-
-            let new_constructor = ComponentConstructor {
-                parameters: Punctuated::from_iter(params),
-                ..(constructor.clone())
-            };
-
-            tokens.extend(quote! {
-                Box::new(#component_type #component_generics::#new_constructor)
-            });
-        } else {
-            let params = self.parameters.iter().map(|param| {
-                let field = &param.ident;
-                if let Some(value) = &param.value {
-                    if let Some(ident) = value.get_ident() {
-                        let id = idents.get(&ident).unwrap();
-                        quote! {.#field(#id)}
-                    } else {
-                        quote! {.#field(#value)}
-                    }
-                } else {
-                    quote! {.#field(#field)}
-                }
-            });
-            let id_set = if let Some(ident) = &self.ident {
-                let id = idents.get(ident).unwrap();
-                quote! {.id(#id)}
-            } else {
-                quote! {}
-            };
-
-            tokens.extend(quote! {
-                Box::new(#component_type #component_generics::builder()#(#params)*#id_set.build())
-            });
-        }
-    }
-}
-
-impl Parse for ComponentDescriptor {
-    fn parse(input: ParseStream) -> syn::Result<Self> {
-        let component_type: Ident = input.parse()?;
-        let generics: Option<AngleBracketedGenericArguments> = if input.peek(Token![<]) {
-            Some(input.parse()?)
-        } else {
-            None
-        };
-
-        if input.peek(Token![::]) {
-            let _: Token![::] = input.parse()?;
-            let mut custom_constructor: ComponentConstructor = input.parse()?;
-            let ident = custom_constructor.component_ident.take();
-            Ok(ComponentDescriptor {
-                component_type,
-                generics,
-                parameters: Vec::new(),
-                custom_constructor: Some(custom_constructor),
-                ident,
-            })
-        } else {
-            let content;
-            parenthesized!(content in input);
-
-            let mut parameters: Vec<SimpleField> = content
-                .parse_terminated(SimpleField::parse, Token![,])?
+        let (attributes, entities): (Vec<Option<FieldValue>>, Vec<Option<EntityDescriptor>>) =
+            items
                 .into_iter()
-                .collect();
-
-            let ident = parameters
-                .iter()
-                .filter(|param| &param.ident.to_string() == "ident" && param.value.is_some())
-                .flat_map(|param| {
-                    if let SimpleFieldValue::Literal(ident) = param.value.as_ref().unwrap() {
-                        Some(ident.clone())
-                    } else {
-                        None
-                    }
+                .map(|item| match item {
+                    SceneItems::SceneAttribute(field_value) => (Some(field_value), None),
+                    SceneItems::Entity(entity) => (None, Some(entity)),
                 })
-                .next();
+                .unzip();
 
-            if let Some(ident) = &ident {
-                parameters.remove(
-                    parameters
-                        .iter()
-                        .position(|param| {
-                            param.value == Some(SimpleFieldValue::Literal(ident.clone()))
-                        })
-                        .unwrap(),
-                );
-            }
+        let mut attributes =
+            SceneAttributes::validate_attributes(attributes.into_iter().flatten().collect())?;
+        let mut entities: Vec<EntityDescriptor> = entities.into_iter().flatten().collect();
 
-            Ok(ComponentDescriptor {
-                component_type,
-                generics,
-                parameters,
-                custom_constructor: None,
-                ident,
-            })
-        }
-    }
-}
+        let id_map = Self::get_all_ids(&mut attributes.screenspace_materials, &mut entities);
 
-#[derive(Clone)]
-struct ComponentConstructor {
-    constructor_ident: Ident,
-    parameters: Punctuated<Expr, Token![,]>,
-    postfix: Option<TokenStream2>,
-    component_ident: Option<Lit>,
-}
-
-impl Parse for ComponentConstructor {
-    fn parse(input: ParseStream) -> syn::Result<Self> {
-        let constructor_ident: Ident = input.parse()?;
-        let content;
-        parenthesized!(content in input);
-        let parameters = content.parse_terminated(Expr::parse, Token![,])?;
-
-        let (postfix, ident): (Option<TokenStream2>, Option<Lit>) =
-            if input.is_empty() || input.peek(Token![,]) {
-                Ok::<(Option<TokenStream2>, Option<Lit>), syn::Error>((None, None))
-            } else {
-                let mut ident = None;
-                let mut tokens = quote! {};
-
-                let mut tail_getter = |stream: ParseStream| -> syn::Result<()> {
-                    while !stream.peek(Token![,]) && !stream.is_empty() {
-                        let token: TokenTree = stream.parse()?;
-                        tokens.extend(token.to_token_stream());
-                    }
-                    Ok(())
-                };
-
-                let fork = input.fork();
-                // Parse second token in fork to check for ident (constructor.ident("Temp ident"))
-                if fork.parse::<Token![.]>().is_ok() {
-                    if let Ok(ident_func_name) = fork.parse::<Ident>()
-                        && &ident_func_name.to_string() == "ident"
-                    {
-                        let ident_buf;
-                        parenthesized!(ident_buf in fork);
-                        ident = Some(ident_buf.parse()?);
-                        tail_getter(&fork)?;
-                    }
-                } else {
-                    tail_getter(input)?;
-                }
-
-                input.advance_to(&fork);
-
-                Ok((Some(tokens), ident))
-            }?;
-
-        Ok(ComponentConstructor {
-            constructor_ident,
-            parameters,
-            postfix,
-            component_ident: ident,
+        Ok(SceneDescriptor {
+            attributes,
+            entities,
+            id_map,
         })
     }
 }
 
-impl quote::ToTokens for ComponentConstructor {
+impl ToTokens for SceneDescriptor {
     fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
-        let constructor_ident = &self.constructor_ident;
-        let parameters = &self.parameters;
-        let postfix = &self.postfix;
-        tokens.extend(quote! {
-            #constructor_ident(#parameters)#postfix
-        });
-    }
-}
-
-struct ComputeDescriptor {
-    params: Vec<SimpleField>,
-    ident: Option<Lit>,
-}
-
-impl ComputeDescriptor {
-    fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream, idents: &HashMap<Lit, Id>) {
-        let params = self.params.iter().map(|param| {
-            let field = &param.ident;
-            if let Some(value) = &param.value {
-                if let Some(ident) = value.get_ident() {
-                    let id = idents.get(&ident).unwrap();
-                    quote! {.#field(#id)}
-                } else {
-                    quote! {.#field(#value)}
-                }
-            } else {
-                quote! {.#field(#field)}
-            }
-        });
-        let id_set = if let Some(ident) = &self.ident {
-            let id = idents.get(ident).unwrap();
-            quote! {.id(#id)}
+        let active_cam = if let Some(active_cam) = &self.attributes.active_camera {
+            quote! {Some(#active_cam)}
         } else {
-            quote! {}
+            quote! {None}
         };
 
+        let screenspace_materials: TokenStream = self
+            .attributes
+            .screenspace_materials
+            .iter()
+            .map(|mat| quote! {#mat;})
+            .collect();
+
+        let id_macro_fields: TokenStream = self
+            .id_map
+            .iter()
+            .map(|(raw, id)| {
+                let id_tokens = id_to_tokens(*id);
+                quote! {(#raw) => {#id_tokens};}
+            })
+            .collect();
+
+        let id_macro = quote! {
+            macro_rules! ID {
+                #id_macro_fields
+                ($($fallback:tt)*) => {compile_error!("Invalid ID provided")};
+            }
+        };
+
+        let entities = &self.entities;
+
         tokens.extend(quote! {
-            Compute::builder()#(#params)*#id_set.build().unwrap()
+            {
+                #id_macro
+
+                let mut scene = v4::ecs::scene::Scene::default();
+
+                #screenspace_materials
+
+                #(#entities)*
+
+                scene.set_active_camera(#active_cam);
+
+                scene
+            }
         });
     }
 }
 
-impl Parse for ComputeDescriptor {
-    fn parse(input: ParseStream) -> syn::Result<Self> {
-        let compute_ident: Ident = input.parse()?;
-        if &compute_ident.to_string() != "Compute" {
-            return Err(syn::Error::new(
-                compute_ident.span(),
-                "Only Compute components are valid in this field.",
-            ));
-        }
-
-        let content;
-        parenthesized!(content in input);
-
-        let mut params: Vec<SimpleField> = content
-            .parse_terminated(SimpleField::parse, Token![,])?
-            .into_iter()
-            .collect();
-
-        let ident_and_index = params
-            .iter()
-            .enumerate()
-            .filter(|(_, param)| &param.ident.to_string() == "ident" && param.value.is_some())
-            .flat_map(|(i, param)| {
-                if let SimpleFieldValue::Literal(ident) = param.value.as_ref().unwrap() {
-                    Some((i, ident.clone()))
-                } else {
-                    None
-                }
-            })
-            .next();
-
-        if let Some((ident_index, _)) = &ident_and_index {
-            params.remove(
-                *ident_index, /* params
-                              .iter()
-                              .position(|param| param.value == Some(SimpleFieldValue::Literal(ident.clone())))
-                              .unwrap(), */
-            );
-        }
-
-        let ident = ident_and_index.into_iter().map(|(_, ident)| ident).next();
-
-        Ok(ComputeDescriptor { params, ident })
-    }
+pub struct SceneAttributes {
+    active_camera: Option<Macro>,
+    screenspace_materials: Vec<MaterialDescriptor>,
 }
 
-#[derive(Debug)]
-struct SimpleField {
-    ident: Ident,
-    value: Option<SimpleFieldValue>,
-}
+impl SceneAttributes {
+    fn validate_attributes(attributes: Vec<FieldValue>) -> syn::Result<SceneAttributes> {
+        let mut active_camera = None;
+        let mut screen_space_materials = Vec::new();
 
-impl Parse for SimpleField {
-    fn parse(input: ParseStream) -> syn::Result<Self> {
-        let ident = input.parse::<Ident>()?;
-        let colon = input.parse::<Token![:]>();
-        let mut value = None;
-        if colon.is_ok() {
-            if input.peek(syn::token::Brace) {
-                let content;
-                braced!(content in input);
-                value = Some(SimpleFieldValue::Group(content.parse()?));
-            } else if Expr::peek(input) {
-                let expr: Expr = input.parse()?;
-                if let Expr::Lit(lit) = expr {
-                    value = Some(SimpleFieldValue::Literal(lit.lit));
-                } else {
-                    value = Some(SimpleFieldValue::Expression(expr));
+        for attribute in attributes {
+            match attribute.member {
+                syn::Member::Named(ref ident) => match ident.to_string().as_str() {
+                    "active_camera" => {
+                        let expr = attribute.expr;
+                        active_camera = Some(parse_quote!(#expr));
+                    }
+                    "screen_space_materials" => {
+                        let array_contents =
+                            expr_to_array(attribute.expr, |input: ParseStream| {
+                                MaterialDescriptor::parse(input, true)
+                            })?;
+
+                        screen_space_materials = Vec::from_iter(array_contents);
+                    }
+                    _ => {
+                        let error = format!("Invalid attribute {ident}");
+                        return Err(Error::new_spanned(attribute, error));
+                    }
+                },
+                syn::Member::Unnamed(_) => {
+                    return Err(Error::new_spanned(
+                        attribute,
+                        "Unnamed fields are not allowed for scene attributes",
+                    ));
                 }
-            } else if input.peek(Lit) {
-                let lit: Lit = input.parse()?;
-                value = Some(SimpleFieldValue::Literal(lit));
             }
         }
 
-        Ok(SimpleField { ident, value })
+        Ok(SceneAttributes {
+            active_camera,
+            screenspace_materials: screen_space_materials,
+        })
     }
 }
 
 #[derive(Debug)]
-enum SimpleFieldValue {
-    Expression(Expr),
-    Literal(Lit),
-    Group(TokenStream2),
+enum SceneItems {
+    SceneAttribute(FieldValue),
+    Entity(EntityDescriptor),
 }
 
-impl PartialEq for SimpleFieldValue {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Self::Expression(l0), Self::Expression(r0)) => l0 == r0,
-            (Self::Literal(l0), Self::Literal(r0)) => l0 == r0,
-            _ => false,
+impl Parse for SceneItems {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        if input.peek2(Token![=]) {
+            Ok(Self::Entity(input.parse()?))
+        } else {
+            Ok(Self::SceneAttribute(input.parse()?))
         }
     }
 }
 
-impl SimpleFieldValue {
-    fn get_ident(&self) -> Option<Lit> {
-        if let SimpleFieldValue::Expression(Expr::Call(ExprCall { func, args, .. })) = &self
-            && let Expr::Path(ExprPath { path, .. }) = *func.clone()
-            && let Some(possible_ident) = path.get_ident()
-            && &possible_ident.to_string() == "ident"
-            && let Some(Expr::Lit(lit)) = args.first()
-        {
-            return Some(lit.lit.clone());
-        }
-
-        None
-    }
-}
-
-impl quote::ToTokens for SimpleFieldValue {
-    fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
-        tokens.extend(match self {
-            SimpleFieldValue::Expression(expr) => quote! {#expr},
-            SimpleFieldValue::Literal(lit) => quote! {#lit},
-            SimpleFieldValue::Group(group) => quote! {#group},
-        });
-    }
-}
-
+#[derive(Debug)]
 struct MaterialDescriptor {
-    pipeline_id: PipelineIdVariants,
-    attachments: Vec<ShaderAttachmentDescriptor>,
+    pipeline: PipelineOptions,
+    attachments: Vec<ShaderAttachmentOptions>,
     immediate_data: Option<Expr>,
-    is_enabled: Option<LitBool>,
-    ident: Option<Lit>,
+    enabled: Option<Expr>,
+    id: Option<Id>,
 }
 
 impl MaterialDescriptor {
-    fn parse_screen_space(input: ParseStream) -> syn::Result<Self> {
-        let content;
-        braced!(content in input);
-        let params = content.parse_terminated(MaterialParameters::parse_screen_space, Token![,])?;
+    fn parse(input: ParseStream, screenspace: bool) -> syn::Result<Self> {
+        let modular_struct = ModularStruct::parse(
+            input,
+            "Material",
+            vec!["pipeline"],
+            vec!["attachments", "immediate_data", "enabled", "ID"],
+        )?;
 
-        let mut pipeline_id: Option<ScreenSpacePipelineIdDescriptor> = None;
-        let mut attachments: Vec<ShaderAttachmentDescriptor> = Vec::new();
-        let mut is_enabled: Option<LitBool> = None;
-        let mut immediate_data: Option<Expr> = None;
-        let mut ident: Option<Lit> = None;
+        let pipeline = modular_struct.get_mandatory_field("pipeline")?;
 
-        for param in params {
-            match param {
-                MaterialParameters::Pipeline(specified_pipeline_id) => {
-                    match specified_pipeline_id {
-                        PipelineIdVariants::ScreenSpace(screen_space_pipeline_id_descriptor) => {
-                            pipeline_id = Some(screen_space_pipeline_id_descriptor)
-                        }
-                        _ => return Err(input.error("Only screen-space pipelines are valid here")),
-                    }
+        match &pipeline {
+            PipelineOptions::Screenspace(pipeline) => {
+                if !screenspace {
+                    return Err(Error::new(
+                        pipeline.span,
+                        "A standard material cannot receive a screenspace pipeline",
+                    ));
                 }
-                MaterialParameters::Attachments(specified_attachments) => {
-                    attachments = specified_attachments
-                }
-                MaterialParameters::IsEnabled(enabled_lit) => is_enabled = Some(enabled_lit),
-                MaterialParameters::ImmediateData(data) => immediate_data = Some(data),
-                MaterialParameters::Ident(lit) => ident = Some(lit),
             }
+            PipelineOptions::Normal(screenspace_pipeline) => {
+                if screenspace {
+                    return Err(Error::new(
+                        screenspace_pipeline.span,
+                        "A screenspace material cannot receive a normal pipeline",
+                    ));
+                }
+            }
+            PipelineOptions::Id(_) => {}
         }
 
-        let Some(pipeline_id) = pipeline_id else {
-            return Err(input.error("A pipeline ID must be specified"));
-        };
-
-        Ok(MaterialDescriptor {
-            pipeline_id: PipelineIdVariants::ScreenSpace(pipeline_id),
-            attachments,
-            immediate_data,
-            is_enabled,
-            ident,
-        })
-    }
-
-    fn initialize_and_get_id(
-        self,
-        entity_ident: EntityId,
-        input: ParseStream,
-        idents: &mut HashMap<Lit, Id>,
-        pipelines: &mut Vec<PipelineIdDescriptor>,
-        materials: &mut Vec<TransformedMaterialDescriptor>,
-    ) -> syn::Result<ComponentId> {
-        let pipeline_id = self
-            .pipeline_id
-            .initialize_and_get_id(input, idents, pipelines)?;
-
-        if let Some(ident) = self.ident {
-            idents.insert(ident, Id::Material(materials.len() as ComponentId));
-        }
-
-        materials.push(TransformedMaterialDescriptor {
-            pipeline_id,
-            attachments: self.attachments,
-            entities_attached: vec![entity_ident],
-            immediate_data: self.immediate_data,
-            is_enabled: self.is_enabled,
-        });
-
-        Ok(materials.len() as ComponentId - 1)
-    }
-}
-
-impl Parse for MaterialDescriptor {
-    fn parse(input: ParseStream) -> syn::Result<Self> {
-        let content;
-        braced!(content in input);
-        let params = content.parse_terminated(MaterialParameters::parse, Token![,])?;
-
-        let mut pipeline_id: Option<PipelineIdVariants> = None;
-        let mut attachments: Vec<ShaderAttachmentDescriptor> = Vec::new();
-        let mut immediate_data: Option<Expr> = None;
-        let mut is_enabled: Option<LitBool> = None;
-        let mut ident: Option<Lit> = None;
-
-        for param in params {
-            match param {
-                MaterialParameters::Pipeline(specified_pipeline_id) => {
-                    pipeline_id = Some(specified_pipeline_id)
-                }
-                MaterialParameters::Attachments(specified_attachments) => {
-                    attachments = specified_attachments
-                }
-                MaterialParameters::ImmediateData(data) => immediate_data = Some(data),
-                MaterialParameters::IsEnabled(enabled_lit) => is_enabled = Some(enabled_lit),
-                MaterialParameters::Ident(lit) => ident = Some(lit),
-            }
-        }
-
-        let Some(pipeline_id) = pipeline_id else {
-            return Err(input.error("A pipeline ID must be specified"));
-        };
-
-        Ok(MaterialDescriptor {
-            pipeline_id,
-            attachments,
-            immediate_data,
-            is_enabled,
-            ident,
-        })
-    }
-}
-
-struct TransformedMaterialDescriptor {
-    pipeline_id: usize,
-    attachments: Vec<ShaderAttachmentDescriptor>,
-    entities_attached: Vec<EntityId>,
-    immediate_data: Option<Expr>,
-    is_enabled: Option<LitBool>,
-}
-
-enum MaterialParameters {
-    Pipeline(PipelineIdVariants),
-    Attachments(Vec<ShaderAttachmentDescriptor>),
-    IsEnabled(LitBool),
-    ImmediateData(Expr),
-    Ident(Lit),
-}
-
-impl MaterialParameters {
-    fn parse_screen_space(input: ParseStream) -> syn::Result<Self> {
-        let field_identifier: Ident = input.parse()?;
-        let _: Token![:] = input.parse()?;
-
-        match field_identifier.to_string().as_str() {
-            "pipeline" => Ok(Self::Pipeline(PipelineIdVariants::ScreenSpace(
-                input.parse()?,
-            ))),
-            "attachments" => {
-                let content;
-                bracketed!(content in input);
-                Ok(Self::Attachments(
-                    content
-                        .parse_terminated(ShaderAttachmentDescriptor::parse, Token![,])?
-                        .into_iter()
-                        .collect(),
-                ))
-            }
-            "immediate_data" => Ok(Self::ImmediateData(input.parse()?)),
-            "is_enabled" => Ok(Self::IsEnabled(input.parse()?)),
-            "ident" => Ok(Self::Ident(input.parse()?)),
-            _ => Err(syn::Error::new_spanned(
-                field_identifier,
-                "Invalid argument passed into the material descriptor",
-            )),
-        }
-    }
-}
-
-impl Parse for MaterialParameters {
-    fn parse(input: ParseStream) -> syn::Result<Self> {
-        let field_identifier: Ident = input.parse()?;
-        let _: Token![:] = input.parse()?;
-
-        match field_identifier.to_string().as_str() {
-            "pipeline" => Ok(Self::Pipeline(input.parse()?)),
-            "attachments" => {
-                let content;
-                bracketed!(content in input);
-                Ok(Self::Attachments(
-                    content
-                        .parse_terminated(ShaderAttachmentDescriptor::parse, Token![,])?
-                        .into_iter()
-                        .collect(),
-                ))
-            }
-            "immediate_data" => Ok(Self::ImmediateData(input.parse()?)),
-            "is_enabled" => Ok(Self::IsEnabled(input.parse()?)),
-            "ident" => Ok(Self::Ident(input.parse()?)),
-            _ => Err(syn::Error::new_spanned(
-                field_identifier,
-                "Invalid argument passed into the material descriptor",
-            )),
-        }
-    }
-}
-
-#[derive(Clone)]
-enum PipelineIdVariants {
-    Ident(Lit),
-    Specifier(PipelineIdDescriptor),
-    ScreenSpace(ScreenSpacePipelineIdDescriptor),
-}
-
-impl PipelineIdVariants {
-    fn initialize_and_get_id(
-        self,
-        input: ParseStream,
-        idents: &mut HashMap<Lit, Id>,
-        pipelines: &mut Vec<PipelineIdDescriptor>,
-    ) -> syn::Result<usize> {
-        match self {
-            PipelineIdVariants::Ident(pipeline_ident) => match idents.get(&pipeline_ident) {
-                Some(id) => {
-                    if let Id::Pipeline(id) = *id {
-                        Ok(id)
-                    } else {
-                        Err(syn::Error::new(
-                            pipeline_ident.span(),
-                            format!(
-                                "Two objects share the same identifier: \"{pipeline_ident:?}\""
-                            ),
-                        ))
-                    }
-                }
-                None => Err(syn::Error::new(
-                    pipeline_ident.span(),
-                    format!(
-                        "The pipeline \"{pipeline_ident:?}\" could not be found. If you declared it, make sure it is declared above the current entity"
-                    ),
-                )),
-            },
-            PipelineIdVariants::Specifier(pipeline_id_descriptor) => {
-                let pipeline_id = pipelines.len();
-                if let Some(pipeline_ident) = &pipeline_id_descriptor.ident {
-                    idents.insert(pipeline_ident.clone(), Id::Pipeline(pipeline_id));
-                }
-                pipelines.push(pipeline_id_descriptor.clone());
-
-                Ok(pipeline_id)
-            }
-            PipelineIdVariants::ScreenSpace(_) => {
-                Err(input.error("Screen-space materials are not valid here"))
-            }
-        }
-    }
-}
-
-impl Parse for PipelineIdVariants {
-    fn parse(input: ParseStream) -> syn::Result<Self> {
-        if input.peek(syn::token::Brace) {
-            Ok(Self::Specifier(input.parse()?))
-        } else {
-            let val = SimpleFieldValue::Expression(input.parse()?);
-            if let Some(ident) = val.get_ident() {
-                Ok(Self::Ident(ident))
+        Ok(Self {
+            pipeline,
+            attachments: if let Some(attachments) =
+                modular_struct.get_optional_field_with("attachments", |input: ParseStream| {
+                    let contents;
+                    bracketed!(contents in input);
+                    contents.parse_terminated(ShaderAttachmentOptions::parse, Token![,])
+                })? {
+                Vec::from_iter(attachments)
             } else {
-                let span = match val {
-                    SimpleFieldValue::Expression(expr) => expr.span(),
-                    SimpleFieldValue::Literal(lit) => lit.span(),
-                    SimpleFieldValue::Group(group) => group.span(),
-                };
-                Err(syn::Error::new(
-                    span,
-                    "Error getting an identifier for a pipeline ID",
-                ))
-            }
-        }
-    }
-}
-
-#[derive(Clone)]
-struct ScreenSpacePipelineIdDescriptor {
-    fragment_shader_path: LitStr,
-}
-
-impl Parse for ScreenSpacePipelineIdDescriptor {
-    fn parse(input: ParseStream) -> syn::Result<Self> {
-        let content;
-        braced!(content in input);
-        let fields = content.parse_terminated(SimpleField::parse, Token![,])?;
-        let mut fragment_shader_path: Option<LitStr> = None;
-
-        for field in fields {
-            match field.ident.to_string().as_str() {
-                "vertex_shader_path" => {
-                    return Err(syn::Error::new(
-                        field.ident.span(),
-                        "No vertex shader should be specified for a screen-space effect",
-                    ));
-                }
-                "fragment_shader_path" => {
-                    if let Some(value) = field.value {
-                        match value {
-                            SimpleFieldValue::Literal(lit) => {
-                                if let Lit::Str(str) = lit {
-                                    fragment_shader_path = Some(str)
-                                } else {
-                                    return Err(syn::Error::new(
-                                        lit.span(),
-                                        "Only string literals are valid paths",
-                                    ));
-                                }
-                            }
-                            rest => {
-                                return Err(syn::Error::new_spanned(
-                                    rest,
-                                    "Only string literals are valid paths",
-                                ));
-                            }
-                        }
-                    }
-                }
-                "vertex_layouts" => {
-                    return Err(syn::Error::new(
-                        field.ident.span(),
-                        "No vertex layouts should be specified for a screen-space effect",
-                    ));
-                }
-                "uses_camera" => {
-                    return Err(syn::Error::new(
-                        field.ident.span(),
-                        "No camera usage should be specified for a screen-space effect",
-                    ));
-                }
-                "geometry_details" => {
-                    return Err(syn::Error::new(
-                        field.ident.span(),
-                        "No camera usage should be specified for a screen-space effect",
-                    ));
-                }
-                "ident" => {
-                    return Err(syn::Error::new(
-                        field.ident.span(),
-                        "Identifiers are not valid here, as they can not be safely checked",
-                    ));
-                }
-                _ => {
-                    return Err(syn::Error::new_spanned(
-                        field.ident,
-                        "Invalid argument passed into the pipeline descriptor",
-                    ));
-                }
-            }
-        }
-
-        let Some(fragment_shader_path) = fragment_shader_path else {
-            return Err(input.error("A fragment shader path must be specified"));
-        };
-
-        Ok(ScreenSpacePipelineIdDescriptor {
-            fragment_shader_path,
+                Vec::new()
+            },
+            immediate_data: modular_struct.get_optional_field("immediate_data")?,
+            enabled: modular_struct.get_optional_field("enabled")?,
+            id: modular_struct.get_optional_field("ID")?,
         })
     }
 }
 
-impl quote::ToTokens for ScreenSpacePipelineIdDescriptor {
-    fn to_tokens(&self, tokens: &mut TokenStream2) {
-        let ScreenSpacePipelineIdDescriptor {
-            fragment_shader_path,
+impl GetId for MaterialDescriptor {
+    fn populate_id_map(&mut self, id_map: &mut HashMap<LitStr, Uuid>) {
+        if let Some(id) = self.id.as_mut() {
+            let Id::Raw(raw_id) = id else {
+                return;
+            };
+            let new_uuid = Uuid::new_v4();
+            id_map.insert(raw_id.clone(), new_uuid);
+
+            *id = Id::Processed(new_uuid);
+        }
+
+        self.pipeline.populate_id_map(id_map);
+    }
+}
+
+impl ToTokens for MaterialDescriptor {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        let Self {
+            pipeline,
+            attachments,
+            immediate_data,
+            enabled,
+            id,
         } = self;
+
+        let immediate_data = quote_or(immediate_data.as_ref(), quote! {Vec::new()});
+
+        let enabled = quote_or(enabled.as_ref(), quote! {true});
+
+        let id = id
+            .as_ref()
+            .map(|id| {
+                if let Id::Processed(uuid) = id {
+                    let id_tokens = id_to_tokens(*uuid);
+                    quote! {Some(#id_tokens)}
+                } else {
+                    quote! {None}
+                }
+            })
+            .unwrap_or(quote! {None});
+
         tokens.extend(quote! {
-            v4::engine_management::pipeline::PipelineId {
-                vertex_shader: v4::engine_management::pipeline::PipelineShader::Path(""),
-                spirv_vertex_shader: false,
-                fragment_shader: v4::engine_management::pipeline::PipelineShader::Path(#fragment_shader_path),
-                spirv_fragment_shader: false,
-                vertex_layouts: Vec::new(),
-                uses_camera: false,
-                is_screen_space: true,
-                geometry_details: Default::default(),
-                render_priority: i32::MAX,
-            }
+            scene.create_material(
+                #pipeline,
+                vec![#(#attachments),*],
+                #immediate_data,
+                #enabled,
+                #id,
+            ).unwrap()
         });
     }
 }
 
-#[derive(Clone)]
-struct PipelineIdDescriptor {
-    vertex_shader_path: LitStr,
+#[derive(Debug)]
+enum PipelineOptions {
+    Screenspace(ScreenspacePipelineDescriptor),
+    Normal(NormalPipelineDescriptor),
+    Id(Macro),
+}
+
+impl Parse for PipelineOptions {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let ident: Ident = input.fork().parse()?;
+
+        match ident.to_string().as_str() {
+            "ScreenSpacePipeline" => Ok(Self::Screenspace(input.parse()?)),
+            "Pipeline" => Ok(Self::Normal(input.parse()?)),
+            "ID" => Ok(Self::Id(input.parse()?)),
+            _ => Err(Error::new_spanned(ident, "Invalid pipeline specified.")),
+        }
+    }
+}
+
+impl GetId for PipelineOptions {
+    fn populate_id_map(&mut self, id_map: &mut HashMap<LitStr, Uuid>) {
+        match self {
+            PipelineOptions::Screenspace(screenspace) => screenspace.populate_id_map(id_map),
+            PipelineOptions::Normal(normal) => normal.populate_id_map(id_map),
+            _ => {}
+        }
+    }
+}
+
+impl ToTokens for PipelineOptions {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        tokens.extend(match self {
+            PipelineOptions::Screenspace(screenspace) => {
+                quote! {v4::ecs::material::PipelineOptions::Descriptor(#screenspace)}
+            }
+            PipelineOptions::Normal(normal) => {
+                quote! {v4::ecs::material::PipelineOptions::Descriptor(#normal)}
+            }
+            PipelineOptions::Id(id) => quote! {v4::ecs::material::PipelineOptions::Id(#id)},
+        });
+    }
+}
+
+#[derive(Debug)]
+struct ScreenspacePipelineDescriptor {
+    shader_path: LitStr,
+    spirv_shader: Option<LitBool>,
+    immediate_size: Option<Expr>,
+    span: Span,
+    id: Option<Id>,
+}
+
+impl Parse for ScreenspacePipelineDescriptor {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let modular_struct = ModularStruct::parse(
+            input,
+            "ScreenSpacePipeline",
+            vec!["shader_path"],
+            vec!["spirv_shader", "immediate_size", "ID"],
+        )?;
+
+        Ok(Self {
+            shader_path: modular_struct.get_mandatory_field("shader_path")?,
+            spirv_shader: modular_struct.get_optional_field("spirv_shader")?,
+            immediate_size: modular_struct.get_optional_field("immediate_size")?,
+            span: modular_struct.span,
+            id: modular_struct.get_optional_field("ID")?,
+        })
+    }
+}
+
+impl GetId for ScreenspacePipelineDescriptor {
+    fn populate_id_map(&mut self, id_map: &mut HashMap<LitStr, Uuid>) {
+        if let Some(id) = self.id.as_mut() {
+            let Id::Raw(raw_id) = id else {
+                return;
+            };
+            let new_uuid = Uuid::new_v4();
+            id_map.insert(raw_id.clone(), new_uuid);
+
+            *id = Id::Processed(new_uuid);
+        }
+    }
+}
+
+impl ToTokens for ScreenspacePipelineDescriptor {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        let Self {
+            shader_path,
+            spirv_shader,
+            immediate_size,
+            ..
+        } = self;
+
+        let spirv_shader = quote_or(spirv_shader.as_ref(), quote! {false});
+
+        let immediate_size = quote_or(immediate_size.as_ref(), quote! {0});
+
+        tokens.extend(quote! {
+            v4::engine_management::pipeline::PipelineParameters::new_screenspace(
+                #shader_path.to_string(),
+                #spirv_shader,
+                #immediate_size,
+            )
+        });
+    }
+}
+
+#[derive(Debug)]
+struct NormalPipelineDescriptor {
+    vertex_shader: LitStr,
     spirv_vertex_shader: Option<LitBool>,
-    fragment_shader_path: LitStr,
+    fragment_shader: LitStr,
     spirv_fragment_shader: Option<LitBool>,
-    vertex_layouts: Vec<ExprCall>,
+    vertex_layouts: Expr,
     uses_camera: LitBool,
     geometry_details: Option<GeometryDetailsDescriptor>,
     immediate_size: Option<Expr>,
     render_priority: Option<Expr>,
-    ident: Option<Lit>,
+    span: Span,
+    id: Option<Id>,
 }
 
-impl Parse for PipelineIdDescriptor {
+impl Parse for NormalPipelineDescriptor {
     fn parse(input: ParseStream) -> syn::Result<Self> {
-        let content;
-        braced!(content in input);
-        let fields = content.parse_terminated(SimpleField::parse, Token![,])?;
-        let mut vertex_shader_path: Option<LitStr> = None;
-        let mut spirv_vertex_shader: Option<LitBool> = None;
-        let mut fragment_shader_path: Option<LitStr> = None;
-        let mut spirv_fragment_shader: Option<LitBool> = None;
-        let mut vertex_layouts: Vec<ExprCall> = Vec::new();
-        let mut uses_camera: Option<LitBool> = None;
-        let mut geometry_details: Option<GeometryDetailsDescriptor> = None;
-        let mut immediate_size: Option<Expr> = None;
-        let mut render_priority: Option<Expr> = None;
-        let mut ident: Option<Lit> = None;
+        let modular_struct = ModularStruct::parse(
+            input,
+            "Pipeline",
+            vec![
+                "vertex_shader",
+                "fragment_shader",
+                "vertex_layouts",
+                "uses_camera",
+            ],
+            vec![
+                "spirv_vertex_shader",
+                "spirv_fragment_shader",
+                "geometry_details",
+                "immediate_size",
+                "render_priority",
+                "ID",
+            ],
+        )?;
 
-        for field in fields {
-            match field.ident.to_string().as_str() {
-                "vertex_shader_path" => {
-                    if let Some(value) = field.value {
-                        match value {
-                            SimpleFieldValue::Literal(lit) => {
-                                if let Lit::Str(str) = lit {
-                                    vertex_shader_path = Some(str)
-                                } else {
-                                    return Err(syn::Error::new(
-                                        lit.span(),
-                                        "Only string literals are valid paths",
-                                    ));
-                                }
-                            }
-                            rest => {
-                                return Err(syn::Error::new_spanned(
-                                    rest,
-                                    "Only string literals are valid paths",
-                                ));
-                            }
-                        }
-                    }
-                }
-                "spirv_vertex_shader" => {
-                    if let Some(value) = field.value {
-                        match value {
-                            SimpleFieldValue::Literal(lit) => {
-                                if let Lit::Bool(bool) = lit {
-                                    spirv_vertex_shader = Some(bool);
-                                } else {
-                                    return Err(syn::Error::new(
-                                        lit.span(),
-                                        "Only boolean literals are valid here",
-                                    ));
-                                }
-                            }
-                            rest => {
-                                return Err(syn::Error::new_spanned(
-                                    rest,
-                                    "Only boolean literals are valid here",
-                                ));
-                            }
-                        }
-                    }
-                }
-                "fragment_shader_path" => {
-                    if let Some(value) = field.value {
-                        match value {
-                            SimpleFieldValue::Literal(lit) => {
-                                if let Lit::Str(str) = lit {
-                                    fragment_shader_path = Some(str)
-                                } else {
-                                    return Err(syn::Error::new(
-                                        lit.span(),
-                                        "Only string literals are valid paths",
-                                    ));
-                                }
-                            }
-                            rest => {
-                                return Err(syn::Error::new_spanned(
-                                    rest,
-                                    "Only string literals are valid paths",
-                                ));
-                            }
-                        }
-                    }
-                }
-                "spirv_fragment_shader" => {
-                    if let Some(value) = field.value {
-                        match value {
-                            SimpleFieldValue::Literal(lit) => {
-                                if let Lit::Bool(bool) = lit {
-                                    spirv_fragment_shader = Some(bool);
-                                } else {
-                                    return Err(syn::Error::new(
-                                        lit.span(),
-                                        "Only boolean literals are valid here",
-                                    ));
-                                }
-                            }
-                            rest => {
-                                return Err(syn::Error::new_spanned(
-                                    rest,
-                                    "Only boolean literals are valid here",
-                                ));
-                            }
-                        }
-                    }
-                }
-                "vertex_layouts" => {
-                    if let Some(value) = field.value {
-                        match value {
-                            SimpleFieldValue::Expression(expr) => {
-                                let stream = quote! {#expr};
-                                vertex_layouts = parse2::<VertexLayoutsDescriptor>(stream)?.0;
-                            }
-                            rest => {
-                                return Err(syn::Error::new_spanned(
-                                    rest,
-                                    "Invalid value for vertex layout",
-                                ));
-                            }
-                        }
-                    }
-                }
-                "uses_camera" => {
-                    if let Some(SimpleFieldValue::Literal(Lit::Bool(bool))) = field.value {
-                        uses_camera = Some(bool);
-                    }
-                }
-                "geometry_details" => {
-                    if let Some(value) = field.value {
-                        match value {
-                            SimpleFieldValue::Group(expr) => {
-                                let stream = quote! {#expr};
-                                geometry_details =
-                                    Some(parse2::<GeometryDetailsDescriptor>(stream)?);
-                            }
-                            SimpleFieldValue::Literal(lit) => {
-                                return Err(syn::Error::new(
-                                    lit.span(),
-                                    "Invalid value for geometry details",
-                                ));
-                            }
-                            SimpleFieldValue::Expression(expr) => {
-                                return Err(syn::Error::new(
-                                    expr.span(),
-                                    "Invalid value for geometry details",
-                                ));
-                            }
-                        }
-                    }
-                }
-                "immediate_size" => {
-                    if let Some(value) = field.value {
-                        let expr = quote! {#value};
-                        immediate_size = Some(parse2::<Expr>(expr)?);
-                    }
-                }
-                "render_priority" => {
-                    if let Some(SimpleFieldValue::Expression(priority)) = field.value {
-                        render_priority = Some(priority);
-                    }
-                }
-                "ident" => {
-                    if let Some(SimpleFieldValue::Literal(lit)) = field.value {
-                        ident = Some(lit);
-                    }
-                }
-                _ => {
-                    return Err(syn::Error::new_spanned(
-                        field.ident,
-                        "Invalid argument passed into the pipeline descriptor",
-                    ));
-                }
-            }
-        }
-
-        let Some(vertex_shader_path) = vertex_shader_path else {
-            return Err(input.error("A vertex shader path must be specified"));
-        };
-        let Some(fragment_shader_path) = fragment_shader_path else {
-            return Err(input.error("A fragment shader path must be specified"));
-        };
-
-        let Some(uses_camera) = uses_camera else {
-            return Err(input.error("The usage of the camera must be specified"));
-        };
-
-        Ok(PipelineIdDescriptor {
-            vertex_shader_path,
-            spirv_vertex_shader,
-            fragment_shader_path,
-            spirv_fragment_shader,
-            vertex_layouts,
-            uses_camera,
-            geometry_details,
-            immediate_size,
-            render_priority,
-            ident,
+        Ok(Self {
+            vertex_shader: modular_struct.get_mandatory_field("vertex_shader")?,
+            fragment_shader: modular_struct.get_mandatory_field("fragment_shader")?,
+            vertex_layouts: modular_struct.get_mandatory_field("vertex_layouts")?,
+            uses_camera: modular_struct.get_mandatory_field("uses_camera")?,
+            spirv_vertex_shader: modular_struct.get_optional_field("spirv_vertex_shader")?,
+            spirv_fragment_shader: modular_struct.get_optional_field("spirv_fragment_shader")?,
+            geometry_details: modular_struct.get_optional_field("geometry_details")?,
+            immediate_size: modular_struct.get_optional_field("immediate_size")?,
+            render_priority: modular_struct.get_optional_field("render_priority")?,
+            span: modular_struct.span,
+            id: modular_struct.get_optional_field("ID")?,
         })
     }
 }
 
-impl quote::ToTokens for PipelineIdDescriptor {
-    fn to_tokens(&self, tokens: &mut TokenStream2) {
-        let PipelineIdDescriptor {
-            vertex_shader_path,
+impl GetId for NormalPipelineDescriptor {
+    fn populate_id_map(&mut self, id_map: &mut HashMap<LitStr, Uuid>) {
+        if let Some(id) = self.id.as_mut() {
+            let Id::Raw(raw_id) = id else {
+                return;
+            };
+            let new_uuid = Uuid::new_v4();
+            id_map.insert(raw_id.clone(), new_uuid);
+
+            *id = Id::Processed(new_uuid);
+        }
+    }
+}
+
+impl ToTokens for NormalPipelineDescriptor {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        let Self {
+            vertex_shader,
             spirv_vertex_shader,
-            fragment_shader_path,
+            fragment_shader,
             spirv_fragment_shader,
             vertex_layouts,
             uses_camera,
@@ -1435,432 +675,710 @@ impl quote::ToTokens for PipelineIdDescriptor {
             render_priority,
             ..
         } = self;
-        let geometry_details = match geometry_details {
-            Some(geo) => quote! {#geo},
-            None => quote! {v4::engine_management::pipeline::GeometryDetails::default()},
-        };
-        let spirv_vertex_shader = if let Some(is_spirv) = spirv_vertex_shader {
-            quote! {#is_spirv}
-        } else {
-            quote! {false}
-        };
-        let spirv_fragment_shader = if let Some(is_spirv) = spirv_fragment_shader {
-            quote! {#is_spirv}
-        } else {
-            quote! {false}
-        };
 
-        let immediate_size = if let Some(expr) = immediate_size.as_ref() {
-            quote! {#expr}
-        } else {
-            quote! {0}
-        };
+        let spirv_vertex_shader = quote_or(spirv_vertex_shader.as_ref(), quote! {false});
+        let spirv_fragment_shader = quote_or(spirv_fragment_shader.as_ref(), quote! {false});
 
-        let render_priority = if let Some(lit) = render_priority.as_ref() {
-            quote! {#lit}
-        } else {
-            quote! {0}
-        };
+        let geometry_details = quote_or(
+            geometry_details.as_ref(),
+            quote! {
+                v4::engine_management::pipeline::GeometryDetails::default()
+            },
+        );
+
+        let immediate_size = quote_or(immediate_size.as_ref(), quote! {0});
+        let render_priority = quote_or(render_priority.as_ref(), quote! {i32::MAX});
 
         tokens.extend(quote! {
-            v4::engine_management::pipeline::PipelineId {
-                vertex_shader: v4::engine_management::pipeline::PipelineShader::Path(#vertex_shader_path),
+            v4::engine_management::pipeline::PipelineParameters {
+                vertex_shader: #vertex_shader.to_string(),
                 spirv_vertex_shader: #spirv_vertex_shader,
-                fragment_shader: v4::engine_management::pipeline::PipelineShader::Path(#fragment_shader_path),
+                fragment_shader: #fragment_shader.to_string(),
                 spirv_fragment_shader: #spirv_fragment_shader,
-                vertex_layouts: vec![#(#vertex_layouts),*],
+                vertex_layouts: #vertex_layouts,
                 uses_camera: #uses_camera,
-                is_screen_space: false,
                 geometry_details: #geometry_details,
                 immediate_size: #immediate_size,
                 render_priority: #render_priority,
+                is_screenspace: false,
             }
         });
     }
 }
 
-struct VertexLayoutsDescriptor(Vec<ExprCall>);
-
-impl Parse for VertexLayoutsDescriptor {
-    fn parse(input: ParseStream) -> syn::Result<Self> {
-        let content;
-        bracketed!(content in input);
-        Ok(Self(
-            content
-                .parse_terminated(ExprCall::parse, Token![,])?
-                .into_iter()
-                .collect(),
-        ))
-    }
-}
-
-#[derive(Default, Clone)]
+#[derive(Debug)]
 struct GeometryDetailsDescriptor {
-    topology: Option<ExprPath>,
-    strip_index_format: Option<ExprPath>,
-    front_face: Option<ExprPath>,
-    cull_mode: Option<ExprPath>,
-    polygon_mode: Option<ExprPath>,
+    topology: Option<Expr>,
+    strip_index_format: Option<Path>,
+    front_face: Option<Path>,
+    cull_mode: Option<Path>,
+    polygon_mode: Option<Path>,
 }
 
 impl Parse for GeometryDetailsDescriptor {
     fn parse(input: ParseStream) -> syn::Result<Self> {
-        let fields = input.parse_terminated(SimpleField::parse, Token![,])?;
+        let modular_struct = ModularStruct::parse(
+            input,
+            "GeometryDetails",
+            Vec::new(),
+            vec![
+                "topology",
+                "strip_index_format",
+                "front_face",
+                "cull_mode",
+                "polygon_mode",
+            ],
+        )?;
 
-        let mut details = GeometryDetailsDescriptor::default();
-
-        for field in fields {
-            match field.ident.to_string().as_str() {
-                "topology" => match field.value.unwrap() {
-                    SimpleFieldValue::Expression(expr) => {
-                        if let Expr::Path(path) = expr {
-                            details.topology = Some(path);
-                        }
-                    }
-                    rest => {
-                        return Err(syn::Error::new_spanned(
-                            rest,
-                            "Invalid argument passed into geometry details topology field",
-                        ));
-                    }
-                },
-                "strip_index_format" => match field.value.unwrap() {
-                    SimpleFieldValue::Expression(expr) => {
-                        if let Expr::Path(path) = expr {
-                            details.strip_index_format = Some(path);
-                        }
-                    }
-                    rest => {
-                        return Err(syn::Error::new_spanned(
-                            rest,
-                            "Invalid argument passed into geometry details strip index format field",
-                        ));
-                    }
-                },
-                "front_face" => match field.value.unwrap() {
-                    SimpleFieldValue::Expression(expr) => {
-                        if let Expr::Path(path) = expr {
-                            details.front_face = Some(path);
-                        }
-                    }
-                    rest => {
-                        return Err(syn::Error::new_spanned(
-                            rest,
-                            "Invalid argument passed into geometry details front face field",
-                        ));
-                    }
-                },
-                "cull_mode" => match field.value.unwrap() {
-                    SimpleFieldValue::Expression(expr) => {
-                        if let Expr::Path(path) = expr {
-                            details.cull_mode = Some(path);
-                        }
-                    }
-                    rest => {
-                        return Err(syn::Error::new_spanned(
-                            rest,
-                            "Invalid argument passed into geometry details cull mode field",
-                        ));
-                    }
-                },
-                "polygon_mode" => match field.value.unwrap() {
-                    SimpleFieldValue::Expression(expr) => {
-                        if let Expr::Path(path) = expr {
-                            details.polygon_mode = Some(path);
-                        }
-                    }
-                    rest => {
-                        return Err(syn::Error::new_spanned(
-                            rest,
-                            "Invalid argument passed into geometry details polygon mode field",
-                        ));
-                    }
-                },
-                _ => {
-                    return Err(syn::Error::new_spanned(
-                        field.ident,
-                        "Invalid argument passed into the pipeline geometry details descriptor",
-                    ));
-                }
-            }
-        }
-
-        Ok(details)
+        Ok(Self {
+            topology: modular_struct.get_optional_field("topology")?,
+            strip_index_format: modular_struct.get_optional_field("strip_index_format")?,
+            front_face: modular_struct.get_optional_field("front_face")?,
+            cull_mode: modular_struct.get_optional_field("cull_mode")?,
+            polygon_mode: modular_struct.get_optional_field("polygon_mode")?,
+        })
     }
 }
 
-impl quote::ToTokens for GeometryDetailsDescriptor {
-    fn to_tokens(&self, tokens: &mut TokenStream2) {
-        let GeometryDetailsDescriptor {
+impl ToTokens for GeometryDetailsDescriptor {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        let Self {
             topology,
             strip_index_format,
             front_face,
             cull_mode,
             polygon_mode,
+            ..
         } = self;
 
-        let topology = if let Some(topology) = topology {
-            quote! {topology: #topology}
-        } else {
-            quote! {topology: Default::default()}
-        };
-
-        let strip_index_format = if let Some(strip_index_format) = strip_index_format {
-            quote! {strip_index_format: #strip_index_format}
-        } else {
-            quote! {strip_index_format: Default::default()}
-        };
-
-        let front_face = if let Some(front_face) = front_face {
-            quote! {front_face: #front_face}
-        } else {
-            quote! {front_face: Default::default()}
-        };
-
-        let cull_mode = if let Some(cull_mode) = cull_mode {
-            quote! {cull_mode: #cull_mode}
-        } else {
-            quote! {cull_mode: Default::default()}
-        };
-
-        let polygon_mode = if let Some(polygon_mode) = polygon_mode {
-            quote! {polygon_mode: #polygon_mode}
-        } else {
-            quote! {polygon_mode: Default::default()}
-        };
+        let topology = topology
+            .as_ref()
+            .map(|val| quote! {topology: #val,})
+            .unwrap_or_default();
+        let strip_index_format = strip_index_format
+            .as_ref()
+            .map(|val| quote! {strip_index_format: #val,})
+            .unwrap_or_default();
+        let front_face = front_face
+            .as_ref()
+            .map(|val| quote! {front_face: #val,})
+            .unwrap_or_default();
+        let cull_mode = cull_mode
+            .as_ref()
+            .map(|val| quote! {cull_mode: #val,})
+            .unwrap_or_default();
+        let polygon_mode = polygon_mode
+            .as_ref()
+            .map(|val| quote! {polygon_mode: #val,})
+            .unwrap_or_default();
 
         tokens.extend(quote! {
             v4::engine_management::pipeline::GeometryDetails {
-            #topology,
-            #strip_index_format,
-            #front_face,
-            #cull_mode,
-            #polygon_mode,
+                #topology
+                #strip_index_format
+                #front_face
+                #cull_mode
+                #polygon_mode
+                ..std::default::Default::default()
             }
         });
     }
 }
 
-enum ShaderAttachmentDescriptor {
-    Texture(ShaderTextureAttachmentDescriptor),
-    Buffer(ShaderBufferAttachmentDescriptor),
+#[derive(Debug)]
+enum ShaderAttachmentOptions {
+    Texture(ShaderTextureDescriptor),
+    Buffer(ShaderBufferOptions),
 }
 
-impl Parse for ShaderAttachmentDescriptor {
+impl Parse for ShaderAttachmentOptions {
     fn parse(input: ParseStream) -> syn::Result<Self> {
-        let ident: Ident = input.parse()?;
-
-        match ident.to_string().as_str() {
-            "Texture" => Ok(ShaderAttachmentDescriptor::Texture(input.parse()?)),
-            "Buffer" => Ok(ShaderAttachmentDescriptor::Buffer(input.parse()?)),
-            _ => Err(syn::Error::new(ident.span(), "Invalid material attachment")),
+        let ident: Ident = input.fork().parse()?;
+        if &ident.to_string() == "Buffer" {
+            Ok(Self::Buffer(input.parse()?))
+        } else if &ident.to_string() == "Texture" {
+            Ok(Self::Texture(input.parse()?))
+        } else {
+            Err(Error::new_spanned(
+                ident,
+                "Invalid shader attachment specified",
+            ))
         }
     }
 }
 
-impl quote::ToTokens for ShaderAttachmentDescriptor {
-    fn to_tokens(&self, tokens: &mut TokenStream2) {
-        match self {
-            ShaderAttachmentDescriptor::Texture(ShaderTextureAttachmentDescriptor {
-                texture_bundle,
-                visibility,
-            }) => tokens.extend(quote! {
-                v4::ecs::material::ShaderAttachment::Texture(
-                    v4::ecs::material::ShaderTextureAttachment {
-                        texture_bundle: #texture_bundle,
-                        visibility: #visibility,
-                    }
-                )
-            }),
-            ShaderAttachmentDescriptor::Buffer(ShaderBufferAttachmentDescriptor {
-                device,
-                data,
-                buffer_type,
-                visibility,
-                extra_usages,
-            }) => tokens.extend(quote! {
-                v4::ecs::material::ShaderAttachment::Buffer(
-                    v4::ecs::material::ShaderBufferAttachment::new(
-                        #device,
-                        #data,
-                        #buffer_type,
-                        #visibility,
-                        #extra_usages,
-                    )
-                )
-            }),
-        };
+impl ToTokens for ShaderAttachmentOptions {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        tokens.extend(match self {
+            ShaderAttachmentOptions::Texture(texture) => quote! {#texture},
+            ShaderAttachmentOptions::Buffer(buffer) => quote! {#buffer},
+        });
     }
 }
 
-struct ShaderTextureAttachmentDescriptor {
+#[derive(Debug)]
+struct ShaderTextureDescriptor {
     texture_bundle: Expr,
-    visibility: ExprPath,
+    visibility: Expr,
 }
 
-impl Parse for ShaderTextureAttachmentDescriptor {
+impl Parse for ShaderTextureDescriptor {
     fn parse(input: ParseStream) -> syn::Result<Self> {
-        let content;
-        parenthesized!(content in input);
-        let fields = content.parse_terminated(SimpleField::parse, Token![,])?;
-        let mut texture_bundle: Option<Expr> = None;
-        let mut visibility: Option<ExprPath> = None;
+        let modular_struct = ModularStruct::parse(
+            input,
+            "Texture",
+            vec!["texture_bundle", "visibility"],
+            Vec::new(),
+        )?;
 
-        for field in fields {
-            match field.ident.to_string().as_str() {
-                "texture_bundle" => {
-                    texture_bundle = match field.value {
-                        Some(value) => Some(match value {
-                            SimpleFieldValue::Expression(expr) => Ok(expr),
-                            rest => Err(syn::Error::new_spanned(rest, "Invalid texture value")),
-                        }?),
-                        None => None,
-                    }
+        Ok(Self {
+            texture_bundle: modular_struct.get_mandatory_field("texture_bundle")?,
+            visibility: modular_struct.get_mandatory_field("visibility")?,
+        })
+    }
+}
+
+impl ToTokens for ShaderTextureDescriptor {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        let Self {
+            texture_bundle,
+            visibility,
+            ..
+        } = self;
+
+        tokens.extend(quote! {
+            v4::ecs::material::ShaderAttachment::Texture(
+                v4::ecs::material::ShaderTextureAttachment {
+                    texture_bundle: #texture_bundle,
+                    visibility: #visibility
                 }
-                "visibility" => {
-                    visibility = match field.value {
-                        Some(value) => Some(match value {
-                            SimpleFieldValue::Expression(expr) => {
-                                if let Expr::Path(path) = expr {
-                                    Ok(path)
-                                } else {
-                                    Err(syn::Error::new(
-                                        expr.span(),
-                                        "Invalid texture visibility value",
-                                    ))
-                                }
-                            }
-                            rest => Err(syn::Error::new_spanned(
-                                rest,
-                                "Invalid texture visibility value",
-                            )),
-                        }?),
-                        None => None,
-                    }
-                }
-                _ => {}
-            }
-        }
+            )
+        });
+    }
+}
 
-        let error_message = if texture_bundle.is_none() {
-            "No texture bundle provided"
-        } else {
-            "No attachment visibility provided"
-        };
+#[derive(Debug)]
+enum ShaderBufferOptions {
+    Descriptor(ShaderBufferDescriptor),
+    Constructor(ShaderBufferConstructor),
+}
 
-        if let Some(texture_bundle) = texture_bundle
-            && let Some(visibility) = visibility
-        {
-            Ok(ShaderTextureAttachmentDescriptor {
-                texture_bundle,
-                visibility,
-            })
+impl Parse for ShaderBufferOptions {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        if input.fork().parse::<ShaderBufferDescriptor>().is_ok() {
+            Ok(Self::Descriptor(input.parse()?))
+        } else if input.fork().parse::<ShaderBufferConstructor>().is_ok() {
+            Ok(Self::Constructor(input.parse()?))
         } else {
-            Err(input.error(error_message))
+            Err(Error::new_spanned(
+                input.parse::<TokenTree>()?,
+                "Invalid shader buffer variant found. Use either the buffer descriptor (buffer, visibility, buffer_type), or the constructor (device, data, buffer_type, visibility, extra_usages)",
+            ))
         }
     }
 }
 
-struct ShaderBufferAttachmentDescriptor {
+impl ToTokens for ShaderBufferOptions {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        tokens.extend(match self {
+            ShaderBufferOptions::Descriptor(descriptor) => quote! {#descriptor},
+            ShaderBufferOptions::Constructor(constructor) => quote! {#constructor},
+        });
+    }
+}
+
+#[derive(Debug)]
+struct ShaderBufferDescriptor {
+    buffer: Expr,
+    visibility: Expr,
+    buffer_type: Expr,
+}
+
+impl Parse for ShaderBufferDescriptor {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let modular_struct = ModularStruct::parse(
+            input,
+            "Buffer",
+            vec!["buffer", "visibility", "buffer_type"],
+            Vec::new(),
+        )?;
+
+        let buffer = modular_struct.get_mandatory_field("buffer")?;
+        let visibility = modular_struct.get_mandatory_field("visibility")?;
+        let buffer_type = modular_struct.get_mandatory_field("buffer_type")?;
+
+        Ok(Self {
+            buffer,
+            visibility,
+            buffer_type,
+        })
+    }
+}
+
+impl ToTokens for ShaderBufferDescriptor {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        let Self {
+            buffer,
+            visibility,
+            buffer_type,
+        } = self;
+
+        tokens.extend(quote! {
+            v4::ecs::material::ShaderAttachment::Buffer(
+                v4::ecs::material::ShaderBufferAttachment {
+                    buffer: #buffer,
+                    visibility: #visibility,
+                    buffer_type: #buffer_type,
+                }
+            )
+        });
+    }
+}
+
+#[derive(Debug)]
+struct ShaderBufferConstructor {
     device: Expr,
     data: Expr,
-    buffer_type: ExprPath,
-    visibility: ExprPath,
+    buffer_type: Expr,
+    visibility: Expr,
     extra_usages: Expr,
 }
 
-impl Parse for ShaderBufferAttachmentDescriptor {
+impl Parse for ShaderBufferConstructor {
     fn parse(input: ParseStream) -> syn::Result<Self> {
-        let content;
-        parenthesized!(content in input);
-        let fields = content.parse_terminated(SimpleField::parse, Token![,])?;
-        let mut device: Option<Expr> = None;
-        let mut data: Option<Expr> = None;
-        let mut buffer_type: Option<ExprPath> = None;
-        let mut visibility: Option<ExprPath> = None;
-        let mut extra_usages: Option<Expr> = None;
+        let modular_struct = ModularStruct::parse(
+            input,
+            "Buffer",
+            vec![
+                "device",
+                "data",
+                "buffer_type",
+                "visibility",
+                "extra_usages",
+            ],
+            Vec::new(),
+        )?;
 
-        for field in fields {
-            match field.ident.to_string().as_str() {
-                "device" => {
-                    device = match field.value {
-                        Some(value) => Some(match value {
-                            SimpleFieldValue::Expression(expr) => Ok(expr),
-                            rest => Err(syn::Error::new_spanned(rest, "Invalid device expression")),
-                        }?),
-                        None => None,
-                    }
-                }
-                "data" => {
-                    data = match field.value {
-                        Some(value) => Some(match value {
-                            SimpleFieldValue::Expression(expr) => Ok(expr),
-                            rest => Err(syn::Error::new_spanned(rest, "Invalid data expression")),
-                        }?),
-                        None => None,
-                    }
-                }
-                "buffer_type" => {
-                    buffer_type = match field.value {
-                        Some(value) => Some(match value {
-                            SimpleFieldValue::Expression(Expr::Path(path)) => Ok(path),
-                            rest => Err(syn::Error::new_spanned(rest, "Invalid buffer type value")),
-                        }?),
-                        None => None,
-                    }
-                }
-                "visibility" => {
-                    visibility = match field.value {
-                        Some(value) => Some(match value {
-                            SimpleFieldValue::Expression(Expr::Path(path)) => Ok(path),
-                            rest => Err(syn::Error::new_spanned(
-                                rest,
-                                "Invalid buffer visibility value",
-                            )),
-                        }?),
-                        None => None,
-                    }
-                }
-                "extra_usages" => {
-                    extra_usages = match field.value {
-                        Some(value) => Some(match value {
-                            SimpleFieldValue::Expression(expr) => Ok(expr),
-                            rest => Err(syn::Error::new_spanned(rest, "Invalid usages expression")),
-                        }?),
-                        None => None,
-                    }
-                }
-                _ => {}
-            }
-        }
+        Ok(Self {
+            device: modular_struct.get_mandatory_field("device")?,
+            data: modular_struct.get_mandatory_field("data")?,
+            buffer_type: modular_struct.get_mandatory_field("buffer_type")?,
+            visibility: modular_struct.get_mandatory_field("visibility")?,
+            extra_usages: modular_struct.get_mandatory_field("extra_usages")?,
+        })
+    }
+}
 
-        let error_message = if device.is_none() {
-            "No device provided"
-        } else if data.is_none() {
-            "No data provided"
-        } else if buffer_type.is_none() {
-            "No buffer type provided"
-        } else if visibility.is_none() {
-            "No attachment visibility provided"
+impl ToTokens for ShaderBufferConstructor {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        let Self {
+            device,
+            data,
+            buffer_type,
+            visibility,
+            extra_usages,
+        } = self;
+
+        tokens.extend(quote! {
+            v4::ecs::material::ShaderAttachment::Buffer(
+                v4::ecs::material::ShaderBufferAttachment::new(
+                    #device,
+                    #data,
+                    #buffer_type,
+                    #visibility,
+                    #extra_usages,
+                )
+            )
+        });
+    }
+}
+
+#[derive(Debug)]
+struct EntityDescriptor {
+    parent: Option<Macro>,
+    id: Option<Id>,
+    components: Vec<ComponentOptions>,
+    material: Option<MaterialDescriptor>,
+    computes: Vec<ComputeDescriptor>,
+    is_enabled: Option<LitBool>,
+}
+
+impl Parse for EntityDescriptor {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let id: Option<Id> = if input.peek(Token![_]) {
+            let _underscore_token: Token![_] = input.parse()?;
+            None
         } else {
-            "No extra usages provided"
+            Some(input.parse()?)
         };
 
-        if let Some(device) = device
-            && let Some(data) = data
-            && let Some(buffer_type) = buffer_type
-            && let Some(visibility) = visibility
-            && let Some(extra_usages) = extra_usages
+        let _equal_token: Token![=] = input.parse()?;
+
+        let entity_contents = ModularStruct::parse_no_ident(
+            input,
+            Vec::new(),
+            vec!["material", "components", "computes", "parent", "is_enabled"],
+        )?;
+
+        let components = if let Some(components_field) =
+            entity_contents.get_optional_field::<Expr>("components")?
         {
-            Ok(ShaderBufferAttachmentDescriptor {
-                device,
-                data,
-                buffer_type,
-                visibility,
-                extra_usages,
+            expr_to_array(components_field.clone(), ComponentOptions::parse)?
+        } else {
+            Vec::new()
+        };
+
+        let material = entity_contents
+            .get_optional_field_with("material", |input: ParseStream| {
+                MaterialDescriptor::parse(input, false)
+            })?;
+
+        let computes =
+            if let Some(computes_field) = entity_contents.get_optional_field::<Expr>("computes")? {
+                expr_to_array(computes_field.clone(), ComputeDescriptor::parse)?
+            } else {
+                Vec::new()
+            };
+
+        Ok(Self {
+            id,
+            parent: entity_contents.get_optional_field("parent")?,
+            components,
+            material,
+            computes,
+            is_enabled: entity_contents.get_optional_field("is_enabled")?,
+        })
+    }
+}
+
+impl GetId for EntityDescriptor {
+    fn populate_id_map(&mut self, id_map: &mut HashMap<LitStr, Uuid>) {
+        if let Some(id) = self.id.as_mut() {
+            let Id::Raw(raw_id) = id else {
+                return;
+            };
+            let new_uuid = Uuid::new_v4();
+            id_map.insert(raw_id.clone(), new_uuid);
+
+            *id = Id::Processed(new_uuid);
+        }
+
+        if let Some(material) = &mut self.material {
+            material.populate_id_map(id_map);
+        }
+
+        for component in &mut self.components {
+            component.populate_id_map(id_map);
+        }
+
+        for compute in &mut self.computes {
+            compute.populate_id_map(id_map);
+        }
+    }
+}
+
+impl ToTokens for EntityDescriptor {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        let Self {
+            parent,
+            id,
+            components,
+            material,
+            computes,
+            is_enabled,
+        } = self;
+
+        let parent = parent
+            .as_ref()
+            .map(|parent| quote! {Some(#parent)})
+            .unwrap_or(quote! {None});
+
+        let material = material
+            .as_ref()
+            .map(|material| {
+                quote! {Some(#material)}
+            })
+            .unwrap_or(quote! {None});
+
+        let is_enabled = quote_or(is_enabled.as_ref(), quote! {true});
+
+        let id = if let Some(Id::Processed(id)) = id {
+            let id_tokens = id_to_tokens(*id);
+            quote! {Some(#id_tokens)}
+        } else {
+            quote! {None}
+        };
+
+        tokens.extend(quote! {
+            let material_id = #material;
+            scene.create_entity(
+                #parent,
+                vec![#(Box::new(#components)),*],
+                vec![#(#computes),*],
+                material_id,
+                #is_enabled,
+                #id,
+            ).unwrap();
+        });
+    }
+}
+
+#[derive(Debug)]
+enum ComponentOptions {
+    Descriptor(ComponentDescriptor),
+    Constructor(ComponentConstructor),
+}
+
+impl GetId for ComponentOptions {
+    fn populate_id_map(&mut self, id_map: &mut HashMap<LitStr, Uuid>) {
+        let id_option = match self {
+            ComponentOptions::Descriptor(descriptor) => descriptor.id.as_mut(),
+            ComponentOptions::Constructor(constructor) => constructor.id.as_mut(),
+        };
+
+        if let Some(id) = id_option {
+            let Id::Raw(raw_id) = id else {
+                return;
+            };
+            let new_uuid = Uuid::new_v4();
+            id_map.insert(raw_id.clone(), new_uuid);
+            *id = Id::Processed(new_uuid);
+        }
+    }
+}
+
+impl Parse for ComponentOptions {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        if input.fork().parse::<ComponentDescriptor>().is_ok() {
+            Ok(Self::Descriptor(input.parse()?))
+        } else {
+            Ok(Self::Constructor(input.parse()?))
+        }
+    }
+}
+
+impl ToTokens for ComponentOptions {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        tokens.extend(match self {
+            ComponentOptions::Descriptor(descriptor) => quote! {#descriptor},
+            ComponentOptions::Constructor(constructor) => quote! {#constructor},
+        });
+    }
+}
+
+#[derive(Debug)]
+struct ComponentDescriptor {
+    ident: Ident,
+    fields: Vec<FieldValue>,
+    id: Option<Id>,
+}
+
+impl Parse for ComponentDescriptor {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let modular_struct = ModularStruct::parse_everything(input)?;
+
+        Ok(Self {
+            fields: modular_struct
+                .fields
+                .iter()
+                .flat_map(|(name, field)| {
+                    if name != "ID" {
+                        Some(field.clone())
+                    } else {
+                        None
+                    }
+                })
+                .collect(),
+            id: modular_struct.get_optional_field("ID")?,
+            ident: modular_struct.ident.unwrap(),
+        })
+    }
+}
+
+impl ToTokens for ComponentDescriptor {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        let ident = &self.ident;
+        let fields: Vec<_> = self
+            .fields
+            .iter()
+            .flat_map(|field| {
+                let name = &field.member;
+                let expr = if field.colon_token.is_some() {
+                    let val = &field.expr;
+                    quote! {#val}
+                } else {
+                    quote! {#name}
+                };
+                quote! {.#name(#expr)}
+            })
+            .collect();
+
+        let id = if let Some(Id::Processed(id)) = self.id {
+            let id_tokens = id_to_tokens(id);
+            quote! {.id(#id_tokens)}
+        } else {
+            TokenStream::new()
+        };
+
+        tokens.extend(quote! {
+            #ident::builder()#(#fields)*#id.build(),
+        });
+    }
+}
+
+#[derive(Debug)]
+struct ComponentConstructor {
+    constructor: Expr,
+    id: Option<Id>,
+}
+
+impl Parse for ComponentConstructor {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        if input.fork().parse::<ExprMethodCall>().is_ok() {
+            let method_call: ExprMethodCall = input.parse()?;
+            let (id, filtered_constructor) = if method_call.method == "ID" {
+                if let Expr::Lit(syn::PatLit { lit, .. }) = &method_call.args[0]
+                    && let syn::Lit::Str(lit_str) = lit
+                {
+                    Ok((Some(Id::Raw(lit_str.clone())), *method_call.receiver))
+                } else {
+                    Err(Error::new_spanned(
+                        &method_call.args[0],
+                        "Invalid ID created",
+                    ))
+                }?
+            } else {
+                (None, Expr::MethodCall(method_call))
+            };
+
+            Ok(Self {
+                constructor: filtered_constructor,
+                id,
             })
         } else {
-            Err(input.error(error_message))
+            Ok(Self {
+                constructor: input.parse()?,
+                id: None,
+            })
         }
+    }
+}
+
+impl ToTokens for ComponentConstructor {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        if let Some(Id::Processed(id)) = &self.id {
+            let constructor = &self.constructor;
+            let id_tokens = id_to_tokens(*id);
+            tokens.extend(quote! {
+                {
+                    let mut comp = #constructor;
+                    comp.set_id(#id_tokens);
+                    comp
+                }
+            });
+        } else {
+            self.constructor.to_tokens(tokens);
+        }
+    }
+}
+
+#[derive(Debug)]
+struct ComputeDescriptor {
+    shader_path: LitStr,
+    workgroup_counts: Expr,
+    attachments: Vec<ShaderAttachmentOptions>,
+    is_spirv: Option<LitBool>,
+    iterate_count: Option<Expr>,
+    continuous_execution: Option<LitBool>,
+    id: Option<Id>,
+}
+
+impl Parse for ComputeDescriptor {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let modular_struct = ModularStruct::parse(
+            input,
+            "Compute",
+            vec!["shader_path", "workgroup_counts"],
+            vec![
+                "attachments",
+                "is_spirv",
+                "iterate_count",
+                "continuous_execution",
+                "ID",
+            ],
+        )?;
+
+        Ok(Self {
+            shader_path: modular_struct.get_mandatory_field("shader_path")?,
+            workgroup_counts: modular_struct.get_mandatory_field("workgroup_counts")?,
+            attachments: if let Some(attachments_expr) =
+                modular_struct.get_optional_field("attachments")?
+            {
+                expr_to_array(attachments_expr, ShaderAttachmentOptions::parse)?
+            } else {
+                Vec::new()
+            },
+            is_spirv: modular_struct.get_optional_field("is_spirv")?,
+            iterate_count: modular_struct.get_optional_field("iterate_count")?,
+            continuous_execution: modular_struct.get_optional_field("continuous_execution")?,
+            id: modular_struct.get_optional_field("ID")?,
+        })
+    }
+}
+
+impl GetId for ComputeDescriptor {
+    fn populate_id_map(&mut self, id_map: &mut HashMap<LitStr, Uuid>) {
+        if let Some(id) = self.id.as_mut() {
+            let Id::Raw(raw_id) = id else {
+                return;
+            };
+            let new_uuid = Uuid::new_v4();
+            id_map.insert(raw_id.clone(), new_uuid);
+            *id = Id::Processed(new_uuid);
+        }
+    }
+}
+
+impl ToTokens for ComputeDescriptor {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        let Self {
+            shader_path,
+            workgroup_counts,
+            attachments,
+            is_spirv,
+            iterate_count,
+            continuous_execution,
+            ..
+        } = self;
+
+        let is_spirv = is_spirv
+            .as_ref()
+            .map(|is_spirv| {
+                quote! {.is_spirv(#is_spirv)}
+            })
+            .unwrap_or_default();
+
+        let iterate_count = iterate_count
+            .as_ref()
+            .map(|count| {
+                quote! {.iterate_count(#count)}
+            })
+            .unwrap_or_default();
+
+        let continuous_execution = continuous_execution
+            .as_ref()
+            .map(|execution| quote! {.continuous_execution(#execution)})
+            .unwrap_or_default();
+
+        tokens.extend(quote! {
+            v4::ecs::compute::Compute::builder()
+                .shader_path(#shader_path)
+                .workgroup_counts(#workgroup_counts)
+                .attachments(vec![#(#attachments),*])
+                #is_spirv
+                #iterate_count
+                #continuous_execution
+                .build().unwrap()
+        });
     }
 }

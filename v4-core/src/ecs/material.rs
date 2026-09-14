@@ -1,4 +1,4 @@
-use std::ops::Range;
+use std::{collections::{HashMap, HashSet}, ops::Range};
 
 use wgpu::{
     BindGroup, BindGroupEntry, BindGroupLayout, BindGroupLayoutEntry, Buffer, CommandEncoder,
@@ -6,15 +6,15 @@ use wgpu::{
 };
 
 use crate::{
-    ecs::compute::Compute,
-    engine_management::pipeline::PipelineId,
+    engine_management::pipeline::PipelineParameters,
     engine_support::texture_support::{TextureBundle, TextureProperties},
 };
 
 use super::{
     actions::ActionQueue,
-    component::{Component, ComponentDetails, ComponentId, ComponentSystem, UpdateParams},
-    entity::EntityId,
+    component::{Component, ComponentDetails, ComponentSystem, UpdateParams},
+    compute::Compute,
+    scene::Id,
 };
 
 #[derive(Debug, Clone)]
@@ -83,9 +83,8 @@ pub enum ShaderAttachment {
 
 #[derive(Debug)]
 pub struct Material {
-    id: ComponentId,
-    pipeline_id: PipelineId,
-    entities_attached: Vec<EntityId>,
+    id: Id,
+    entities_attached: HashSet<Id>,
     component_ranges: Vec<Range<usize>>,
     attachments: Vec<ShaderAttachment>,
     bind_group_layout: Option<BindGroupLayout>,
@@ -93,28 +92,33 @@ pub struct Material {
     immediate_data: Vec<u8>,
     is_initialized: bool,
     is_enabled: bool,
+    parent_entity: Id,
+}
+
+#[derive(Debug)]
+pub enum PipelineOptions {
+    Descriptor(PipelineParameters),
+    Id(Id),
 }
 
 impl Material {
     pub fn new(
-        id: ComponentId,
-        pipeline_id: PipelineId,
+        id: Id,
         attachments: Vec<ShaderAttachment>,
-        entities_attached: Vec<EntityId>,
         immediate_data: Vec<u8>,
         is_enabled: bool,
     ) -> Self {
         Self {
             id,
             attachments,
-            entities_attached,
+            entities_attached: HashSet::new(),
             component_ranges: Vec::new(),
-            pipeline_id,
             bind_group_layout: None,
             bind_group: None,
             immediate_data,
             is_initialized: false,
             is_enabled,
+            parent_entity: Id::nil(),
         }
     }
 
@@ -262,8 +266,12 @@ impl Material {
             .collect()
     }
 
-    pub fn attach_entity(&mut self, entity_id: EntityId) {
-        self.entities_attached.push(entity_id);
+    pub fn attach_entity(&mut self, entity_id: Id) {
+        self.entities_attached.insert(entity_id);
+    }
+
+    pub fn remove_entity(&mut self, entity_id: Id) {
+        self.entities_attached.remove(&entity_id);
     }
 
     pub fn bind_group_layout(&self) -> Option<&BindGroupLayout> {
@@ -280,14 +288,6 @@ impl Material {
 
     pub fn attachments_mut(&mut self) -> &mut [ShaderAttachment] {
         self.attachments.as_mut()
-    }
-
-    pub fn uses_camera(&self) -> bool {
-        self.pipeline_id.uses_camera
-    }
-
-    pub fn pipeline_id(&self) -> &PipelineId {
-        &self.pipeline_id
     }
 
     pub fn get_immediate_data(&self) -> &[u8] {
@@ -390,8 +390,9 @@ impl ComponentSystem for Material {
         queue: &Queue,
         render_pass: &mut wgpu::RenderPass,
         other_components: &[&Component],
+        pipeline_parameters: &PipelineParameters,
     ) {
-        let bind_group_offset = if self.uses_camera() { 1 } else { 0 };
+        let bind_group_offset = pipeline_parameters.uses_camera as u32;
         let bind_group = self.bind_group.as_ref().expect("The material bind group was not created. Remember to initialize the material before executing it.");
         render_pass.set_bind_group(bind_group_offset, bind_group, &[]);
 
@@ -400,7 +401,13 @@ impl ComponentSystem for Material {
                 if !component.is_enabled() {
                     continue;
                 }
-                component.render(device, queue, render_pass, other_components);
+                component.render(
+                    device,
+                    queue,
+                    render_pass,
+                    other_components,
+                    pipeline_parameters,
+                );
             }
         }
     }
@@ -411,7 +418,7 @@ impl ComponentSystem for Material {
         queue: &Queue,
         encoder: &mut CommandEncoder,
         other_components: &[&Component],
-        materials: &[Material],
+        materials: &HashMap<Id, Material>,
         computes: &[Compute],
     ) {
         for range in &self.component_ranges {
@@ -430,9 +437,14 @@ impl ComponentSystem for Material {
 }
 
 impl ComponentDetails for Material {
-    fn id(&self) -> ComponentId {
+    fn id(&self) -> Id {
         self.id
     }
+
+    fn set_id(&mut self, id: Id) {
+        self.id = id;
+    }
+
 
     fn is_initialized(&self) -> bool {
         self.is_initialized
@@ -442,11 +454,11 @@ impl ComponentDetails for Material {
         self.is_initialized = true;
     }
 
-    fn parent_entity_id(&self) -> EntityId {
-        0
+    fn parent_entity_id(&self) -> Id {
+        self.parent_entity
     }
 
-    fn set_parent_entity(&mut self, _parent_id: EntityId) {}
+    fn set_parent_entity(&mut self, _parent_id: Id) {}
 
     fn is_enabled(&self) -> bool {
         self.is_enabled

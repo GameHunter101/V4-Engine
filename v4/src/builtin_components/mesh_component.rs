@@ -3,7 +3,10 @@ use std::{fmt::Debug, ops::Range};
 use crate::v4;
 use bytemuck::{Pod, Zeroable};
 use nalgebra::Vector3;
-use v4_core::ecs::component::{Component, ComponentDetails, ComponentSystem};
+use v4_core::{ecs::{
+    component::{Component, ComponentDetails, ComponentSystem},
+    scene::Id,
+}, engine_management::pipeline::PipelineParameters};
 use v4_macros::component;
 use wgpu::{
     Buffer, Device, Queue, RenderPass, VertexAttribute,
@@ -61,7 +64,8 @@ impl<V: VertexDescriptor> MeshComponent<V> {
                 ignore_points: true,
                 ignore_lines: true,
             },
-        ).await?;
+        )
+        .await?;
 
         let model_count = models.len();
 
@@ -115,13 +119,8 @@ impl<V: VertexDescriptor> MeshComponent<V> {
             vertex_buffers: None,
             index_buffers: None,
             enabled_models: (0..model_count).map(|i| (i, None)).collect(),
-            id: {
-                use std::hash::{Hash, Hasher};
-                let mut hasher = std::hash::DefaultHasher::new();
-                std::time::Instant::now().hash(&mut hasher);
-                hasher.finish()
-            },
-            parent_entity_id: 0,
+            id: Id::new_v4(),
+            parent_entity_id: Id::nil(),
             is_initialized: false,
             is_enabled,
         })
@@ -174,7 +173,7 @@ impl<V: VertexDescriptor> MeshComponent<V> {
         model_index: Option<usize>,
         device: &Device,
         queue: &Queue,
-        overwrite: bool
+        overwrite: bool,
     ) {
         let comp_id = self.id();
         if let Some(index) = model_index {
@@ -272,6 +271,7 @@ impl<V: VertexDescriptor + Send + Sync> ComponentSystem for MeshComponent<V> {
         _queue: &Queue,
         render_pass: &mut RenderPass,
         _other_components: &[&Component],
+        _pipeline_parameters: &PipelineParameters,
     ) {
         for (index, range_opt) in &self.enabled_models {
             render_pass.set_vertex_buffer(

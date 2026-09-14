@@ -12,19 +12,19 @@ pub async fn main() {
     let device = rendering_manager.device();
     let queue = rendering_manager.queue();
 
-    scene! {
+    let scene = scene! {
         _ = {
-            material: {
-                pipeline: {
-                    vertex_shader_path: "shaders/textures/vertex.wgsl",
-                    fragment_shader_path: "shaders/textures/fragment.wgsl",
-                    vertex_layouts: [Vertex::vertex_layout()],
+            material: Material {
+                pipeline: Pipeline {
+                    vertex_shader: "shaders/textures/vertex.wgsl",
+                    fragment_shader: "shaders/textures/fragment.wgsl",
+                    vertex_layouts: vec![Vertex::vertex_layout()],
                     uses_camera: false,
-                    geometry_details: {
+                    geometry_details: GeometryDetails {
                         polygon_mode: wgpu::PolygonMode::Fill,
                     }
                 },
-                attachments: [Texture (
+                attachments: [Texture {
                     texture_bundle:
                         TextureBundle::from_path(
                             "./assets/testing_textures/dude.png",
@@ -33,10 +33,10 @@ pub async fn main() {
                             TextureProperties::default(),
                         ).await.unwrap().1,
                     visibility: wgpu::ShaderStages::FRAGMENT,
-                )],
+                }],
             },
             components: [
-                MeshComponent(
+                MeshComponent {
                     vertices: vec![vec![
                         Vertex {
                             pos: [-0.5, 0.5, 0.0],
@@ -57,10 +57,10 @@ pub async fn main() {
                     ]],
                     indices: vec![vec![0,1,2,0,2,3]],
                     enabled_models: vec![(0, None)],
-                ),
+                },
             ]
         }
-    }
+    };
 
     engine.attach_scene(scene);
 

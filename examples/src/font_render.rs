@@ -2,7 +2,10 @@ use v4::{
     V4,
     builtin_actions::UpdateTextComponentAction,
     component,
-    ecs::component::{ComponentDetails, ComponentId, ComponentSystem, UpdateParams},
+    ecs::{
+        component::{ComponentDetails, ComponentSystem, UpdateParams},
+        scene::Id,
+    },
     engine_management::font_management::{TextComponentProperties, TextDisplayInfo},
     scene,
 };
@@ -15,7 +18,7 @@ struct TextComponent {
 
 #[component]
 struct ToggleComponent {
-    text_component: ComponentId,
+    text_component: Id,
 }
 
 #[tokio::main]
@@ -31,11 +34,16 @@ pub async fn main() {
         .await
         .unwrap();
 
-    scene! {
+    let scene = scene! {
         "main" = {
             components: [
-                TextComponent(text: "something".to_string(), ident: "text"),
-                ToggleComponent(text_component: ident("text")),
+                TextComponent {
+                    text: "something".to_string(),
+                    ID: "text"
+                },
+                ToggleComponent{
+                    text_component: ID!("text")
+                },
             ]
         },
     };
