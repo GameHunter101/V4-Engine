@@ -1348,7 +1348,7 @@ impl ToTokens for ComputeDescriptor {
             is_spirv,
             iterate_count,
             continuous_execution,
-            ..
+            id,
         } = self;
 
         let is_spirv = is_spirv
@@ -1370,6 +1370,13 @@ impl ToTokens for ComputeDescriptor {
             .map(|execution| quote! {.continuous_execution(#execution)})
             .unwrap_or_default();
 
+        let id = if let Some(Id::Processed(uuid)) = id {
+            let id_tokens = id_to_tokens(*uuid);
+            quote!{.id(#id_tokens)}
+        } else {
+            TokenStream::new()
+        };
+
         tokens.extend(quote! {
             v4::ecs::compute::Compute::builder()
                 .shader_path(#shader_path)
@@ -1378,6 +1385,7 @@ impl ToTokens for ComputeDescriptor {
                 #is_spirv
                 #iterate_count
                 #continuous_execution
+                #id
                 .build().unwrap()
         });
     }
