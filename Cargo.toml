@@ -12,7 +12,7 @@ debug = true
 strip = false
 
 [workspace.package]
-version = "0.3.21"
+version = "0.3.22"
 authors = ["Lior Carmeli"]
 
 [workspace.dependencies]

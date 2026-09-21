@@ -188,6 +188,10 @@ impl Compute {
         self.continuous_execution
     }
 
+    pub fn set_workgroup_counts(&mut self, new_workgroup_counts: WorkgroupCounts) {
+        self.workgroup_counts = new_workgroup_counts;
+    }
+
     /// Execute a single compute component. The compute component must be initialized before
     /// execution may occur, otherwise an error will be returned. An optional compute pass can be
     /// provided in the use case of grouping multiple compute executions together. However, the
