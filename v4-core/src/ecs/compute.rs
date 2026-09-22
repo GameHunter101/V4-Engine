@@ -1,9 +1,12 @@
 use wgpu::{
     BindGroup, BindGroupEntry, BindGroupLayout, BindGroupLayoutEntry, ComputePass, ComputePipeline,
-    Device, Queue, ShaderStages,
+    Device, Extent3d, Queue, ShaderStages,
 };
 
-use crate::engine_management::pipeline::{PipelineError, PipelineManager};
+use crate::{
+    ecs::material::ShaderAttachmentError,
+    engine_management::pipeline::{PipelineError, PipelineManager},
+};
 
 use super::{
     component::{ComponentDetails, ComponentSystem},
@@ -13,7 +16,7 @@ use super::{
 
 use thiserror::Error;
 
-#[derive(Error, Debug)]
+#[derive(Debug, Error)]
 pub enum ComputeError {
     #[error(
         "The compute pipeline was not created. Remember to initialize the compute before executing it. (Compute {0})"
@@ -21,6 +24,15 @@ pub enum ComputeError {
     PipelineNotInitialized(Id),
     #[error("No workgroup counts provided.")]
     NoWorkgroupCounts,
+    #[error("The targeted attachment ({target}, {}) does not match the specified type ({}).", if *.target_is_texture {"Texture"} else {"Buffer"}, if *.target_is_texture {"Buffer"} else {"Texture"})]
+    InvalidAttachmentUpdate {
+        target: usize,
+        target_is_texture: bool,
+    },
+    #[error("The targeted attachment ({0}) does not exist.")]
+    AttachmentNotFound(usize),
+    #[error("Error from shader attachment: {0:?}")]
+    ShaderAttachmentError(#[from] ShaderAttachmentError),
 }
 
 pub trait DynamicWorkgroupCounts: std::fmt::Debug + Send + Sync {
@@ -229,6 +241,101 @@ impl Compute {
 
         Ok(())
     }
+
+    fn create_bind_group(
+        &self,
+        layout: &BindGroupLayout,
+        entries: &[BindGroupEntry],
+        device: &Device,
+    ) -> BindGroup {
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some(&format!("Compute {} bind group", self.id)),
+            layout,
+            entries,
+        })
+    }
+
+    /// Create a bind group entry for every attachment. This is useful for updating attachments, as
+    /// a new bind group needs to be created when new data exceeds the old capacity.
+    fn attachment_bind_group_entries(&self) -> Vec<BindGroupEntry<'_>> {
+        self.attachments
+            .iter()
+            .enumerate()
+            .map(|(binding, attachment)| Self::create_bind_group_entry(attachment, binding as u32))
+            .collect()
+    }
+
+    /// Update the specified buffer attachment with raw byte data. Will error if either the
+    /// attachment could not be found, the pipeline is not initialized or if the selected
+    /// attachment is not a buffer.
+    pub fn update_buffer_attachment(
+        &mut self,
+        attachment_index: usize,
+        data: &[u8],
+        device: &Device,
+        queue: &Queue,
+    ) -> Result<(), ComputeError> {
+        if let Some(attachment) = self.attachments_mut().get_mut(attachment_index) {
+            if let ShaderAttachment::Buffer(buf) = attachment {
+                if buf.update_buffer(data, device, queue) {
+                    let attachments = self.attachment_bind_group_entries();
+                    let Some(bind_group_layout) = &self.bind_group_layout else {
+                        return Err(ComputeError::PipelineNotInitialized(self.id));
+                    };
+
+                    self.create_bind_group(bind_group_layout, &attachments, device);
+                }
+                Ok(())
+            } else {
+                Err(ComputeError::InvalidAttachmentUpdate {
+                    target: attachment_index,
+                    target_is_texture: false,
+                })
+            }
+        } else {
+            Err(ComputeError::AttachmentNotFound(attachment_index))
+        }
+    }
+
+    /// Update the specified texture attachment with raw byte data. Will error if either the attachment
+    /// could not be found, the pipeline is not initialized, the selected attachment is not a texture,
+    /// or if the new data overflows the existing texture and no `new_tex_size` was specified.
+    pub fn update_texture_attachment(
+        &mut self,
+        attachment_index: usize,
+        data: &[u8],
+        new_tex_size: Option<Extent3d>,
+        device: &Device,
+        queue: &Queue,
+    ) -> Result<(), ComputeError> {
+        if let Some(attachment) = self.attachments_mut().get_mut(attachment_index) {
+            if let ShaderAttachment::Texture(tex) = attachment {
+                if tex.update_texture(
+                    data,
+                    device,
+                    queue,
+                    Some(&format!("{:?} Shader Buffer", tex.visibility)),
+                    new_tex_size,
+                )? {
+                    let attachments = self.attachment_bind_group_entries();
+                    let Some(bind_group_layout) = &self.bind_group_layout else {
+                        return Err(ComputeError::PipelineNotInitialized(self.id));
+                    };
+
+                    self.create_bind_group(bind_group_layout, &attachments, device);
+                }
+
+                Ok(())
+            } else {
+                Err(ComputeError::InvalidAttachmentUpdate {
+                    target: attachment_index,
+                    target_is_texture: true,
+                })
+            }
+        } else {
+            Err(ComputeError::AttachmentNotFound(attachment_index))
+        }
+    }
 }
 
 impl ComponentSystem for Compute {
@@ -253,11 +360,7 @@ impl ComponentSystem for Compute {
             entries: &bind_group_layout_entries,
         });
 
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some(&format!("Compute {} bind group", self.id)),
-            layout: &bind_group_layout,
-            entries: &bind_group_entries,
-        });
+        let bind_group = self.create_bind_group(&bind_group_layout, &bind_group_entries, device);
 
         self.pipeline = Some(
             Self::create_compute_pipeline(
