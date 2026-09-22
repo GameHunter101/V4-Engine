@@ -1,8 +1,11 @@
-use std::{collections::{HashMap, HashSet}, ops::Range};
+use std::{
+    collections::{HashMap, HashSet},
+    ops::Range,
+};
 
 use wgpu::{
     BindGroup, BindGroupEntry, BindGroupLayout, BindGroupLayoutEntry, Buffer, CommandEncoder,
-    Device, Queue, Sampler, ShaderStages, util::DeviceExt,
+    Device, Extent3d, Queue, Sampler, ShaderStages, util::DeviceExt,
 };
 
 use crate::{
@@ -17,10 +20,88 @@ use super::{
     scene::Id,
 };
 
+use thiserror::Error;
+
+#[derive(Debug, Error)]
+pub enum MaterialError {
+    #[error(
+        "The render pipeline was not created. Remember to initialize the material before executing it. (Material {0})"
+    )]
+    PipelineNotInitialized(Id),
+    #[error("The targeted attachment ({target}, {}) does not match the specified type ({}).", if *.target_is_texture {"Texture"} else {"Buffer"}, if *.target_is_texture {"Buffer"} else {"Texture"})]
+    InvalidAttachmentUpdate {
+        target: usize,
+        target_is_texture: bool,
+    },
+    #[error("The targeted attachment ({0}) does not exist.")]
+    AttachmentNotFound(usize),
+    #[error("Error from shader attachment: {0:?}")]
+    ShaderAttachmentError(#[from] ShaderAttachmentError),
+}
+
+#[derive(Debug, Error)]
+pub enum ShaderAttachmentError {
+    #[error(
+        "The updated texture is larger than the original texture, but no new texture size was specified."
+    )]
+    NoNewTextureSize,
+}
+
 #[derive(Debug, Clone)]
 pub struct ShaderTextureAttachment {
     pub texture_bundle: TextureBundle,
     pub visibility: ShaderStages,
+}
+
+impl ShaderTextureAttachment {
+    pub fn update_texture(
+        &mut self,
+        data: &[u8],
+        device: &Device,
+        queue: &Queue,
+        label: Option<&str>,
+        new_tex_size: Option<Extent3d>,
+    ) -> Result<bool, ShaderAttachmentError> {
+        let texture = self.texture_bundle.view().texture();
+        let tex_pixel_size =
+            texture.format().block_copy_size(None).unwrap() * texture.format().components() as u32;
+        let tex_size = texture.size();
+        if data.len() as u64 <= (tex_pixel_size * tex_size.width * tex_size.height) as u64 {
+            queue.write_texture(
+                texture.as_image_copy(),
+                data,
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(texture.size().width * tex_pixel_size),
+                    rows_per_image: Some(texture.size().height),
+                },
+                texture.size(),
+            );
+            Ok(false)
+        } else {
+            let Some(size) = new_tex_size else {
+                return Err(ShaderAttachmentError::NoNewTextureSize);
+            };
+
+            *self.texture_bundle.view_mut() = device
+                .create_texture(&wgpu::TextureDescriptor {
+                    label,
+                    size,
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: texture.dimension(),
+                    format: texture.format(),
+                    usage: texture.usage(),
+                    view_formats: &[],
+                })
+                .create_view(&wgpu::TextureViewDescriptor {
+                    array_layer_count: Some(tex_size.depth_or_array_layers),
+                    ..Default::default()
+                });
+
+            Ok(true)
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -40,7 +121,7 @@ impl ShaderBufferAttachment {
     ) -> Self {
         Self {
             buffer: device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some(&format!("{:?} Shader Buffer", visibility)),
+                label: Some(&format!("{visibility:?} Shader Buffer")),
                 contents: data,
                 usage: match buffer_type {
                     wgpu::BufferBindingType::Uniform => wgpu::BufferUsages::UNIFORM,
@@ -52,14 +133,14 @@ impl ShaderBufferAttachment {
         }
     }
 
-    pub fn update_buffer(&mut self, contents: &[u8], device: &Device, queue: &Queue) {
+    pub fn update_buffer(&mut self, contents: &[u8], device: &Device, queue: &Queue) -> bool {
         crate::engine_support::misc_utils::update_buffer(
             &mut self.buffer,
             contents,
             device,
             queue,
             Some(&format!("{:?} Shader Buffer", self.visibility)),
-        );
+        )
     }
 
     pub fn buffer(&self) -> &Buffer {
@@ -122,7 +203,7 @@ impl Material {
         }
     }
 
-    pub fn create_attachment_bind_group_layout_entry(
+    pub fn create_bind_group_layout_entry(
         attachment: &ShaderAttachment,
         binding: u32,
     ) -> BindGroupLayoutEntry {
@@ -156,7 +237,7 @@ impl Material {
         }
     }
 
-    fn create_attachment_bind_group_entry<'a>(
+    fn create_bind_group_entry<'a>(
         attachment: &'a ShaderAttachment,
         binding: u32,
     ) -> BindGroupEntry<'a> {
@@ -266,6 +347,101 @@ impl Material {
             .collect()
     }
 
+    pub fn create_bind_group(
+        &self,
+        layout: &BindGroupLayout,
+        entries: &[BindGroupEntry],
+        device: &Device,
+    ) -> BindGroup {
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some(&format!("Material {} | Bind group", self.id)),
+            layout,
+            entries,
+        })
+    }
+
+    /// Update the specified buffer attachment with raw byte data. Will error if either the
+    /// attachment could not be found, the pipeline is not initialized or if the selected
+    /// attachment is not a buffer.
+    pub fn update_buffer_attachment(
+        &mut self,
+        attachment_index: usize,
+        data: &[u8],
+        device: &Device,
+        queue: &Queue,
+    ) -> Result<(), MaterialError> {
+        if let Some(attachment) = self.attachments_mut().get_mut(attachment_index) {
+            if let ShaderAttachment::Buffer(buf) = attachment {
+                if buf.update_buffer(data, device, queue) {
+                    let attachments = self.attachment_bind_group_entries();
+                    let Some(bind_group_layout) = &self.bind_group_layout else {
+                        return Err(MaterialError::PipelineNotInitialized(self.id));
+                    };
+
+                    self.create_bind_group(bind_group_layout, &attachments, device);
+                }
+                Ok(())
+            } else {
+                Err(MaterialError::InvalidAttachmentUpdate {
+                    target: attachment_index,
+                    target_is_texture: false,
+                })
+            }
+        } else {
+            Err(MaterialError::AttachmentNotFound(attachment_index))
+        }
+    }
+
+    /// Create a bind group entry for every attachment. This is useful for updating attachments, as
+    /// a new bind group needs to be created when new data exceeds the old capacity.
+    fn attachment_bind_group_entries(&self) -> Vec<BindGroupEntry<'_>> {
+        self.attachments
+            .iter()
+            .enumerate()
+            .map(|(binding, attachment)| Self::create_bind_group_entry(attachment, binding as u32))
+            .collect()
+    }
+
+    /// Update the specified texture attachment with raw byte data. Will error if either the attachment
+    /// could not be found, the pipeline is not initialized, the selected attachment is not a texture,
+    /// or if the new data overflows the existing texture and no `new_tex_size` was specified.
+    pub fn update_texture_attachment(
+        &mut self,
+        attachment_index: usize,
+        data: &[u8],
+        new_tex_size: Option<Extent3d>,
+        device: &Device,
+        queue: &Queue,
+    ) -> Result<(), MaterialError> {
+        if let Some(attachment) = self.attachments_mut().get_mut(attachment_index) {
+            if let ShaderAttachment::Texture(tex) = attachment {
+                if tex.update_texture(
+                    data,
+                    device,
+                    queue,
+                    Some(&format!("{:?} Shader Buffer", tex.visibility)),
+                    new_tex_size,
+                )? {
+                    let attachments = self.attachment_bind_group_entries();
+                    let Some(bind_group_layout) = &self.bind_group_layout else {
+                        return Err(MaterialError::PipelineNotInitialized(self.id));
+                    };
+
+                    self.create_bind_group(bind_group_layout, &attachments, device);
+                }
+
+                Ok(())
+            } else {
+                Err(MaterialError::InvalidAttachmentUpdate {
+                    target: attachment_index,
+                    target_is_texture: true,
+                })
+            }
+        } else {
+            Err(MaterialError::AttachmentNotFound(attachment_index))
+        }
+    }
+
     pub fn attach_entity(&mut self, entity_id: Id) {
         self.entities_attached.insert(entity_id);
     }
@@ -311,8 +487,8 @@ impl ComponentSystem for Material {
             .enumerate()
             .map(|(binding, attachment)| {
                 (
-                    Self::create_attachment_bind_group_layout_entry(attachment, binding as u32),
-                    Self::create_attachment_bind_group_entry(attachment, binding as u32),
+                    Self::create_bind_group_layout_entry(attachment, binding as u32),
+                    Self::create_bind_group_entry(attachment, binding as u32),
                 )
             })
             .unzip();
@@ -350,11 +526,8 @@ impl ComponentSystem for Material {
             entries: &all_bind_group_layout_entries,
         });
 
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some(&format!("Material {} | Bind group", self.id)),
-            layout: &bind_group_layout,
-            entries: &all_bind_group_entries,
-        });
+        let bind_group =
+            self.create_bind_group(&bind_group_layout, &all_bind_group_entries, device);
 
         self.bind_group_layout = Some(bind_group_layout);
         self.bind_group = Some(bind_group);
@@ -444,7 +617,6 @@ impl ComponentDetails for Material {
     fn set_id(&mut self, id: Id) {
         self.id = id;
     }
-
 
     fn is_initialized(&self) -> bool {
         self.is_initialized
