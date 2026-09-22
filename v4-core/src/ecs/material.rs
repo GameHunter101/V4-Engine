@@ -378,7 +378,7 @@ impl Material {
                         return Err(MaterialError::PipelineNotInitialized(self.id));
                     };
 
-                    self.create_bind_group(bind_group_layout, &attachments, device);
+                    self.bind_group = Some(self.create_bind_group(bind_group_layout, &attachments, device));
                 }
                 Ok(())
             } else {
@@ -427,7 +427,7 @@ impl Material {
                         return Err(MaterialError::PipelineNotInitialized(self.id));
                     };
 
-                    self.create_bind_group(bind_group_layout, &attachments, device);
+                    self.bind_group = Some(self.create_bind_group(bind_group_layout, &attachments, device));
                 }
 
                 Ok(())

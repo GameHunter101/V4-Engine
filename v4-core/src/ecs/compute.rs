@@ -283,7 +283,7 @@ impl Compute {
                         return Err(ComputeError::PipelineNotInitialized(self.id));
                     };
 
-                    self.create_bind_group(bind_group_layout, &attachments, device);
+                    self.bind_group = Some(self.create_bind_group(bind_group_layout, &attachments, device));
                 }
                 Ok(())
             } else {
@@ -322,7 +322,7 @@ impl Compute {
                         return Err(ComputeError::PipelineNotInitialized(self.id));
                     };
 
-                    self.create_bind_group(bind_group_layout, &attachments, device);
+                    self.bind_group = Some(self.create_bind_group(bind_group_layout, &attachments, device));
                 }
 
                 Ok(())
