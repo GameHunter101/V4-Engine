@@ -105,23 +105,28 @@ impl ShaderTextureAttachment {
 }
 
 #[derive(Debug, Clone)]
-pub struct ShaderBufferAttachment {
-    pub buffer: Buffer,
-    pub visibility: ShaderStages,
-    pub buffer_type: wgpu::BufferBindingType,
+pub struct BufferBundle {
+    buffer: Buffer,
+    buffer_type: wgpu::BufferBindingType,
 }
 
-impl ShaderBufferAttachment {
+impl BufferBundle {
     pub fn new(
         device: &Device,
         data: &[u8],
         buffer_type: wgpu::BufferBindingType,
-        visibility: ShaderStages,
         extra_usages: wgpu::BufferUsages,
     ) -> Self {
         Self {
             buffer: device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some(&format!("{visibility:?} Shader Buffer")),
+                label: Some(&format!(
+                    "Shader {} Buffer",
+                    match buffer_type {
+                        wgpu::BufferBindingType::Uniform => "Uniform".to_string(),
+                        wgpu::BufferBindingType::Storage { read_only } =>
+                            format!("Storage (read only: {read_only})"),
+                    }
+                )),
                 contents: data,
                 usage: match buffer_type {
                     wgpu::BufferBindingType::Uniform => wgpu::BufferUsages::UNIFORM,
@@ -129,13 +134,32 @@ impl ShaderBufferAttachment {
                 } | extra_usages,
             }),
             buffer_type,
-            visibility,
         }
     }
 
+    pub fn buffer(&self) -> &Buffer {
+        &self.buffer
+    }
+
+    pub fn buffer_mut(&mut self) -> &mut Buffer {
+        &mut self.buffer
+    }
+
+    pub fn buffer_type(&self) -> wgpu::BufferBindingType {
+        self.buffer_type
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ShaderBufferAttachment {
+    pub buffer: BufferBundle,
+    pub visibility: ShaderStages,
+}
+
+impl ShaderBufferAttachment {
     pub fn update_buffer(&mut self, contents: &[u8], device: &Device, queue: &Queue) -> bool {
         crate::engine_support::misc_utils::update_buffer(
-            &mut self.buffer,
+            self.buffer.buffer_mut(),
             contents,
             device,
             queue,
@@ -144,7 +168,7 @@ impl ShaderBufferAttachment {
     }
 
     pub fn buffer(&self) -> &Buffer {
-        &self.buffer
+        self.buffer.buffer()
     }
 
     pub fn visibility(&self) -> ShaderStages {
@@ -152,7 +176,7 @@ impl ShaderBufferAttachment {
     }
 
     pub fn buffer_type(&self) -> wgpu::BufferBindingType {
-        self.buffer_type
+        self.buffer.buffer_type()
     }
 }
 
@@ -245,7 +269,7 @@ impl Material {
             ShaderAttachment::Texture(tex) => {
                 wgpu::BindingResource::TextureView(tex.texture_bundle.view())
             }
-            ShaderAttachment::Buffer(buf) => buf.buffer.as_entire_binding(),
+            ShaderAttachment::Buffer(buf) => buf.buffer.buffer().as_entire_binding(),
         };
 
         BindGroupEntry { binding, resource }
@@ -378,7 +402,8 @@ impl Material {
                         return Err(MaterialError::PipelineNotInitialized(self.id));
                     };
 
-                    self.bind_group = Some(self.create_bind_group(bind_group_layout, &attachments, device));
+                    self.bind_group =
+                        Some(self.create_bind_group(bind_group_layout, &attachments, device));
                 }
                 Ok(())
             } else {
@@ -427,7 +452,8 @@ impl Material {
                         return Err(MaterialError::PipelineNotInitialized(self.id));
                     };
 
-                    self.bind_group = Some(self.create_bind_group(bind_group_layout, &attachments, device));
+                    self.bind_group =
+                        Some(self.create_bind_group(bind_group_layout, &attachments, device));
                 }
 
                 Ok(())
