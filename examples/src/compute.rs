@@ -1,4 +1,4 @@
-use v4::{V4, scene};
+use v4::{V4, ecs::material::BufferBundle, scene};
 
 #[tokio::main]
 pub async fn main() {
@@ -12,18 +12,20 @@ pub async fn main() {
                 Compute {
                     attachments: [
                         Buffer {
-                            device,
-                            data: bytemuck::cast_slice(&[1.0_f32,2.0,3.0,4.0, 5.0, 6.0, 7.0, 8.0]),
-                            buffer_type: wgpu::BufferBindingType::Storage { read_only: true },
+                            buffer: BufferBundle::new(
+                                device, bytemuck::cast_slice(&[1.0_f32,2.0,3.0,4.0, 5.0, 6.0, 7.0, 8.0]),
+                                wgpu::BufferBindingType::Storage { read_only: true },
+                                wgpu::BufferUsages::empty(),
+                            ),
                             visibility: wgpu::ShaderStages::COMPUTE,
-                            extra_usages: wgpu::BufferUsages::empty(),
                         },
                         Buffer {
-                            device,
-                            data: bytemuck::cast_slice(&[0.0_f32,0.0,0.0,0.0, 0.0, 0.0, 0.0, 0.0]),
-                            buffer_type: wgpu::BufferBindingType::Storage { read_only: false },
+                            buffer: BufferBundle::new(
+                                device, bytemuck::cast_slice(&[0.0_f32,0.0,0.0,0.0, 0.0, 0.0, 0.0, 0.0]),
+                                wgpu::BufferBindingType::Storage { read_only: false },
+                                wgpu::BufferUsages::empty(),
+                            ),
                             visibility: wgpu::ShaderStages::COMPUTE,
-                            extra_usages: wgpu::BufferUsages::empty(),
                         },
                     ],
                     shader_path: "shaders/compute/compute.wgsl",

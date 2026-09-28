@@ -1,7 +1,7 @@
 #![allow(clippy::large_enum_variant)]
 use std::collections::{HashMap, HashSet};
 
-use proc_macro2::{Span, TokenStream, TokenTree};
+use proc_macro2::{Span, TokenStream};
 use quote::{ToTokens, quote};
 use syn::{
     Error, Expr, ExprMethodCall, ExprStruct, FieldValue, Ident, LitBool, LitStr, Macro, Path,
@@ -788,7 +788,7 @@ impl ToTokens for GeometryDetailsDescriptor {
 #[derive(Debug)]
 enum ShaderAttachmentOptions {
     Texture(ShaderTextureDescriptor),
-    Buffer(ShaderBufferOptions),
+    Buffer(ShaderBufferDescriptor),
 }
 
 impl Parse for ShaderAttachmentOptions {
@@ -858,40 +858,9 @@ impl ToTokens for ShaderTextureDescriptor {
 }
 
 #[derive(Debug)]
-enum ShaderBufferOptions {
-    Descriptor(ShaderBufferDescriptor),
-    Constructor(ShaderBufferConstructor),
-}
-
-impl Parse for ShaderBufferOptions {
-    fn parse(input: ParseStream) -> syn::Result<Self> {
-        if input.fork().parse::<ShaderBufferDescriptor>().is_ok() {
-            Ok(Self::Descriptor(input.parse()?))
-        } else if input.fork().parse::<ShaderBufferConstructor>().is_ok() {
-            Ok(Self::Constructor(input.parse()?))
-        } else {
-            Err(Error::new_spanned(
-                input.parse::<TokenTree>()?,
-                "Invalid shader buffer variant found. Use either the buffer descriptor (buffer, visibility, buffer_type), or the constructor (device, data, buffer_type, visibility, extra_usages)",
-            ))
-        }
-    }
-}
-
-impl ToTokens for ShaderBufferOptions {
-    fn to_tokens(&self, tokens: &mut TokenStream) {
-        tokens.extend(match self {
-            ShaderBufferOptions::Descriptor(descriptor) => quote! {#descriptor},
-            ShaderBufferOptions::Constructor(constructor) => quote! {#constructor},
-        });
-    }
-}
-
-#[derive(Debug)]
 struct ShaderBufferDescriptor {
     buffer: Expr,
     visibility: Expr,
-    buffer_type: Expr,
 }
 
 impl Parse for ShaderBufferDescriptor {
@@ -899,18 +868,16 @@ impl Parse for ShaderBufferDescriptor {
         let modular_struct = ModularStruct::parse(
             input,
             "Buffer",
-            vec!["buffer", "visibility", "buffer_type"],
+            vec!["buffer", "visibility"],
             Vec::new(),
         )?;
 
         let buffer = modular_struct.get_mandatory_field("buffer")?;
         let visibility = modular_struct.get_mandatory_field("visibility")?;
-        let buffer_type = modular_struct.get_mandatory_field("buffer_type")?;
 
         Ok(Self {
             buffer,
             visibility,
-            buffer_type,
         })
     }
 }
@@ -920,7 +887,6 @@ impl ToTokens for ShaderBufferDescriptor {
         let Self {
             buffer,
             visibility,
-            buffer_type,
         } = self;
 
         tokens.extend(quote! {
@@ -928,66 +894,7 @@ impl ToTokens for ShaderBufferDescriptor {
                 v4::ecs::material::ShaderBufferAttachment {
                     buffer: #buffer,
                     visibility: #visibility,
-                    buffer_type: #buffer_type,
                 }
-            )
-        });
-    }
-}
-
-#[derive(Debug)]
-struct ShaderBufferConstructor {
-    device: Expr,
-    data: Expr,
-    buffer_type: Expr,
-    visibility: Expr,
-    extra_usages: Expr,
-}
-
-impl Parse for ShaderBufferConstructor {
-    fn parse(input: ParseStream) -> syn::Result<Self> {
-        let modular_struct = ModularStruct::parse(
-            input,
-            "Buffer",
-            vec![
-                "device",
-                "data",
-                "buffer_type",
-                "visibility",
-                "extra_usages",
-            ],
-            Vec::new(),
-        )?;
-
-        Ok(Self {
-            device: modular_struct.get_mandatory_field("device")?,
-            data: modular_struct.get_mandatory_field("data")?,
-            buffer_type: modular_struct.get_mandatory_field("buffer_type")?,
-            visibility: modular_struct.get_mandatory_field("visibility")?,
-            extra_usages: modular_struct.get_mandatory_field("extra_usages")?,
-        })
-    }
-}
-
-impl ToTokens for ShaderBufferConstructor {
-    fn to_tokens(&self, tokens: &mut TokenStream) {
-        let Self {
-            device,
-            data,
-            buffer_type,
-            visibility,
-            extra_usages,
-        } = self;
-
-        tokens.extend(quote! {
-            v4::ecs::material::ShaderAttachment::Buffer(
-                v4::ecs::material::ShaderBufferAttachment::new(
-                    #device,
-                    #data,
-                    #buffer_type,
-                    #visibility,
-                    #extra_usages,
-                )
             )
         });
     }
