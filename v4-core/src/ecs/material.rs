@@ -1,6 +1,7 @@
 use std::{
     collections::{HashMap, HashSet},
     ops::Range,
+    sync::Arc,
 };
 
 use wgpu::{
@@ -106,7 +107,7 @@ impl ShaderTextureAttachment {
 
 #[derive(Debug, Clone)]
 pub struct BufferBundle {
-    buffer: Buffer,
+    buffer: Arc<Buffer>,
     buffer_type: wgpu::BufferBindingType,
 }
 
@@ -118,21 +119,23 @@ impl BufferBundle {
         extra_usages: wgpu::BufferUsages,
     ) -> Self {
         Self {
-            buffer: device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some(&format!(
-                    "Shader {} Buffer",
-                    match buffer_type {
-                        wgpu::BufferBindingType::Uniform => "Uniform".to_string(),
-                        wgpu::BufferBindingType::Storage { read_only } =>
-                            format!("Storage (read only: {read_only})"),
-                    }
-                )),
-                contents: data,
-                usage: match buffer_type {
-                    wgpu::BufferBindingType::Uniform => wgpu::BufferUsages::UNIFORM,
-                    wgpu::BufferBindingType::Storage { .. } => wgpu::BufferUsages::STORAGE,
-                } | extra_usages,
-            }),
+            buffer: Arc::new(
+                device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some(&format!(
+                        "Shader {} Buffer",
+                        match buffer_type {
+                            wgpu::BufferBindingType::Uniform => "Uniform".to_string(),
+                            wgpu::BufferBindingType::Storage { read_only } =>
+                                format!("Storage (read only: {read_only})"),
+                        }
+                    )),
+                    contents: data,
+                    usage: match buffer_type {
+                        wgpu::BufferBindingType::Uniform => wgpu::BufferUsages::UNIFORM,
+                        wgpu::BufferBindingType::Storage { .. } => wgpu::BufferUsages::STORAGE,
+                    } | extra_usages,
+                }),
+            ),
             buffer_type,
         }
     }
@@ -142,7 +145,7 @@ impl BufferBundle {
     }
 
     pub fn buffer_mut(&mut self) -> &mut Buffer {
-        &mut self.buffer
+        Arc::get_mut(&mut self.buffer).unwrap()
     }
 
     pub fn buffer_type(&self) -> wgpu::BufferBindingType {
