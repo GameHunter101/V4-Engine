@@ -1,7 +1,7 @@
 use std::{
     collections::{HashMap, HashSet},
     ops::Range,
-    sync::Arc,
+    sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard},
 };
 
 use wgpu::{
@@ -11,7 +11,12 @@ use wgpu::{
 
 use crate::{
     engine_management::pipeline::PipelineParameters,
-    engine_support::texture_support::{TextureBundle, TextureProperties},
+    engine_support::{
+        attachments::{
+            AttachmentError, attachments_to_raw, create_bind_group_entry, create_bind_group_layout_entry, update_buffer_attachment, update_texture_attachment
+        },
+        texture_support::{TextureBundle, TextureProperties},
+    },
 };
 
 use super::{
@@ -29,23 +34,11 @@ pub enum MaterialError {
         "The render pipeline was not created. Remember to initialize the material before executing it. (Material {0})"
     )]
     PipelineNotInitialized(Id),
-    #[error("The targeted attachment ({target}, {}) does not match the specified type ({}).", if *.target_is_texture {"Texture"} else {"Buffer"}, if *.target_is_texture {"Buffer"} else {"Texture"})]
-    InvalidAttachmentUpdate {
-        target: usize,
-        target_is_texture: bool,
-    },
-    #[error("The targeted attachment ({0}) does not exist.")]
-    AttachmentNotFound(usize),
-    #[error("Error from shader attachment: {0:?}")]
-    ShaderAttachmentError(#[from] ShaderAttachmentError),
 }
 
-#[derive(Debug, Error)]
-pub enum ShaderAttachmentError {
-    #[error(
-        "The updated texture is larger than the original texture, but no new texture size was specified."
-    )]
-    NoNewTextureSize,
+pub enum RawAttachment<'a> {
+    Texture(&'a TextureBundle),
+    Buffer(RwLockReadGuard<'a, Buffer>),
 }
 
 #[derive(Debug, Clone)]
@@ -62,7 +55,7 @@ impl ShaderTextureAttachment {
         queue: &Queue,
         label: Option<&str>,
         new_tex_size: Option<Extent3d>,
-    ) -> Result<bool, ShaderAttachmentError> {
+    ) -> Result<bool, AttachmentError> {
         let texture = self.texture_bundle.view().texture();
         let tex_pixel_size =
             texture.format().block_copy_size(None).unwrap() * texture.format().components() as u32;
@@ -81,7 +74,7 @@ impl ShaderTextureAttachment {
             Ok(false)
         } else {
             let Some(size) = new_tex_size else {
-                return Err(ShaderAttachmentError::NoNewTextureSize);
+                return Err(AttachmentError::NoNewTextureSize);
             };
 
             *self.texture_bundle.view_mut() = device
@@ -107,7 +100,7 @@ impl ShaderTextureAttachment {
 
 #[derive(Debug, Clone)]
 pub struct BufferBundle {
-    buffer: Arc<Buffer>,
+    buffer: Arc<RwLock<Buffer>>,
     buffer_type: wgpu::BufferBindingType,
 }
 
@@ -119,8 +112,8 @@ impl BufferBundle {
         extra_usages: wgpu::BufferUsages,
     ) -> Self {
         Self {
-            buffer: Arc::new(
-                device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            buffer: Arc::new(RwLock::new(device.create_buffer_init(
+                &wgpu::util::BufferInitDescriptor {
                     label: Some(&format!(
                         "Shader {} Buffer",
                         match buffer_type {
@@ -134,18 +127,18 @@ impl BufferBundle {
                         wgpu::BufferBindingType::Uniform => wgpu::BufferUsages::UNIFORM,
                         wgpu::BufferBindingType::Storage { .. } => wgpu::BufferUsages::STORAGE,
                     } | extra_usages,
-                }),
-            ),
+                },
+            ))),
             buffer_type,
         }
     }
 
-    pub fn buffer(&self) -> &Buffer {
-        &self.buffer
+    pub fn buffer(&self) -> RwLockReadGuard<'_, Buffer> {
+        self.buffer.read().unwrap()
     }
 
-    pub fn buffer_mut(&mut self) -> &mut Buffer {
-        Arc::get_mut(&mut self.buffer).unwrap()
+    pub fn buffer_mut(&self) -> RwLockWriteGuard<'_, Buffer> {
+        self.buffer.write().unwrap()
     }
 
     pub fn buffer_type(&self) -> wgpu::BufferBindingType {
@@ -161,8 +154,8 @@ pub struct ShaderBufferAttachment {
 
 impl ShaderBufferAttachment {
     pub fn update_buffer(&mut self, contents: &[u8], device: &Device, queue: &Queue) -> bool {
-        crate::engine_support::misc_utils::update_buffer(
-            self.buffer.buffer_mut(),
+        crate::engine_support::attachments::update_buffer(
+            &mut self.buffer.buffer_mut(),
             contents,
             device,
             queue,
@@ -170,7 +163,7 @@ impl ShaderBufferAttachment {
         )
     }
 
-    pub fn buffer(&self) -> &Buffer {
+    pub fn buffer(&self) -> RwLockReadGuard<'_, Buffer> {
         self.buffer.buffer()
     }
 
@@ -228,54 +221,6 @@ impl Material {
             is_enabled,
             parent_entity: Id::nil(),
         }
-    }
-
-    pub fn create_bind_group_layout_entry(
-        attachment: &ShaderAttachment,
-        binding: u32,
-    ) -> BindGroupLayoutEntry {
-        match attachment {
-            ShaderAttachment::Texture(tex) => wgpu::BindGroupLayoutEntry {
-                binding,
-                visibility: tex.visibility,
-                ty: wgpu::BindingType::Texture {
-                    sample_type: wgpu::TextureSampleType::Float {
-                        filterable: tex.texture_bundle.properties().is_filtered,
-                    },
-                    view_dimension: if tex.texture_bundle.properties().is_cubemap {
-                        wgpu::TextureViewDimension::Cube
-                    } else {
-                        wgpu::TextureViewDimension::D2
-                    },
-                    multisampled: false,
-                },
-                count: None,
-            },
-            ShaderAttachment::Buffer(buf) => wgpu::BindGroupLayoutEntry {
-                binding,
-                visibility: buf.visibility,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-        }
-    }
-
-    fn create_bind_group_entry<'a>(
-        attachment: &'a ShaderAttachment,
-        binding: u32,
-    ) -> BindGroupEntry<'a> {
-        let resource = match attachment {
-            ShaderAttachment::Texture(tex) => {
-                wgpu::BindingResource::TextureView(tex.texture_bundle.view())
-            }
-            ShaderAttachment::Buffer(buf) => buf.buffer.buffer().as_entire_binding(),
-        };
-
-        BindGroupEntry { binding, resource }
     }
 
     fn create_sampler_entries<'a>(
@@ -374,19 +319,6 @@ impl Material {
             .collect()
     }
 
-    pub fn create_bind_group(
-        &self,
-        layout: &BindGroupLayout,
-        entries: &[BindGroupEntry],
-        device: &Device,
-    ) -> BindGroup {
-        device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some(&format!("Material {} | Bind group", self.id)),
-            layout,
-            entries,
-        })
-    }
-
     /// Update the specified buffer attachment with raw byte data. Will error if either the
     /// attachment could not be found, the pipeline is not initialized or if the selected
     /// attachment is not a buffer.
@@ -396,38 +328,18 @@ impl Material {
         data: &[u8],
         device: &Device,
         queue: &Queue,
-    ) -> Result<(), MaterialError> {
-        if let Some(attachment) = self.attachments_mut().get_mut(attachment_index) {
-            if let ShaderAttachment::Buffer(buf) = attachment {
-                if buf.update_buffer(data, device, queue) {
-                    let attachments = self.attachment_bind_group_entries();
-                    let Some(bind_group_layout) = &self.bind_group_layout else {
-                        return Err(MaterialError::PipelineNotInitialized(self.id));
-                    };
+    ) -> Result<(), AttachmentError> {
+        self.bind_group = update_buffer_attachment(
+            &mut self.attachments,
+            attachment_index,
+            data,
+            device,
+            queue,
+            self.bind_group_layout.as_ref(),
+            self.id,
+        )?;
 
-                    self.bind_group =
-                        Some(self.create_bind_group(bind_group_layout, &attachments, device));
-                }
-                Ok(())
-            } else {
-                Err(MaterialError::InvalidAttachmentUpdate {
-                    target: attachment_index,
-                    target_is_texture: false,
-                })
-            }
-        } else {
-            Err(MaterialError::AttachmentNotFound(attachment_index))
-        }
-    }
-
-    /// Create a bind group entry for every attachment. This is useful for updating attachments, as
-    /// a new bind group needs to be created when new data exceeds the old capacity.
-    fn attachment_bind_group_entries(&self) -> Vec<BindGroupEntry<'_>> {
-        self.attachments
-            .iter()
-            .enumerate()
-            .map(|(binding, attachment)| Self::create_bind_group_entry(attachment, binding as u32))
-            .collect()
+        Ok(())
     }
 
     /// Update the specified texture attachment with raw byte data. Will error if either the attachment
@@ -440,35 +352,19 @@ impl Material {
         new_tex_size: Option<Extent3d>,
         device: &Device,
         queue: &Queue,
-    ) -> Result<(), MaterialError> {
-        if let Some(attachment) = self.attachments_mut().get_mut(attachment_index) {
-            if let ShaderAttachment::Texture(tex) = attachment {
-                if tex.update_texture(
-                    data,
-                    device,
-                    queue,
-                    Some(&format!("{:?} Shader Buffer", tex.visibility)),
-                    new_tex_size,
-                )? {
-                    let attachments = self.attachment_bind_group_entries();
-                    let Some(bind_group_layout) = &self.bind_group_layout else {
-                        return Err(MaterialError::PipelineNotInitialized(self.id));
-                    };
+    ) -> Result<(), AttachmentError> {
+        self.bind_group = update_texture_attachment(
+            &mut self.attachments,
+            attachment_index,
+            data,
+            new_tex_size,
+            device,
+            queue,
+            self.bind_group_layout.as_ref(),
+            self.id,
+        )?;
 
-                    self.bind_group =
-                        Some(self.create_bind_group(bind_group_layout, &attachments, device));
-                }
-
-                Ok(())
-            } else {
-                Err(MaterialError::InvalidAttachmentUpdate {
-                    target: attachment_index,
-                    target_is_texture: true,
-                })
-            }
-        } else {
-            Err(MaterialError::AttachmentNotFound(attachment_index))
-        }
+        Ok(())
     }
 
     pub fn attach_entity(&mut self, entity_id: Id) {
@@ -507,6 +403,7 @@ impl Material {
 // #[async_trait::async_trait]
 impl ComponentSystem for Material {
     fn initialize(&mut self, device: &Device) -> ActionQueue {
+        let raw_attachments = attachments_to_raw(&self.attachments);
         let (bind_group_layout_entries, bind_group_entries): (
             Vec<BindGroupLayoutEntry>,
             Vec<BindGroupEntry>,
@@ -516,8 +413,8 @@ impl ComponentSystem for Material {
             .enumerate()
             .map(|(binding, attachment)| {
                 (
-                    Self::create_bind_group_layout_entry(attachment, binding as u32),
-                    Self::create_bind_group_entry(attachment, binding as u32),
+                    create_bind_group_layout_entry(attachment, binding as u32),
+                    create_bind_group_entry(&raw_attachments[binding], binding as u32),
                 )
             })
             .unzip();
@@ -555,9 +452,13 @@ impl ComponentSystem for Material {
             entries: &all_bind_group_layout_entries,
         });
 
-        let bind_group =
-            self.create_bind_group(&bind_group_layout, &all_bind_group_entries, device);
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some(&format!("Material {} | Bind group", self.id)),
+            layout: &bind_group_layout,
+            entries: &all_bind_group_entries,
+        });
 
+        drop(raw_attachments);
         self.bind_group_layout = Some(bind_group_layout);
         self.bind_group = Some(bind_group);
 
