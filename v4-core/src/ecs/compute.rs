@@ -236,7 +236,7 @@ impl Compute {
         device: &Device,
         queue: &Queue,
     ) -> Result<(), AttachmentError> {
-        self.bind_group = update_buffer_attachment(
+        if let Some(new_bind_group) = update_buffer_attachment(
             &mut self.attachments,
             attachment_index,
             data,
@@ -244,7 +244,9 @@ impl Compute {
             queue,
             self.bind_group_layout.as_ref(),
             self.id,
-        )?;
+        )? {
+            self.bind_group = Some(new_bind_group);
+        }
 
         Ok(())
     }
@@ -260,7 +262,7 @@ impl Compute {
         device: &Device,
         queue: &Queue,
     ) -> Result<(), AttachmentError> {
-        self.bind_group = update_texture_attachment(
+        if let Some(new_bind_group) = update_texture_attachment(
             &mut self.attachments,
             attachment_index,
             data,
@@ -269,7 +271,9 @@ impl Compute {
             queue,
             self.bind_group_layout.as_ref(),
             self.id,
-        )?;
+        )? {
+            self.bind_group = Some(new_bind_group);
+        }
 
         Ok(())
     }

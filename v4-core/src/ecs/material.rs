@@ -319,6 +319,7 @@ impl Material {
             .collect()
     }
 
+
     /// Update the specified buffer attachment with raw byte data. Will error if either the
     /// attachment could not be found, the pipeline is not initialized or if the selected
     /// attachment is not a buffer.
@@ -329,7 +330,7 @@ impl Material {
         device: &Device,
         queue: &Queue,
     ) -> Result<(), AttachmentError> {
-        self.bind_group = update_buffer_attachment(
+        if let Some(new_bind_group) = update_buffer_attachment(
             &mut self.attachments,
             attachment_index,
             data,
@@ -337,7 +338,9 @@ impl Material {
             queue,
             self.bind_group_layout.as_ref(),
             self.id,
-        )?;
+        )? {
+            self.bind_group = Some(new_bind_group);
+        }
 
         Ok(())
     }
@@ -353,7 +356,7 @@ impl Material {
         device: &Device,
         queue: &Queue,
     ) -> Result<(), AttachmentError> {
-        self.bind_group = update_texture_attachment(
+        if let Some(new_bind_group) = update_texture_attachment(
             &mut self.attachments,
             attachment_index,
             data,
@@ -362,7 +365,9 @@ impl Material {
             queue,
             self.bind_group_layout.as_ref(),
             self.id,
-        )?;
+        )? {
+            self.bind_group = Some(new_bind_group);
+        }
 
         Ok(())
     }
