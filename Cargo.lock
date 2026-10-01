@@ -2828,7 +2828,7 @@ dependencies = [
 
 [[package]]
 name = "v4"
-version = "0.3.22"
+version = "0.3.23"
 dependencies = [
  "algoe",
  "async-trait",
@@ -2848,7 +2848,7 @@ dependencies = [
 
 [[package]]
 name = "v4-core"
-version = "0.3.26"
+version = "0.3.27"
 dependencies = [
  "algoe",
  "async-scoped",

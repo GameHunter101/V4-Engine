@@ -144,7 +144,7 @@ impl<V: VertexDescriptor> MeshComponent<V> {
             if let Some(buffers) = &mut self.vertex_buffers {
                 let buf = &mut buffers[index];
                 let contents = bytemuck::cast_slice(&self.vertices[index]);
-                v4::engine_support::misc_utils::update_buffer(
+                v4::engine_support::attachments::update_buffer(
                     buf,
                     contents,
                     device,
@@ -185,7 +185,7 @@ impl<V: VertexDescriptor> MeshComponent<V> {
             if let Some(buffers) = &mut self.index_buffers {
                 let buf = &mut buffers[index];
                 let contents = bytemuck::cast_slice(&self.indices[index]);
-                v4::engine_support::misc_utils::update_buffer(
+                v4::engine_support::attachments::update_buffer(
                     buf,
                     contents,
                     device,
